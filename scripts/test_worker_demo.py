@@ -6,17 +6,17 @@ def main():
     print("Submitting Pipeline Job...")
     res = requests.post("http://127.0.0.1:8000/jobs/by-urls", json={
         "mode": "pipeline",
-        "urls": ["https://www.youtube.com/watch?v=M7FIvfx5J10"],
+        "urls": ["https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4"],
         "settings": {
             "categories": "Automotive, Technology, Food",
-            "provider": "Gemini CLI",
-            "model_name": "Gemini CLI Default",
+            "provider": "Ollama",
+            "model_name": "qwen3-vl:8b-instruct",
             "ocr_engine": "EasyOCR",
             "ocr_mode": "🚀 Fast",
             "scan_mode": "Tail Only",
             "override": False,
             "enable_search": False,
-            "enable_vision": False,
+            "enable_vision": True,
             "context_size": 8192,
             "workers": 1
         }
@@ -40,11 +40,11 @@ def main():
     print("\n\nSubmitting Agent Job...")
     res = requests.post("http://127.0.0.1:8000/jobs/by-urls", json={
         "mode": "agent",
-        "urls": ["https://www.youtube.com/watch?v=M7FIvfx5J10"],
+        "urls": ["https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4"],
         "settings": {
             "categories": "Automotive, Technology, Food",
-            "provider": "Gemini CLI",
-            "model_name": "Gemini CLI Default",
+            "provider": "Ollama",
+            "model_name": "qwen3-vl:8b-instruct",
             "ocr_engine": "EasyOCR",
             "ocr_mode": "🚀 Fast",
             "scan_mode": "Tail Only",

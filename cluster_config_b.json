@@ -1,0 +1,1 @@
+{"self_name": "node-b", "nodes": {"node-a": "http://127.0.0.1:8000", "node-b": "http://127.0.0.1:8001"}}
