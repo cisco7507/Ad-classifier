@@ -2,7 +2,7 @@ import time
 import re
 import torch
 import pandas as pd
-from video_service.core.utils import logger, device
+from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.categories import category_mapper, siglip_model, siglip_processor
 from video_service.core.video_io import extract_frames_for_agent, resolve_urls
 from video_service.core.ocr import ocr_manager
@@ -104,6 +104,8 @@ Current Memory:
                     elif category_mapper.categories and siglip_model is not None and getattr(category_mapper, 'vision_text_features', None) is not None:
                         with torch.no_grad():
                             image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
+                            if TORCH_DTYPE != torch.float32:
+                                image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
                             image_features = siglip_model.get_image_features(**image_inputs)
                             image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
                             

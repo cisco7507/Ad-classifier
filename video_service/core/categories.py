@@ -4,14 +4,15 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer, util
 import numpy as np
 import plotly.graph_objects as go
-from video_service.core.utils import logger, device
+from video_service.core.utils import logger, device, TORCH_DTYPE
 
 siglip_model = None
 siglip_processor = None
 
 SIGLIP_ID = "google/siglip-so400m-patch14-384"
 try:
-    siglip_model = AutoModel.from_pretrained(SIGLIP_ID).to(device)
+    logger.info(f"Initializing SigLIP on {device} with dtype {TORCH_DTYPE}")
+    siglip_model = AutoModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
     siglip_processor = AutoProcessor.from_pretrained(SIGLIP_ID)
 except Exception as e:
     logger.error(f"Failed to load SigLIP: {e}")
@@ -25,7 +26,8 @@ class CategoryMapper:
             self.cat_to_id = dict(zip(self.df[col_name].astype(str), self.df[id_name].astype(str)))
             self.categories = list(self.cat_to_id.keys())
             
-            self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device)
+            logger.info(f"Initializing SentenceTransformer on {device} with dtype {TORCH_DTYPE}")
+            self.embedder = SentenceTransformer('all-MiniLM-L6-v2', device=device, model_kwargs={"torch_dtype": TORCH_DTYPE})
             self.category_embeddings = self.embedder.encode(self.categories, convert_to_tensor=True)
             self.active = True
             

@@ -5,7 +5,7 @@ from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM
 from transformers.dynamic_module_utils import get_imports
 from unittest.mock import patch
-from video_service.core.utils import logger, device
+from video_service.core.utils import logger, device, TORCH_DTYPE
 
 class OCRManager:
     def __init__(self):
@@ -21,7 +21,9 @@ class OCRManager:
             if torch.cuda.is_available(): torch.cuda.empty_cache()
             
             if name == "EasyOCR":
-                self.current_engine = easyocr.Reader(['en', 'fr'], gpu=torch.cuda.is_available() or torch.backends.mps.is_available(), verbose=False)
+                use_gpu = (device == "cuda")
+                logger.info(f"Initializing EasyOCR. GPU mode: {use_gpu}")
+                self.current_engine = easyocr.Reader(['en', 'fr'], gpu=use_gpu, verbose=False)
             elif name == "Florence-2 (Microsoft)":
                 def fixed_get_imports(filename):
                     imports = get_imports(filename)
@@ -29,8 +31,9 @@ class OCRManager:
                     return imports
                 with patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports):
                     model_id = "microsoft/Florence-2-base"
+                    logger.info(f"Initializing Florence-2 on {device} with dtype {TORCH_DTYPE}")
                     self.current_engine = {
-                        "model": AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True).to(device).eval(),
+                        "model": AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True, torch_dtype=TORCH_DTYPE).to(device).eval(),
                         "processor": AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
                     }
             self.current_name = name
@@ -45,7 +48,8 @@ class OCRManager:
                 return " ".join(annotated)
             elif engine_name == "Florence-2 (Microsoft)":
                 pil_img = Image.fromarray(image_rgb)
-                inputs = {k: v.to(device) for k, v in engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt").items()}
+                inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
+                inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
                 with torch.inference_mode():
                     generated_ids = engine["model"].generate(**inputs, max_new_tokens=1024, num_beams=1 if "Fast" in mode else 3)
                 parsed = engine["processor"].post_process_generation(engine["processor"].batch_decode(generated_ids, skip_special_tokens=False)[0], task="<OCR_WITH_REGION>", image_size=(pil_img.width, pil_img.height))

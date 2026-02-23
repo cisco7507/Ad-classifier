@@ -1,5 +1,10 @@
 from typing import List, Optional, Any
 from pydantic import BaseModel, Field
+from enum import Enum
+
+class JobMode(str, Enum):
+    pipeline = "pipeline"
+    agent = "agent"
 
 class JobSettings(BaseModel):
     categories: str = ""
@@ -15,15 +20,15 @@ class JobSettings(BaseModel):
     workers: int = 2
 
 class JobSettingsForm(JobSettings):
-    mode: str = "pipeline"
+    mode: JobMode = JobMode.pipeline
 
 class UrlBatchRequest(BaseModel):
-    mode: str = "pipeline"
+    mode: JobMode = JobMode.pipeline
     urls: List[str]
     settings: JobSettings
 
 class FolderRequest(BaseModel):
-    mode: str = "pipeline"
+    mode: JobMode = JobMode.pipeline
     folder_path: str
     settings: JobSettings
 
@@ -39,4 +44,5 @@ class JobStatus(BaseModel):
     progress: float
     error: Optional[str]
     settings: Optional[JobSettings]
-    mode: Optional[str]
+    mode: Optional[JobMode]
+    url: Optional[str] = None

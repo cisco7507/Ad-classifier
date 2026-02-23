@@ -24,6 +24,10 @@ def init_db():
                 progress REAL DEFAULT 0,
                 error TEXT,
                 settings TEXT,
-                mode TEXT
+                mode TEXT,
+                url TEXT,
+                result_json TEXT,
+                artifacts_json TEXT,
+                events TEXT DEFAULT '[]'
             )
         """)

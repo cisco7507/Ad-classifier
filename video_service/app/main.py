@@ -2,10 +2,13 @@ import os
 import uuid
 import datetime
 import json
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+import tempfile
+import shutil
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from typing import List, Optional
 from video_service.db.database import get_db, init_db
-from video_service.app.models.job import JobResponse, JobStatus, JobSettings, UrlBatchRequest, FolderRequest, JobSettingsForm
+from video_service.app.models.job import JobResponse, JobStatus, JobSettings, UrlBatchRequest, FolderRequest, JobSettingsForm, JobMode
+from video_service.core.device import get_diagnostics
 
 app = FastAPI(title="Video Ad Classification Service")
 
@@ -19,19 +22,26 @@ def startup_event():
 def health_check():
     return {"status": "ok", "node": NODE_NAME}
 
+@app.get("/diagnostics/device")
+def device_diagnostics():
+    return get_diagnostics()
+
 @app.get("/metrics")
 def get_metrics():
-    return {"jobs_processed": 0}
+    conn = get_db()
+    cur = conn.execute("SELECT COUNT(*) as c FROM jobs WHERE status = 'completed'")
+    count = cur.fetchone()['c']
+    return {"jobs_processed": count}
 
-def _create_job(mode: str, settings: JobSettings) -> str:
+def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
     job_id = f"{NODE_NAME}-{uuid.uuid4()}"
     status = "queued"
     
     conn = get_db()
     with conn:
         conn.execute(
-            "INSERT INTO jobs (id, status, mode, settings) VALUES (?, ?, ?, ?)",
-            (job_id, status, mode, settings.model_dump_json())
+            "INSERT INTO jobs (id, status, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?)",
+            (job_id, status, mode, settings.model_dump_json(), url, "[]")
         )
     return job_id
 
@@ -39,38 +49,63 @@ def _create_job(mode: str, settings: JobSettings) -> str:
 def create_job_urls(request: UrlBatchRequest):
     responses = []
     for url in request.urls:
-        job_id = _create_job(request.mode, request.settings)
-        # TODO: worker dispatch
+        job_id = _create_job(request.mode.value, request.settings, url=url)
         responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
 
 @app.post("/jobs/by-folder", response_model=List[JobResponse])
 def create_job_folder(request: FolderRequest):
-    # Scan folder and create jobs here server-side
     responses = []
     if os.path.isdir(request.folder_path):
         for f in os.listdir(request.folder_path):
             if f.lower().endswith(('.mp4', '.mov')):
-                job_id = _create_job(request.mode, request.settings)
-                # TODO: add file_path tracking to DB and worker dispatch
+                full_path = os.path.join(request.folder_path, f)
+                job_id = _create_job(request.mode.value, request.settings, url=full_path)
                 responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
 
+def parse_settings(
+    categories: str = Form(""),
+    provider: str = Form("Gemini CLI"),
+    model_name: str = Form("Gemini CLI Default"),
+    ocr_engine: str = Form("EasyOCR"),
+    ocr_mode: str = Form("🚀 Fast"),
+    scan_mode: str = Form("Tail Only"),
+    override: bool = Form(False),
+    enable_search: bool = Form(True),
+    enable_vision: bool = Form(True),
+    context_size: int = Form(8192),
+    workers: int = Form(2),
+) -> JobSettings:
+    return JobSettings(
+        categories=categories,
+        provider=provider,
+        model_name=model_name,
+        ocr_engine=ocr_engine,
+        ocr_mode=ocr_mode,
+        scan_mode=scan_mode,
+        override=override,
+        enable_search=enable_search,
+        enable_vision=enable_vision,
+        context_size=context_size,
+        workers=workers
+    )
+
+
 @app.post("/jobs/upload", response_model=JobResponse)
 def create_job_upload(
-    mode: str = Form(...),
-    settings_json: str = Form(...),
+    mode: JobMode = Form(JobMode.pipeline),
+    settings: JobSettings = Depends(parse_settings),
     file: UploadFile = File(...)
 ):
-    try:
-        settings = JobSettings.model_validate_json(settings_json)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid settings JSON: {e}")
+    upload_dir = "/tmp/video_service_uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
         
-    job_id = _create_job(mode, settings)
-    
-    # TODO: save `file` securely to disk with job_id prefix, trigger worker
-    
+    job_id = _create_job(mode.value, settings, url=file_path)
     return JobResponse(job_id=job_id, status="queued")
 
 
@@ -90,7 +125,8 @@ def get_jobs_recent():
             progress=r['progress'],
             error=r['error'],
             settings=JobSettings.model_validate_json(r['settings']) if r['settings'] else None,
-            mode=r['mode']
+            mode=r['mode'],
+            url=r['url']
         ))
         
     return results
@@ -111,23 +147,36 @@ def get_job(job_id: str):
         progress=row['progress'],
         error=row['error'],
         settings=JobSettings.model_validate_json(row['settings']) if row['settings'] else None,
-        mode=row['mode']
+        mode=row['mode'],
+        url=row['url']
     )
 
 @app.get("/jobs/{job_id}/result")
 def get_job_result(job_id: str):
-    # TODO: Fetch final result schema from separate DB table or disk
-    return {"message": "Stub result"}
+    conn = get_db()
+    cur = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row or not row['result_json']:
+        return {"result": None}
+    return {"result": json.loads(row['result_json'])}
 
 @app.get("/jobs/{job_id}/artifacts")
 def get_job_artifacts(job_id: str):
-    # TODO: Fetch frame lists / visual inferences / nebula plot
-    return {"message": "Stub artifacts"}
+    conn = get_db()
+    cur = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row or not row['artifacts_json']:
+        return {"artifacts": None}
+    return {"artifacts": json.loads(row['artifacts_json'])}
 
 @app.get("/jobs/{job_id}/events")
 def get_job_events(job_id: str):
-    # TODO: Fetch inner monologue lines or progress lines
-    return {"events": ["Stub event logger"]}
+    conn = get_db()
+    cur = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,))
+    row = cur.fetchone()
+    if not row or not row['events']:
+        return {"events": []}
+    return {"events": json.loads(row['events'])}
 
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
@@ -138,5 +187,4 @@ def delete_job(job_id: str):
 
 @app.get("/admin/jobs", response_model=List[JobStatus])
 def get_admin_jobs():
-    # Identical to /jobs for now, but will be hit by the cluster aggregator
     return get_jobs_recent()

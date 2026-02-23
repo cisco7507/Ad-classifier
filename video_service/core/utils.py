@@ -15,9 +15,4 @@ logging.basicConfig(
 )
 logger = logging.getLogger("video_service.core")
 
-def get_device():
-    if torch.cuda.is_available(): return "cuda"
-    elif torch.backends.mps.is_available(): return "mps"
-    return "cpu"
-
-device = get_device()
+from .device import DEVICE as device, TORCH_DTYPE

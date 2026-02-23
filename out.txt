@@ -1,0 +1,167 @@
+/admin/jobs
+/health
+/jobs
+/jobs/by-folder
+/jobs/by-urls
+/jobs/upload
+/jobs/{job_id}
+/jobs/{job_id}/artifacts
+/jobs/{job_id}/events
+/jobs/{job_id}/result
+/metrics
+{'Body_create_job_upload_jobs_upload_post': {'properties': {'mode': {'type': 'string',
+                                                                     'title': 'Mode'},
+                                                            'settings_json': {'type': 'string',
+                                                                              'title': 'Settings '
+                                                                                       'Json'},
+                                                            'file': {'type': 'string',
+                                                                     'contentMediaType': 'application/octet-stream',
+                                                                     'title': 'File'}},
+                                             'type': 'object',
+                                             'required': ['mode',
+                                                          'settings_json',
+                                                          'file'],
+                                             'title': 'Body_create_job_upload_jobs_upload_post'},
+ 'FolderRequest': {'properties': {'mode': {'type': 'string',
+                                           'title': 'Mode',
+                                           'default': 'pipeline'},
+                                  'folder_path': {'type': 'string',
+                                                  'title': 'Folder Path'},
+                                  'settings': {'$ref': '#/components/schemas/JobSettings'}},
+                   'type': 'object',
+                   'required': ['folder_path', 'settings'],
+                   'title': 'FolderRequest'},
+ 'HTTPValidationError': {'properties': {'detail': {'items': {'$ref': '#/components/schemas/ValidationError'},
+                                                   'type': 'array',
+                                                   'title': 'Detail'}},
+                         'type': 'object',
+                         'title': 'HTTPValidationError'},
+ 'JobResponse': {'properties': {'job_id': {'type': 'string', 'title': 'Job Id'},
+                                'status': {'type': 'string',
+                                           'title': 'Status'}},
+                 'type': 'object',
+                 'required': ['job_id', 'status'],
+                 'title': 'JobResponse'},
+ 'JobSettings': {'properties': {'categories': {'type': 'string',
+                                               'title': 'Categories',
+                                               'default': ''},
+                                'provider': {'type': 'string',
+                                             'title': 'Provider',
+                                             'default': 'Gemini CLI'},
+                                'model_name': {'type': 'string',
+                                               'title': 'Model Name',
+                                               'default': 'Gemini CLI Default'},
+                                'ocr_engine': {'type': 'string',
+                                               'title': 'Ocr Engine',
+                                               'default': 'EasyOCR'},
+                                'ocr_mode': {'type': 'string',
+                                             'title': 'Ocr Mode',
+                                             'default': '🚀 Fast'},
+                                'scan_mode': {'type': 'string',
+                                              'title': 'Scan Mode',
+                                              'default': 'Tail Only'},
+                                'override': {'type': 'boolean',
+                                             'title': 'Override',
+                                             'default': False},
+                                'enable_search': {'type': 'boolean',
+                                                  'title': 'Enable Search',
+                                                  'default': True},
+                                'enable_vision': {'type': 'boolean',
+                                                  'title': 'Enable Vision',
+                                                  'default': True},
+                                'context_size': {'type': 'integer',
+                                                 'title': 'Context Size',
+                                                 'default': 8192},
+                                'workers': {'type': 'integer',
+                                            'title': 'Workers',
+                                            'default': 2}},
+                 'type': 'object',
+                 'title': 'JobSettings'},
+ 'JobStatus': {'properties': {'job_id': {'type': 'string', 'title': 'Job Id'},
+                              'status': {'type': 'string', 'title': 'Status'},
+                              'created_at': {'type': 'string',
+                                             'title': 'Created At'},
+                              'updated_at': {'type': 'string',
+                                             'title': 'Updated At'},
+                              'progress': {'type': 'number',
+                                           'title': 'Progress'},
+                              'error': {'anyOf': [{'type': 'string'},
+                                                  {'type': 'null'}],
+                                        'title': 'Error'},
+                              'settings': {'anyOf': [{'$ref': '#/components/schemas/JobSettings'},
+                                                     {'type': 'null'}]},
+                              'mode': {'anyOf': [{'type': 'string'},
+                                                 {'type': 'null'}],
+                                       'title': 'Mode'}},
+               'type': 'object',
+               'required': ['job_id',
+                            'status',
+                            'created_at',
+                            'updated_at',
+                            'progress',
+                            'error',
+                            'settings',
+                            'mode'],
+               'title': 'JobStatus'},
+ 'UrlBatchRequest': {'properties': {'mode': {'type': 'string',
+                                             'title': 'Mode',
+                                             'default': 'pipeline'},
+                                    'urls': {'items': {'type': 'string'},
+                                             'type': 'array',
+                                             'title': 'Urls'},
+                                    'settings': {'$ref': '#/components/schemas/JobSettings'}},
+                     'type': 'object',
+                     'required': ['urls', 'settings'],
+                     'title': 'UrlBatchRequest'},
+ 'ValidationError': {'properties': {'loc': {'items': {'anyOf': [{'type': 'string'},
+                                                                {'type': 'integer'}]},
+                                            'type': 'array',
+                                            'title': 'Location'},
+                                    'msg': {'type': 'string',
+                                            'title': 'Message'},
+                                    'type': {'type': 'string',
+                                             'title': 'Error Type'},
+                                    'input': {'title': 'Input'},
+                                    'ctx': {'type': 'object',
+                                            'title': 'Context'}},
+                     'type': 'object',
+                     'required': ['loc', 'msg', 'type'],
+                     'title': 'ValidationError'}}
+video_service/__init__.py
+video_service/__pycache__/__init__.cpython-310.pyc
+video_service/__pycache__/__init__.cpython-314.pyc
+video_service/.env.example
+video_service/app/__init__.py
+video_service/app/__pycache__/__init__.cpython-314.pyc
+video_service/app/__pycache__/main.cpython-314.pyc
+video_service/app/main.py
+video_service/app/models/__pycache__/job.cpython-314.pyc
+video_service/app/models/job.py
+video_service/cluster_config.example.json
+video_service/core/__init__.py
+video_service/core/__pycache__/__init__.cpython-310.pyc
+video_service/core/__pycache__/__init__.cpython-314.pyc
+video_service/core/__pycache__/agent.cpython-314.pyc
+video_service/core/__pycache__/categories.cpython-310.pyc
+video_service/core/__pycache__/categories.cpython-314.pyc
+video_service/core/__pycache__/llm.cpython-314.pyc
+video_service/core/__pycache__/ocr.cpython-314.pyc
+video_service/core/__pycache__/pipeline.cpython-310.pyc
+video_service/core/__pycache__/pipeline.cpython-314.pyc
+video_service/core/__pycache__/utils.cpython-310.pyc
+video_service/core/__pycache__/utils.cpython-314.pyc
+video_service/core/__pycache__/video_io.cpython-310.pyc
+video_service/core/__pycache__/video_io.cpython-314.pyc
+video_service/core/agent.py
+video_service/core/categories.py
+video_service/core/llm.py
+video_service/core/ocr.py
+video_service/core/pipeline.py
+video_service/core/utils.py
+video_service/core/video_io.py
+video_service/db/__init__.py
+video_service/db/__pycache__/__init__.cpython-314.pyc
+video_service/db/__pycache__/database.cpython-314.pyc
+video_service/db/database.py
+video_service/workers/__init__.py
+video_service/workers/worker.py

@@ -3,7 +3,7 @@ import torch
 import cv2
 import pandas as pd
 import concurrent.futures
-from video_service.core.utils import logger, device
+from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls
 from video_service.core.categories import category_mapper, siglip_model, siglip_processor
 from video_service.core.ocr import ocr_manager
@@ -26,6 +26,8 @@ def process_single_video(url, categories, p, m, oe, om, override, sm, enable_sea
             with torch.no_grad():
                 pil_images = [f["image"] for f in frames]
                 image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
+                if TORCH_DTYPE != torch.float32:
+                    image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
                 image_features = siglip_model.get_image_features(**image_inputs)
                 image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
                 
