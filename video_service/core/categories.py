@@ -19,6 +19,7 @@ except Exception as e:
 
 class CategoryMapper:
     def __init__(self, csv_path="categories.csv"):
+        self.categories = []
         try:
             self.df = pd.read_csv(csv_path)
             col_name = 'Freewheel Industry Category' if 'Freewheel Industry Category' in self.df.columns else self.df.columns[1]
