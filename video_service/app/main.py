@@ -4,15 +4,18 @@ import datetime
 import json
 import tempfile
 import shutil
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+import httpx
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
+from fastapi.responses import JSONResponse
 from typing import List, Optional
 from video_service.db.database import get_db, init_db
 from video_service.app.models.job import JobResponse, JobStatus, JobSettings, UrlBatchRequest, FolderRequest, JobSettingsForm, JobMode
 from video_service.core.device import get_diagnostics
+from video_service.core.cluster import cluster
 
 app = FastAPI(title="Video Ad Classification Service")
 
-NODE_NAME = os.environ.get("NODE_NAME", "node-a")
+NODE_NAME = cluster.self_name
 
 @app.on_event("startup")
 def startup_event():
@@ -21,6 +24,27 @@ def startup_event():
 @app.get("/health")
 def health_check():
     return {"status": "ok", "node": NODE_NAME}
+
+@app.get("/cluster/nodes")
+def cluster_nodes():
+    return {"nodes": cluster.nodes, "status": cluster.node_status, "self": cluster.self_name}
+
+@app.get("/cluster/jobs")
+async def cluster_jobs():
+    if not cluster.enabled:
+        return get_admin_jobs()
+    
+    aggr = []
+    async with httpx.AsyncClient() as client:
+        for node, url in cluster.nodes.items():
+            if not cluster.node_status.get(node): continue
+            try:
+                res = await client.get(f"{url}/admin/jobs?internal=1", timeout=cluster.internal_timeout)
+                if res.status_code == 200: aggr.extend(res.json())
+            except: pass
+            
+    aggr.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+    return aggr
 
 @app.get("/diagnostics/device")
 def device_diagnostics():
@@ -45,16 +69,45 @@ def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
         )
     return job_id
 
+async def proxy_request(request: Request, target_url: str) -> Response:
+    async with httpx.AsyncClient() as client:
+        body = await request.body()
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        try:
+            res = await client.request(
+                method=request.method,
+                url=f"{target_url}{request.url.path}?internal=1",
+                content=body,
+                headers=headers,
+                timeout=cluster.internal_timeout
+            )
+            return Response(content=res.content, status_code=res.status_code, headers=dict(res.headers))
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Proxy error: {e}")
+
 @app.post("/jobs/by-urls", response_model=List[JobResponse])
-def create_job_urls(request: UrlBatchRequest):
+async def create_job_urls(request: Request, body: UrlBatchRequest):
+    if not request.query_params.get("internal"):
+        target_node = cluster.select_rr_node()
+        if not target_node: raise HTTPException(503, "No healthy nodes")
+        if target_node != cluster.self_name:
+            return await proxy_request(request, cluster.get_node_url(target_node))
+            
     responses = []
-    for url in request.urls:
-        job_id = _create_job(request.mode.value, request.settings, url=url)
+    for url in body.urls:
+        job_id = _create_job(body.mode.value, body.settings, url=url)
         responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
 
 @app.post("/jobs/by-folder", response_model=List[JobResponse])
-def create_job_folder(request: FolderRequest):
+async def create_job_folder(req: Request, request: FolderRequest):
+    if not req.query_params.get("internal"):
+        target_node = cluster.select_rr_node()
+        if not target_node: raise HTTPException(503, "No healthy nodes")
+        if target_node != cluster.self_name:
+            return await proxy_request(req, cluster.get_node_url(target_node))
+            
     responses = []
     if os.path.isdir(request.folder_path):
         for f in os.listdir(request.folder_path):
@@ -93,11 +146,18 @@ def parse_settings(
 
 
 @app.post("/jobs/upload", response_model=JobResponse)
-def create_job_upload(
+async def create_job_upload(
+    req: Request,
     mode: JobMode = Form(JobMode.pipeline),
     settings: JobSettings = Depends(parse_settings),
     file: UploadFile = File(...)
 ):
+    if not req.query_params.get("internal"):
+        target_node = cluster.select_rr_node()
+        if not target_node: raise HTTPException(503, "No healthy nodes")
+        if target_node != cluster.self_name:
+            return await proxy_request(req, cluster.get_node_url(target_node))
+            
     upload_dir = "/tmp/video_service_uploads"
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
@@ -131,8 +191,32 @@ def get_jobs_recent():
         
     return results
 
+async def _maybe_proxy(req: Request, job_id: str):
+    if req.query_params.get("internal"): return None
+    
+    parts = job_id.split("-")
+    if len(parts) >= 2:
+        owner = getattr(cluster, "self_name", "node-a")
+        # Find prefix logic: job ID looks like node-a-UUID or custom-node-name-UUID
+        # We need to extract everything before the LAST dash just in case name has dashes?
+        # Standard: node_name-uuid. UUID has 4 dashes. So node name is everything before last 5 segments.
+        # But safest: check against cluster.nodes.keys()
+        target = None
+        for node in cluster.nodes.keys():
+            if job_id.startswith(f"{node}-"): 
+                target = node
+                break
+                
+        if target and target != cluster.self_name:
+            url = cluster.get_node_url(target)
+            if url: return await proxy_request(req, url)
+    return None
+
 @app.get("/jobs/{job_id}", response_model=JobStatus)
-def get_job(job_id: str):
+async def get_job(req: Request, job_id: str):
+    proxy_res = await _maybe_proxy(req, job_id)
+    if proxy_res: return proxy_res
+    
     conn = get_db()
     cur = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
     row = cur.fetchone()
@@ -152,7 +236,10 @@ def get_job(job_id: str):
     )
 
 @app.get("/jobs/{job_id}/result")
-def get_job_result(job_id: str):
+async def get_job_result(req: Request, job_id: str):
+    p = await _maybe_proxy(req, job_id)
+    if p: return p
+    
     conn = get_db()
     cur = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,))
     row = cur.fetchone()
@@ -161,7 +248,10 @@ def get_job_result(job_id: str):
     return {"result": json.loads(row['result_json'])}
 
 @app.get("/jobs/{job_id}/artifacts")
-def get_job_artifacts(job_id: str):
+async def get_job_artifacts(req: Request, job_id: str):
+    p = await _maybe_proxy(req, job_id)
+    if p: return p
+    
     conn = get_db()
     cur = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,))
     row = cur.fetchone()
@@ -170,7 +260,10 @@ def get_job_artifacts(job_id: str):
     return {"artifacts": json.loads(row['artifacts_json'])}
 
 @app.get("/jobs/{job_id}/events")
-def get_job_events(job_id: str):
+async def get_job_events(req: Request, job_id: str):
+    p = await _maybe_proxy(req, job_id)
+    if p: return p
+    
     conn = get_db()
     cur = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,))
     row = cur.fetchone()
@@ -179,7 +272,10 @@ def get_job_events(job_id: str):
     return {"events": json.loads(row['events'])}
 
 @app.delete("/jobs/{job_id}")
-def delete_job(job_id: str):
+async def delete_job(req: Request, job_id: str):
+    p = await _maybe_proxy(req, job_id)
+    if p: return p
+    
     conn = get_db()
     with conn:
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
