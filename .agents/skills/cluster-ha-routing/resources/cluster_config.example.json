@@ -1,0 +1,12 @@
+{
+  "self_name": "node-a",
+  "nodes": {
+    "node-a": "http://node-a.internal:8080",
+    "node-b": "http://node-b.internal:8080"
+  },
+  "health_check_interval_seconds": 5,
+  "internal_request_timeout_seconds": 5,
+  "enable_round_robin": true,
+  "rr_state_file": "./rr_state.json",
+  "rr_strategy": "global"
+}

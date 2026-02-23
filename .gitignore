@@ -1,0 +1,112 @@
+# =========================
+# Python / FastAPI project
+# =========================
+
+# Bytecode / build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+*.env
+*.venv
+
+# Installer + build outputs
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Local SQLite / runtime DB
+*.sqlite
+*.db
+
+# Logs and runtime outputs
+logs/
+*.log
+nohup.out
+
+# Storage (uploaded / processed files)
+storage/input/
+storage/output/
+
+# CTranslate2 / Faster-Whisper caches
+.ctranslate2_cache/
+.faster_whisper/
+huggingface/
+cache/
+tmp/
+temp/
+
+# Test / coverage / pytest
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# Windows PowerShell temp / nssm executables
+scripts/windows/nssm.exe
+scripts/windows/launcher.bootstrap.log
+
+# Environment / secrets / credentials
+.env
+*.key
+*.pem
+*.crt
+*.pfx
+
+# GitHub / CI artifacts
+.github/workflows/__pycache__/
+*.pytest_cache/
+*.bak
+*.orig
+
+# Mac / Windows system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary models or downloaded assets
+*.pth
+*.bin
+*.pt
+*.ckpt
+*.onnx
+
+# User data exports / analysis results
+*.csv
+*.xlsx
+*.ods
+*.jsonl
+
+# Backups / temp
+*.tmp
+*.bak
+*.swp
+*~
+.ctranslate2_cache/
+  whisper-base/
+    config.json
+    model.bin
+    tokenizer.json
+    vocabulary.txt
+storage/*
+langid_service/storage/

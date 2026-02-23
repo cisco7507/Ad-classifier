@@ -1,0 +1,61 @@
+import time
+import torch
+import cv2
+import pandas as pd
+import concurrent.futures
+from video_service.core.utils import logger, device
+from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls
+from video_service.core.categories import category_mapper, siglip_model, siglip_processor
+from video_service.core.ocr import ocr_manager
+from video_service.core.llm import llm_engine
+
+def process_single_video(url, categories, p, m, oe, om, override, sm, enable_search, enable_vision, ctx):
+    try:
+        logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
+        frames, cap = extract_frames_for_pipeline(url)
+        if cap and cap.isOpened():
+            cap.release()
+        
+        if not frames: 
+            logger.warning(f"[{url}] Extraction yielded no frames.")
+            return {}, "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty"]
+        
+        sorted_vision = {}
+        if enable_vision and category_mapper.categories and siglip_model is not None and getattr(category_mapper, 'vision_text_features', None) is not None:
+            start_time = time.time()
+            with torch.no_grad():
+                pil_images = [f["image"] for f in frames]
+                image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
+                image_features = siglip_model.get_image_features(**image_inputs)
+                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                
+                logit_scale = siglip_model.logit_scale.exp()
+                logit_bias = siglip_model.logit_bias
+                logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
+                probs = torch.sigmoid(logits_per_image)
+                
+            scores = probs.mean(dim=0).cpu().numpy()
+            sorted_vision = dict(sorted({category_mapper.categories[i]: float(scores[i]) for i in range(len(category_mapper.categories))}.items(), key=lambda item: item[1], reverse=True)[:5])
+        
+        ocr_text = "\n".join([f"[{f['time']:.1f}s] {ocr_manager.extract_text(oe, f['ocr_image'], om)}" for f in frames])
+        res = llm_engine.query_pipeline(p, m, ocr_text, categories, frames[-1]["image"], override, enable_search, enable_vision, ctx)
+        
+        cat_out, cat_id_out = category_mapper.get_closest_official_category(res.get("category", "Unknown"))
+        row = [url, res.get("brand", "Unknown"), cat_id_out, cat_out, res.get("confidence", 0.0), res.get("reasoning", "")]
+        
+        return sorted_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row
+        
+    except Exception as e: 
+        logger.error(f"[{url}] Pipeline Worker Crash: {str(e)}", exc_info=True)
+        return {}, "Err", str(e), [], [url, "Err", "", "Err", 0, str(e)]
+
+def run_pipeline_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, workers):
+    urls_list = resolve_urls(src, urls, fldr)
+    cat_list = [c.strip() for c in cats.split(",") if c.strip()]
+    master = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(process_single_video, u, cat_list, p, m, oe, om, override, sm, enable_search, enable_vision, ctx): u for u in urls_list}
+        for fut in concurrent.futures.as_completed(futures):
+            v, t, d, g, row = fut.result()
+            master.append(row)
+            yield v, t, d, g, pd.DataFrame(master, columns=["URL / Path", "Brand", "Category ID", "Category", "Confidence", "Reasoning"])
