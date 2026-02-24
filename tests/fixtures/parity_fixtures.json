@@ -1,0 +1,69 @@
+{
+  "_comment": "Parity test fixtures. Edit these to point to real test videos. Goldens are generated from these.",
+  "fixtures": [
+    {
+      "id": "short_url",
+      "description": "Short URL video (~15s) — primary smoke test",
+      "source_type": "url",
+      "url": "https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4",
+      "local_path": null,
+      "settings": {
+        "categories": "Cars, Insurance, Finance, Technology, Retail",
+        "provider": "Ollama",
+        "model_name": "qwen3-vl:8b-instruct",
+        "ocr_engine": "EasyOCR",
+        "ocr_mode": "🚀 Fast",
+        "scan_mode": "Tail Only",
+        "override": false,
+        "enable_search": false,
+        "enable_vision": false,
+        "context_size": 8192,
+        "workers": 1
+      }
+    },
+    {
+      "id": "local_mp4",
+      "description": "Local MP4 test — verifies file-path ingestion and OCR pipeline",
+      "source_type": "local",
+      "url": null,
+      "local_path": "tests/fixtures/sample_local.mp4",
+      "settings": {
+        "categories": "Cars, Insurance, Finance, Technology, Retail",
+        "provider": "Ollama",
+        "model_name": "qwen3-vl:8b-instruct",
+        "ocr_engine": "EasyOCR",
+        "ocr_mode": "🚀 Fast",
+        "scan_mode": "Tail Only",
+        "override": false,
+        "enable_search": false,
+        "enable_vision": false,
+        "context_size": 8192,
+        "workers": 1
+      }
+    },
+    {
+      "id": "scan_strategy",
+      "description": "Longer video where scan strategy (tail vs full) produces different frame counts",
+      "source_type": "url",
+      "url": "https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4",
+      "local_path": null,
+      "settings": {
+        "categories": "Cars, Insurance, Finance, Technology, Retail",
+        "provider": "Ollama",
+        "model_name": "qwen3-vl:8b-instruct",
+        "ocr_engine": "EasyOCR",
+        "ocr_mode": "🚀 Fast",
+        "scan_mode": "Full Scan",
+        "override": false,
+        "enable_search": false,
+        "enable_vision": false,
+        "context_size": 8192,
+        "workers": 1
+      },
+      "scan_strategy_check": {
+        "tail_only_frame_count_lt_full": true,
+        "note": "When scan_mode differs, Tail Only should extract fewer frames than Full Scan for videos >10s"
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "_fixture_id": "short_url",
+  "_captured_at": "2026-02-24T00:34:56Z",
+  "_elapsed_seconds": 29.5,
+  "_source": "https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4",
+  "_settings": {
+    "categories": "Cars, Insurance, Finance, Technology, Retail",
+    "provider": "Ollama",
+    "model_name": "qwen3-vl:8b-instruct",
+    "ocr_engine": "EasyOCR",
+    "ocr_mode": "\ud83d\ude80 Fast",
+    "scan_mode": "Tail Only",
+    "override": false,
+    "enable_search": false,
+    "enable_vision": false,
+    "context_size": 8192,
+    "workers": 1
+  },
+  "frame_count": 1,
+  "frame_meta": [
+    {
+      "time_seconds": 35.958,
+      "type": "tail"
+    }
+  ],
+  "ocr_has_text": true,
+  "ocr_lines": [
+    {
+      "time_seconds": 35.958,
+      "text": "Ecomaison vous souhaite une ann\u00e9e 2026 pleine de succ\u00e8s et de circularit\u00e9. ESQUIVEZ le4 ComA enscmble pier Vomason"
+    }
+  ],
+  "result": {
+    "brand": "Ecomaison",
+    "category": "Retail",
+    "category_id": "",
+    "confidence": 0.95,
+    "reasoning": "The OCR text mentions 'Ecomaison', which is a known retail brand specializing in eco-friendly home goods. The phrase 'vous souhaite une ann\u00e9e 2026 pleine de succ\u00e8s et de circularit\u00e9' is a festive or promotional message typical of retail brands. The context and brand name strongly align with the 'Retail' category, with high confidence."
+  }
+}

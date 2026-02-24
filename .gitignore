@@ -110,3 +110,4 @@ desktop.ini
     vocabulary.txt
 storage/*
 langid_service/storage/
+tests/fixtures/sample_local.mp4

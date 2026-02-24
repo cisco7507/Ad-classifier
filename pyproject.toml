@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "parity: API vs combined.py parity tests (require running API + video access)",
+    "unit:   Fast unit tests with no external dependencies",
+]
+
+# Environment variable overrides for CI:
+#   PARITY_API_URL          = http://127.0.0.1:8000  (default)
+#   PARITY_JOB_TIMEOUT      = 300                    (seconds)
+#   PARITY_POLL_INTERVAL    = 3                      (seconds)
+#   PARITY_CONFIDENCE_TOLERANCE = 0.25               (0.0–1.0)
