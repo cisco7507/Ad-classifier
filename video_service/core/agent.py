@@ -8,11 +8,23 @@ from video_service.core.video_io import extract_frames_for_agent, resolve_urls
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine, search_manager
 
+RESULT_COLUMNS = [
+    "URL / Path",
+    "Brand",
+    "Category ID",
+    "Category",
+    "Confidence",
+    "Reasoning",
+    "category_match_method",
+    "category_match_score",
+]
+
+
 class AdClassifierAgent:
     def __init__(self, max_iterations=4):
         self.max_iterations = max_iterations
 
-    def run(self, frames_data, categories, provider, model, ocr_engine, ocr_mode, allow_override, enable_search, enable_vision, context_size):
+    def run(self, frames_data, categories, provider, model, ocr_engine, ocr_mode, allow_override, enable_search, enable_vision, context_size, job_id=None, ocr_summary=""):
         memory_log = "Initial State: I am investigating a chronological storyboard of scenes extracted from an ad.\n"
         pil_images = [f["image"] for f in frames_data]
         
@@ -83,12 +95,21 @@ Current Memory:
                 if tool_name == "FINAL":
                     brand = kwargs.get("brand", "Unknown")
                     raw_cat = kwargs.get("category", "Unknown")
-                    official_cat, cat_id = category_mapper.get_closest_official_category(raw_cat)
+                    category_match = category_mapper.map_category(
+                        raw_category=raw_cat,
+                        job_id=job_id,
+                        suggested_categories_text=", ".join(categories) if categories else "",
+                        predicted_brand=brand,
+                        ocr_summary=ocr_summary,
+                    )
+                    official_cat = category_match["canonical_category"]
+                    cat_id = category_match["category_id"]
                     reason = kwargs.get("reason", "No reason provided")
-                    if raw_cat != official_cat: reason += f" [Mapped from '{raw_cat}']"
+                    if raw_cat != official_cat:
+                        reason += f" [Mapped from '{raw_cat}']"
                     
                     memory_log += f"\n✅ FINAL CONCLUSION REACHED."
-                    yield memory_log, brand, official_cat, cat_id, "N/A", reason
+                    yield memory_log, brand, official_cat, cat_id, "N/A", reason, category_match["category_match_method"], category_match["category_match_score"]
                     return
                     
                 elif tool_name == "OCR":
@@ -130,28 +151,64 @@ Current Memory:
 
             memory_log += f"\n--- Step {step + 1} ---\nAction: {response}\nResult: {observation}\n"
 
-        yield memory_log, "Unknown", "Unknown", "", "N/A", "Agent Timeout: Max iterations reached."
+        category_match = category_mapper.map_category(
+            raw_category="Unknown",
+            job_id=job_id,
+            suggested_categories_text=", ".join(categories) if categories else "",
+            predicted_brand="Unknown",
+            ocr_summary=ocr_summary,
+        )
+        yield (
+            memory_log,
+            "Unknown",
+            category_match["canonical_category"],
+            category_match["category_id"],
+            "N/A",
+            "Agent Timeout: Max iterations reached.",
+            category_match["category_match_method"],
+            category_match["category_match_score"],
+        )
 
-def run_agent_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx):
+def run_agent_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, job_id=None):
     urls_list = resolve_urls(src, urls, fldr)
     cat_list = [c.strip() for c in cats.split(",") if c.strip()]
     master = []
     agent = AdClassifierAgent()
     
     for url in urls_list:
-        yield f"Processing {url}...", [], pd.DataFrame(master, columns=["URL / Path", "Brand", "Category ID", "Category", "Confidence", "Reasoning"]), category_mapper.get_nebula_plot()
+        yield f"Processing {url}...", [], pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot()
         try:
             frames, cap = extract_frames_for_agent(url)
             if cap and cap.isOpened():
                 cap.release()
             gallery = [(f["ocr_image"], f"{f['time']}s") for f in frames]
+            ocr_chunks = []
+            for f in frames:
+                txt = ocr_manager.extract_text(oe, f["ocr_image"], mode=om)
+                if txt:
+                    ocr_chunks.append(txt)
+            ocr_summary = " ".join(ocr_chunks)[:600]
             
-            for log, b, c, cid, conf, r in agent.run(frames, cat_list, p, m, oe, om, override, enable_search, enable_vision, ctx):
+            for log, b, c, cid, conf, r, match_method, match_score in agent.run(
+                frames,
+                cat_list,
+                p,
+                m,
+                oe,
+                om,
+                override,
+                enable_search,
+                enable_vision,
+                ctx,
+                job_id=job_id,
+                ocr_summary=ocr_summary,
+            ):
                 brand, cat, cat_id, reason = b, c, cid, r
-                yield log, gallery, pd.DataFrame(master, columns=["URL / Path", "Brand", "Category ID", "Category", "Confidence", "Reasoning"]), category_mapper.get_nebula_plot(cat)
+                category_match_method, category_match_score = match_method, match_score
+                yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             
-            master.append([url, brand, cat_id, cat, "N/A", reason])
-            yield log, gallery, pd.DataFrame(master, columns=["URL / Path", "Brand", "Category ID", "Category", "Confidence", "Reasoning"]), category_mapper.get_nebula_plot(cat)
+            master.append([url, brand, cat_id, cat, "N/A", reason, category_match_method, category_match_score])
+            yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             time.sleep(4)
         except Exception as e:
-            master.append([url, "Error", "", "Error", "N/A", str(e)])
+            master.append([url, "Error", "", "Error", "N/A", str(e), "none", None])

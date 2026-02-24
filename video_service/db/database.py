@@ -1,7 +1,13 @@
 import sqlite3
 import os
 
-DB_PATH = os.environ.get("DATABASE_PATH", "video_service.db")
+
+def _default_database_path() -> str:
+    node_name = (os.environ.get("NODE_NAME") or "node-a").strip() or "node-a"
+    return f"video_service_{node_name}.db"
+
+
+DB_PATH = os.environ.get("DATABASE_PATH") or _default_database_path()
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=10.0)

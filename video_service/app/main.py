@@ -41,6 +41,7 @@ from video_service.app.models.job import (
 )
 from video_service.core.device import get_diagnostics
 from video_service.core.cluster import cluster
+from video_service.core.categories import category_mapper
 from video_service.core.security import (
     validate_url, safe_folder_path, check_upload_size,
     MAX_UPLOAD_BYTES, MAX_UPLOAD_MB,
@@ -141,13 +142,33 @@ async def cluster_jobs():
             except Exception as exc:
                 logger.warning("cluster_jobs: node %s unreachable: %s", node, exc)
 
-    aggr.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-    return aggr
+    deduped = _dedupe_jobs_by_id(aggr)
+    if len(deduped) != len(aggr):
+        logger.info(
+            "cluster_jobs: deduped duplicate rows total=%d unique=%d",
+            len(aggr),
+            len(deduped),
+        )
+    return deduped
 
 
 @app.get("/diagnostics/device", tags=["ops"])
 def device_diagnostics():
     return get_diagnostics()
+
+
+def _get_category_mapping_diagnostics():
+    return category_mapper.get_diagnostics()
+
+
+@app.get("/diagnostics/category", tags=["ops"])
+def category_mapping_diagnostics():
+    return _get_category_mapping_diagnostics()
+
+
+@app.get("/diagnostics/categories", tags=["ops"])
+def category_mapping_diagnostics_legacy():
+    return _get_category_mapping_diagnostics()
 
 
 @app.get("/metrics", tags=["ops"])
@@ -346,6 +367,21 @@ def _get_jobs_from_db(limit: int = 100) -> list:
         )
         for r in rows
     ]
+
+
+def _dedupe_jobs_by_id(jobs: list[dict]) -> list[dict]:
+    deduped: dict[str, dict] = {}
+    for job in jobs:
+        job_id = job.get("job_id")
+        if not job_id:
+            continue
+        current = deduped.get(job_id)
+        incoming_updated = job.get("updated_at") or ""
+        current_updated = (current or {}).get("updated_at") or ""
+        if current is None or incoming_updated > current_updated:
+            deduped[job_id] = job
+
+    return sorted(deduped.values(), key=lambda x: x.get("created_at", ""), reverse=True)
 
 
 @app.get("/jobs", response_model=List[JobStatus], tags=["jobs"])

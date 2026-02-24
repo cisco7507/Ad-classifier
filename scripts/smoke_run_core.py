@@ -10,6 +10,7 @@ def test_pipeline():
     
     print("Testing Pipeline...")
     generator = run_pipeline_job(
+        job_id="smoke-run",
         src="Web URLs",
         urls=urls,
         fldr="",

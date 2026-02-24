@@ -1,0 +1,1104 @@
+﻿ID,Freewheel Industry Category
+1,Agriculture Crop Production
+2,Agriculture Livestock Production
+3,Bakeries
+4,Beef Cattle Ranching
+6,Beverage Manufacture and Bottling
+7,Biotechnology Sector
+8,Breweries
+9,Chemical Manufacturing - Agricultural
+10,Coffee and Tea Manufacture
+11,Commercial Fishing and Seafood Distribution
+12,Dairy Products Manufacture
+14,Farm Equipment Manufacture and Distribution
+15,Fast Food and Quickservice Restaurants
+16,Food Distributors
+17,Food Service Contractors
+18,Fruit and Vegetable Processing
+19,Grocery Stores and Supermarkets
+20,Meat Products Manufacture
+21,Nurseries
+22,Pest Control Services
+23,Poultry Processing
+24,Restaurants
+25,Sugar Manufacturing
+26,Timber Operations
+27,Tobacco Manufacture
+28,Veterinary Services
+29,Wineries
+30,Architects Offices
+31,Building Material Supply
+32,"Cement, Concrete and Construction Material"
+33,Commercial Construction Contractors
+34,Concrete and Masonry Contractors
+35,Construction Machinery Manufacturing
+36,"Drywall, Plaster, Acoustic & Insulation Contractors"
+37,Electrical Contractors
+38,Engineering Services
+39,Erosion Control
+40,Framing Contractors
+41,Government Contractors
+42,Highway and Street Construction
+43,HVAC and Plumbing Contractors
+44,Landscaping Services
+45,Lumber Wholesalers
+46,Manufactured Housing
+47,Painting and Wall Covering Contractors
+48,Real Estate Brokerage and Management
+49,Real Estate Investment Trusts (REITs)
+50,Residential Real Estate Construction
+51,"Roofing, Siding, and Sheet Metal Contractors"
+52,Security System Services
+53,Site Preparation Contractors
+54,Structural Metals Manufacture
+55,Title Insurance Services
+56,Wood Flooring Manufacture
+57,Accounting Services
+58,Banks and Credit Unions
+59,Consulting Services
+60,Consumer Finance
+61,Credit Card Processing
+62,Credit Collections and Services
+63,Financial Planners and Investment Advisors
+64,Hedge Fund Management
+65,Insurance Agencies
+66,Insurance Carriers
+67,Investment Banking
+68,Legal Services
+69,Mortgage Banking
+71,Securities Brokers
+73,Venture Capital
+74,Chiropractor Offices
+75,Dentists Offices & Clinics
+76,Drugstores
+77,Health Fundraising Organizations
+78,Healthcare
+79,Home Healthcare Services
+80,Hospitals
+81,Kidney Dialysis Centers
+82,Managed Healthcare
+83,Medical & Imaging Laboratories
+84,Medical Equipment Distributors
+85,Medical Supplies and Devices
+86,Nursing Homes and Assisted Living
+87,Optometrists and Opticians
+88,Outpatient Surgical Centers
+89,Pharmaceutical Manufacture and Sale - prescription
+90,Physician Offices
+91,Rehabilitation Therapy Practices
+92,Abrasives Manufacture
+93,Aerospace Products and Parts Manufacture
+94,Aircraft Parts Manufacture
+95,Apparel Manufacture
+96,Automobile Manufacture
+97,Automobile Parts and Accessories Manufacture
+98,Battery Manufacture
+100,Boat Building
+104,Chemical Manufacturing - Industrial
+105,Chemicals
+107,Commercial Printing
+108,Computer Manufacture
+111,Electronic Components & Semiconductor Manufacture
+112,Electronic Gaming Products
+113,Fabricated Metal Parts Manufacturing
+115,Fitness Equipment
+116,Floor Coverings
+117,"Footwear Manufacture, Wholesale, and Retail"
+119,Furniture Manufacturing
+120,Glass and Fiber Optic Manufacturing
+121,Gun Manufacturing
+122,Handtool and Cutlery Manufacture
+123,Household Appliance Manufacture
+124,Industrial Machinery Manufacturing
+125,Lighting Equipment Manufacture
+126,Machine Shops
+127,Machine Tool Manufacture
+130,"Metal Coating, Engraving, & Heat Treating"
+131,Metal Ore Mining
+132,Metal Valve Manufacture
+133,"Motor, Generator, Pump, and Compressor Mfg"
+134,Motorcycle Manufacturing
+135,Musical Instrument Manufacture
+136,Oil and Gas Field Services
+137,Paint and Coating Manufacturing
+138,Paper Products Manufacture
+139,Pet Food Manufacture
+140,Petroleum Refining
+142,Plastic and Rubber Products Manufacturing
+143,Plastic Resins & Synthetic Fibers
+144,Primary Metals Manufacturing
+145,Pulp and Paper Mills
+146,Railroad Equipment Manufacturing
+147,Recreational Vehicle Manufacture
+148,Sawmills and Plywood Mills
+149,Scrap Metals-Recycling
+150,"Search, Detection, and Navigation Equipment Manufacture"
+151,Soap and Detergent Manufacture
+154,Telecommunications Equipment Manufacturers
+155,Textile Manufacturing
+156,Tire Manufacturers
+158,Toy Manufacture
+159,Truck and Bus Manufacturing
+161,Amusement Parks & Arcades
+162,Bed and Breakfast Inns
+163,Boat Dealers
+164,Bowling Centers
+165,Child-care Facilities
+166,Churches & Religious Groups
+167,Colleges and Universities
+168,Community Colleges
+169,Education and Training Services
+170,Electric Energy Distribution
+171,Fitness Centers
+173,Gambling Operations
+174,Golf Courses
+176,Local Bus Transportation
+177,Marinas
+178,Movie Theatres
+179,Municipal Governments
+180,"Museums, Zoos, and Parks"
+181,Natural Gas Production and Distribution
+182,Nonprofit Institutions
+183,Private Schools K-12
+184,Professional Sports Teams and Organizations
+185,Public Schools K-12
+186,Recreational Vehicle Parks
+187,Ski Facilities
+188,Spa Services
+189,Sporting Goods Retailers
+190,Travel Agencies and Services
+191,Waste Management
+192,Water & Sewer Utilities
+193,Automobile Dealers - Luxury
+194,Automobile Dealerships
+195,Automobile Parts Wholesale-Retail
+197,Bars and Nightclubs
+198,"Beer, Wine, and Liquor Stores"
+200,Bookstores
+202,Clothing Stores
+203,Coffee Shops
+204,Computer and Software Stores
+205,Consumer Electronics Stores
+206,Convenience Stores and Gas Stations
+207,"Cosmetics, Beauty Supply, and Perfume Stores"
+208,Department Stores & Discount Stores
+212,Florists
+214,Fuel Oil and LP Gas Dealers
+215,Furniture Stores
+216,Gift and Souvenir Stores
+218,Home Centers and Hardware Stores
+219,Home Furnishings Stores
+220,Household Appliance Stores
+221,Internet and Catalog Retailers
+222,Jewelry Retail
+223,Motorcycle Dealers
+224,Music Stores
+225,Musical Instrument Stores
+228,Pet Stores
+229,Photofinishing and Camera Stores
+230,Recreational Vehicle Dealers
+232,Shoe Stores
+233,Specialty Food Stores
+234,Specialty Retail
+236,Tire Dealers
+237,Toy and Hobby Stores
+238,Used Merchandise Stores
+239,Warehouse Clubs and Superstores
+241,Advertising and Marketing
+242,Air Charter Services
+244,Automobile Rental and Leasing
+245,Automotive Repair Shops
+246,Aviation Services
+248,Car Washes
+249,Catering Services
+251,Commercial and Industrial Equipment Rental
+255,Direct Marketing Services
+256,Dry Cleaning and Laundry Facilities
+259,Fast Lube / Auto Oil Change Service
+263,Freight Shipping Services
+264,Funeral Operations
+265,Hair Care Services
+266,Hotel and Motel - Lodging
+267,Interior Design Services
+268,Internet Service Providers
+269,Janitorial Services and Carpet Cleaning
+272,Linen and Uniform Supply Services
+273,Market Research Services
+274,Personnel Staffing Agencies
+276,Photo Studios and Commercial Photography
+277,Professional Services
+280,Taxi and Limousine Services
+281,Telecommunication Services
+282,Telemarketing Services
+283,Testing Laboratories
+290,Book Publishers
+291,Computer and Office Equipment Distributors
+293,Computer Software Development
+296,Entertainment and Games Software
+298,Graphic Design Services
+299,Information Technology
+301,Magazine Publishers
+303,Movies & TV Production and Distribution
+304,Music Production and Distribution
+305,Newspapers and News Organizations
+306,Public Relations
+307,Radio Broadcasting and Programming
+308,Sales Promotion Services
+310,Technology Sector
+312,"TV Cable, Pay & Broadcast Networks"
+314,Wired Telecommunications Carriers
+315,Wireless Telecommunications Services
+319,Airlines
+324,Biofuels Production
+325,Coal Mining
+327,Deep Sea Shipping
+329,Electric Power Generation
+336,Moving and Storage
+338,Nonmetallic Mineral Mining and Quarrying
+339,Oil and Gas Exploration and Production
+342,Petroleum Wholesale Distribution
+343,Railroads
+347,Trucking
+348,Warehousing and Storage
+352,Chemicals Distributors
+356,"Electrical, Plumbing, and Hardware Distributors"
+357,Electronic Components & Semiconductor Wholesalers
+361,Industrial Machinery Wholesalers
+362,Industrial Supply Wholesalers
+364,Material Handling Equipment Distribution
+367,Office Supply and Paper Distribution
+371,Steel Distribution
+372,Tire Wholesalers
+373,Pharmaceutical Manufacture and Sale - over the counter
+374,Consumer Product Rental
+375,Inland Barge Transport
+376,Manufacturing Sector
+377,"Spirits, Liquor Producers & Distilleries"
+378,Politicians
+379,State and Federal Government
+380,Armed Forces
+381,Tobacco & Smoking Paraphernalia
+382,Adult Entertainment and Paraphernalia
+383,Feminine Hygiene Products
+384,Birth Control Products
+385,Entertainment and Performance Arts
+386,Financial Services
+387,Food - Candy
+388,Food - Packaged
+389,Retail and General Merchandise
+390,Manufacturing
+391,Financial Services
+392,Entertainment
+393,Business Services
+394,Food
+395,Travel/Hotels/Airlines
+396,Amusement and Recreation
+397,Apparel
+398,Government/Municipal
+399,Automotive
+400,Beer/Wine/Liquor
+401,Beverages
+402,Pharmaceuticals
+403,Retail Stores/Chains
+404,Publishing
+405,Educational Services
+406,Health Care Services
+407,Restaurant/Fast Food
+408,Office Equipment/Supplies
+409,Computing Product
+410,Product
+411,Cosmetics/Toiletries
+412,Household Products
+413,Gaming
+414,Gambling
+415,Appliances
+416,Real Estate
+417,Telecommunications
+418,Jewelry
+419,Filmed Entertainment
+420,Media
+421,Associations
+422,Eye Care/Optical
+423,Pet Food/Supplies
+424,Photographic Equipment
+425,Professional Sports
+426,Tobacco
+427,Toys/Games
+428,Aerospace
+429,Military
+430,Commercial Printing
+431,Computing
+432,Audio and Video Equipment
+433,Drug Stores
+434,Home Furnishings
+435,Apparel/Accessories
+436,Insurance
+437,Mail Order/Catalogue
+438,News
+439,New Media
+4951,Adults only or Sexual Content
+4952,Adult Entertainment and Paraphernalia - All else
+4953,Marketing Agency
+4954,Advertising and Marketing - All else
+4955,Agriculture equipment
+4956,Farm Fertilizers
+4957,Agriculture Crop Production - All else
+4958,Animal nutrition
+4959,Agriculture Livestock Production - All else
+4960,Domestic Airlines
+4961,International Airlines
+4962,Airlines - All else
+4963,Alcoholic beverages
+4964,Beer/Cider/Lager Beverages 
+4965,Wine Beverages
+4966,Spirits Beverages
+4967,Alcoholic beverages - All else
+4968,Leisure Park
+4969,Amusement Parks & Arcades - All else
+4970,Bag/Wallet Manufacturer
+4971,Sunglasses Manufacturer
+4972,Watch/Jewelry Manufacturer
+4973,Apparel Manufacture - All else
+4974,Car/Van
+4975,Bike/Scooter
+4976,Auto Warranties
+4977,Automobile Manufacture - All else
+4978,Petrol/Oil/Lubricant Manufacture
+4979,Motor Accessory Manufacture
+4980,Automobile Parts and Accessories Manufacture - All else
+4981,Petrol/Oil/Lubricant Retailer
+4982,Motor Accessory Retailer 
+4983,Automobile Parts Wholesale-Retail - All else
+4984,Commercial Car Rental
+4985,Automobile Rental and Leasing - All else
+4986,Household Batteries
+4987,Battery Manufacture - All else
+4988,Beer/Cider/Lager Store
+4989,Wine Store
+4990,Spirits Store
+4991,"Beer, Wine, and Liquor Stores - All else"
+4992,Condom Product 
+4993,Pregnancy Kit Product
+4994,Birth Control Products - All else
+4995,Beer/Cider/Lager
+4996,Wine
+4997,Spirits
+4998,Breweries - All else
+4999,Men's and Women's clothing
+5000,Men's clothing
+5001,Women's clothing
+5002,Children's clothing
+5003,Shoes
+5004,Lingerie
+5005,Swimwear
+5006,Sportswear/fitness
+5007,Clothing Stores - All else
+5008,Industrial Builder/Housing
+5009,Commercial Construction Contractors - All else
+5010,copiers distributor
+5011,printers distributor
+5012,computers distributor
+5013,faxes distributor
+5014,Computer and Office Equipment Distributors - All else
+5015,Computer Game Store
+5016,Computer Software
+5017,Computer and Software Stores - All else
+5018,Home/Office Computer
+5019,Home/Office Printer
+5020,Home/Office Tablet
+5021,Computer Manufacture - All else
+5022,Loan
+5023,Car Loan
+5024,Debt consolidation loan
+5025,Equity Release Loan
+5026,Personal/other Loan
+5027,Loan - all else
+5028,Credit Card
+5029,Credit Check
+5030,Endowment
+5031,Life/Assurance
+5032,Money Transfer
+5033,Mortgage
+5034,Pension/Investment
+5035,Share Trading
+5036,Travelers Check
+5037,Consumer Finance - All else
+5038,Perfume
+5039,Men's perfume
+5040,Women's perfume
+5041,Children's perfume
+5042,Perfume - All else
+5043,Cleansers
+5044,Facial beauty product
+5045,Hand care product
+5046,Makeup
+5047,Eyeliner
+5048,Foundation
+5049,Lipstick
+5050,Mascara
+5051,Blush/Bronzer
+5052,Makeup - All else
+5053,Haircare products
+5054,Hair color
+5055,Hair loss product
+5056,Hair lice product
+5057,Hair removal product
+5058,Shampoo/Conditioner
+5059,Spray/gel/Mousse
+5060,Haircare products - All else
+5061,Lip care product
+5062,Foot care product
+5063,Skin lotion/sun screen/self-tanner
+5064,"Cosmetics, Beauty Supply, and Perfume Stores - All else"
+5065,Cruises
+5066,Butter/Margarine/Spread
+5067,Cheese/Eggs
+5068,Milk/Milk Substitute
+5069,Yogurt
+5070,Dairy Products Manufacture - All else
+5071,Luggage
+5072,DIY
+5073,DIY Materials
+5074,DIY Tools
+5075,DIY - All else
+5076,Pharmacy/Chemist
+5077,Energy/Stimulant Products
+5078,Drugstores - All else
+5079,Education Courses
+5080,Driving Lessons
+5081,Education and Training Services - All else
+5082,Video Game Ratings
+5083,Rating: E
+5084,Rating: E 10+
+5085,Rating: T
+5086,Rating: M
+5087,Rating: A 18+
+5088,Video Game Ratings - All else
+5089,Game Genre
+5090,Family Entertainment
+5091,Fighting/Shooting
+5092,Motorsport
+5093,Role Play/Fantasy
+5094,Sports
+5095,Game genre - All else
+5096,Entertainment and Games Software - All else
+5097,Event
+5098,Concert event
+5099,Exhibition
+5100,Sporting event
+5101,Theater
+5102,Ticket Agent
+5103,Trade Shows/Fairs
+5104,Event - All else
+5105,Psychics/Fortune Telling
+5106,Quiz
+5107,Entertainment and Performance Arts - All else
+5108,Environment
+5109,Fashion accessories
+5110,Eye glasses
+5111,Sunglasses
+5112,Watches
+5113,Purse/bag
+5114,Wallet
+5115,Jewelry
+5116,Leather goods
+5117,Fashion accessories - All else
+5118,Financial Consultant
+5119,Financial Planners and Investment Advisors - All else
+5120,confectionery 
+5121,chewing gum
+5122,chocolate
+5123,Food -Candy - All else
+5124,Food - Dessert
+5125,Pastry
+5126,Cake
+5127,Pie
+5128,Cookie
+5129,Ready-to-eat desserts
+5130,Ice Cream
+5131,Food - Dessert - All else
+5132,Cereals
+5133,Condiments
+5134,"Pasta, rice, bread"
+5135,Chips
+5136,Butter/Margarine
+5137,Soups
+5138,Baby Food
+5139,Sauces/Stocks/Powders
+5140,Jam/preserves/honey
+5141,Pre-made dinners
+5142,Frozen Foods
+5143,Health and Dietary Foods
+5144,Food - Packaged - All else
+5145,"Food - Vegetables, Meat, Fish"
+5146,Fresh Fruits and Vegetables
+5147,Dried Fruits and Vegetables
+5148,Fish
+5149,Beef
+5150,Poultry
+5151,"Food - Vegetables, Meat, Fish - All else"
+5152,Food - Cooking Oils
+5153,Olive Oil
+5154,Margarines
+5155,Vegetable oil
+5156,Coconut Oil
+5157,Food - Cooking Oils - All else
+5158,Franchises and Business Opportunities
+5159,Futures and Commodities
+5160,Gardening
+5161,Plants and seeds
+5162,Gardening tools
+5163,Gardening tools - electrical
+5164,"Plant containers, mini-greenhouses"
+5165,Fertilizers and garden treatments
+5166,Gardening - All else
+5167,Poker/Casino
+5168,Bingo Hall
+5169,Lottery
+5170,Reward Schemes
+5171,Online Gambling
+5172,Gambling Operations - All else
+5173,Firearms
+5174,Gun Manufacturing - All else
+5175,Hair colorist
+5176,Haircare appliance
+5177,Hairdresser
+5178,Hair Care Services - All else
+5179,Health Services Healthcare
+5180,Preventative Healthcare
+5181,Alternative Medicine Healthcare
+5182,Weight loss Healthcare
+5183,Diabetes Healthcare
+5184,Cholesterol Healthcare
+5185,Gender Specific Healthcare
+5186,Lactose Intolerance Healthcare
+5187,Mental Healthcare 
+5188,Obesity intervention Healthcare
+5189,Respiratory and Cardiovascular Healthcare
+5190,Skin Healthcare
+5191,Healthcare - All else
+5192,Home Improvement
+5193,Kitchen Store
+5194,Bathroom Store
+5195,Outdoor  Store
+5196,Bedroom  Store
+5197,Living Room  Store
+5198,Decoration  Store
+5199,Home Furnishing Stores - All else
+5200,Washing Machine/Dryers
+5201,Vacuum
+5202,Heaters
+5203,Fans
+5204,Anti-theft
+5205,Refrigerators
+5206,Ovens/stoves/microwaves
+5207,Irons
+5208,Light Bulbs
+5209,DVD Player
+5210,Coffee Maker
+5211,Cooking appliances
+5212,Television
+5213,Tablet
+5214,Fax
+5215,Computer
+5216,Copier/scanner
+5217,Printers
+5218,E-reader
+5219,Household Appliance Manufacture - All else
+5220,Household Store
+5221,Electrical Store
+5222,Household Appliance Stores - All else
+5223,Household Tools
+5224,Handheld tools
+5225,Electric Handheld tools 
+5226,"Nails, Screws, Bolts, etc."
+5227,Household Tools - All else
+5228,Housekeeping
+5229,Paper goods
+5230,Food Storage products
+5231,Detergents
+5232,Dish products
+5233,Household cleaners
+5234,"Sponges, mops, cloths"
+5235,Household disinfectants
+5236,Air fresheners
+5237,Trash bags
+5238,Housekeeping - All else
+5239,Illegal Activities
+5240,Building Agency 
+5241,Car Agency
+5242,Health Agency
+5243,Home Agency
+5244,Pet Agency
+5245,Travel Agency
+5246,Commercial Agency
+5247,Life Agency
+5248,Insurance Agencies - All else
+5249,Building Carriers
+5250,Car Carriers
+5251,Health Carriers
+5252,Home Carriers
+5253,Pet Carriers
+5254,Travel Carriers
+5255,Commercial Carriers
+5256,Life Carriers
+5257,Insurance Carriers - All else
+5258,Internet
+5259,Internet Comparison Service
+5260,Internet Dating
+5261,Internet gaming
+5262,Internet Social Networking
+5263,Search Engine
+5264,Internet - All else
+5265,Internet Auction
+5266,Various/Catalog
+5267,Internet and Catalog Retailors - All else
+5268,Men's Magazines
+5269,Women's Magazines
+5270,Magazine Publishers - All else
+5271,Managed Health Services
+5272,Managed Healthcare - All else
+5273,Management Consulting
+5274,Medical Imaging equipment
+5275,Medical & Imaging Laboratories - All else
+5276,Medical Assistance products 
+5277,Medical Supplies and Devices - All else
+5278,Motorcycle accessories
+5279,Motorcycle Manufacturing - All else
+5280,Cinema Genre
+5281,Action/thriller Cinema
+5282,Comedy Cinema
+5283,Drama Cinema
+5284,Family/Kids Cinema
+5285,War/Historical/Factual/Documentary Cinema
+5286,Sci-Fi/Horror Cinema
+5287,Cinema Genre - All else
+5288,Ratings
+5289,Rating: G
+5290,Rating: PG
+5291,Rating: PG-13
+5292,Rating: R
+5293,Rating: NC-17
+5294,Ratings - All else
+5295,DVD/video Genre
+5296,Action/thriller
+5297,Comedy
+5298,Drama
+5299,Family/Kids
+5300,Sci-Fi/Horror
+5301,Fitness/Health
+5302,War/Historical/Factual/Documentary
+5303,DVD/video gene - All else
+5304,Movies & TV Production and Distribution - All else
+5305,Delivery Services
+5306,COI
+5307,Anti- Drink & Drive
+5308,Road Safety
+5309,Anti-smoking ad
+5310,Municipal Governments - All else
+5311,Classical
+5312,Concert
+5313,Dance
+5314,Disco
+5315,Indie
+5316,Kids Music
+5317,Pop
+5318,R&B
+5319,Rap
+5320,Rock
+5321,Spoken 
+5322,Music Production and Distribution - All else
+5323,Non-alcoholic beverages
+5324,Water
+5325,Soda
+5326,Juice
+5327,Milk
+5328,Coffee
+5329,Tea
+5330,Energy drinks
+5331,Non-alcoholic beverages - All else
+5332,Charity
+5333,Issues and Awareness
+5334,Nonprofit Institutions - All else
+5335,Stationary
+5336,Writing instruments
+5337,Office Supply and Paper Distribution - All else
+5338,Pawnbrokers
+5339,Temporary Staffing
+5340,Job Searching and Career Management platforms
+5341,Business Recruitment
+5342,Personnel Staffing Agencies - All else
+5343,Pet Litter
+5344,Cough Flu-analgesics
+5345,Anti-smoking aid
+5346,Disinfectant/antiseptic
+5347,Hearing devices
+5348,Digestion/Laxative
+5349,Vitamins
+5350,Allergy
+5351,Condom
+5352,Contraception
+5353,Foot care
+5354,Optical
+5355,Men's Health
+5356,Indigestion
+5357,Painkiller
+5358,Bandages
+5359,Pregnancy Test
+5360,Non-FDA approved Drugs
+5361,Sleep Remedy
+5362,Nasal products
+5363,Insect Repellants
+5364,Pharmaceutical Manufacture and Sale - over the counter - All else
+5365,Painkillers Prescription 
+5366,Sleep Remedy Prescription 
+5367,Allergy Prescription 
+5368,Erectile Dysfunction products Prescription 
+5369,Cough Flu-analgesics Prescription 
+5370,Pharmaceutical Manufacture and Sale - prescription - All else
+5371,Piracy
+5372,Athletic Governing Bodies
+5373,Real Estate - Housing
+5374,Real Estate - Offices
+5375,Real Estate Agencies
+5376,Real Estate Brokerage and Management - All else
+5377,Take out Restaurants
+5378,Food delivery Service
+5379,Restaurants - All else
+5380,Teleshopping
+5381,Household security
+5382,Fire Alarms
+5383,Security System Services - All else
+5384,Toiletries
+5385,Anti-perspirant/Deodorant/ Body Spray
+5386,"Dental Products (toothpaste, toothbrush, floss etc.)"
+5387,Men's shaving products
+5388,Women's shaving products
+5389,Children's toiletries
+5390,Cleanser/acne cream
+5391,Body wash and Soap
+5392,Personal care baby products
+5393,Toiletries - All else
+5394,Non-Allergy
+5395,Health Food Store
+5396,Specialty Food Stores - All else
+5397,Beer/Cider/Lager Producer & Distillery
+5398,Wine Producer & Distillery
+5399,Spirits Producer & Distillery
+5400,"Spirits, Liquor Producers & Distilleries - All else"
+5401,indoor sports equipment
+5402,outdoor sports equipment
+5403,Golf Accessories
+5404,Golf Apparel
+5405,Golf Bags
+5406,Golf Balls
+5407,Golf Carts
+5408,Golf Clubs
+5409,Golf Gloves
+5410,Golf GPS/Rangefinder
+5411,Golf Grips
+5412,Golf Shafts
+5413,Golf Shoes
+5414,Golf Training Aids
+5415,Tennis Equipment
+5416,Sporting Goods Retailers - All else
+5417,Sports Betting
+5418,Telephone Networks
+5419,Telephone Stores
+5420,Telecommunication Services - All else
+5421,Telephone Accessories
+5422,Handset/Mobile
+5423,Telecommunications Equipment Manufacturers - All else
+5424,e-cigarette
+5425,Marijuana
+5426,Tobacco & Smoking Paraphernalia - All else
+5427,Gaming consoles Store
+5428,Boy toys Store
+5429,Girl Toys Store
+5430,Boy and girl toys Store
+5431,Board games Store
+5432,Toys for newborns
+5433,Toy and Hobby Stores - All else
+5434,Gaming Consoles
+5435,Boy toys
+5436,Girl Toys
+5437,Boy and girl toys
+5438,Board games
+5439,Board game - Child 4-8 yrs.
+5440,Board game - Child 8-12 yrs.
+5441,Board game - Adult
+5442,Board games - All else
+5443,Baby Toys (0-3 yrs.)
+5444,Educational
+5445,Creative
+5446,Collectibles
+5447,Playdoh
+5448,Role Play/Pretend Play
+5449,Dolls
+5450,Cars/Trucks/Trains
+5451,Car playset/Remote Control
+5452,Construction Set
+5453,Paint/Draw
+5454,Beads/Fashion
+5455,Action Figure
+5456,Cooking Set
+5457,Kites/Gliders
+5458,Outdoor
+5459,Robot
+5460,Skateboard/Scooter
+5461,Soft Toys
+5462,Toy Manufacture - All else
+5463,Tourism
+5464,TV Licensing
+5465,Pet Medicine
+5466,Veterinary Services - All else
+9058,Cancer Treatment Healthcare
+9059,Cancer Prescription
+9060,Arthritis Prescription
+9061,HIV & Aids Prescription
+9062,Infectious Diseases & Viruses Prescription
+9063,Asthma Prescription
+9064,Blood Sugar & Diabetes Prescription
+9065,Skin Conditions Prescription
+9066,Mental Health Prescription
+9067,Heart and Cardiovascular Prescription
+9127,Political Issues and Policy
+9137,Bread
+9138,Alcopop
+9139,Snacks
+9140,Liqueur
+9141,Personal Audio
+9142,Directory Assistance Services
+9143,Automotive Roadside Assistance
+9144,Window Installation and Treatments
+9145,Sugars and Sweeteners
+9146,Furniture Polish
+9147,Pressure Washer
+9148,Water Purifier
+9149,Thrush Prescription
+9150,Adult Contemporary
+9151,Retro
+9152,Electronic Toy
+9153,Interactive Toy
+9154,Musical Toy
+9155,Travel Accessories
+9156,Holiday Vacation Travel
+9157,Software Applications
+9158,Photo Editing Software
+9159,Shareware and Freeware
+9160,Video Software
+9161,Web Conferencing
+9162,Antivirus Software
+9163,Browsers
+9164,Computer Animation
+9165,Databases
+9166,Desktop Publishing
+9167,Digital Audio
+9168,Graphics Software
+9169,Operating Systems
+9170,Productivity Software
+9171,Messaging Software
+9172,Digital Goods and Currency
+9173,Clothes Washing Machine
+9174,Baby and Toddler Products
+9175,Baby Gift Sets
+9176,Diapers
+9177,Baby Safety Products
+9178,Nursing and Feeding Products
+9179,Baby Bouncers and Rockers
+9180,Baby Carriers
+9181,High Chairs and Boosters
+9182,Strollers and Joggers
+9183,Baby Bath Products
+9184,Injury Health Claims
+9185,Clothing General
+9186,Fresh Vegetables
+9187,Dishwasher Powder
+9188,Recreational Sports Equipment
+9189,Theme Park
+9190,Pet Care and Services
+9191,Toothpaste
+9192,Toothbrush
+9193,Floss
+9194,Golf Store
+9195,Toy Cars
+9196,Toy Trucks
+9197,Toy Trains
+9198,Toy Construction Over 7 years
+9199,Toy Construction Under 7 years
+9200,Fashion dolls
+9201,Interactive Feature Dolls
+9202,"Mini, Micro, and Pocket Dolls"
+9203,Cameras and Accessories
+9204,Facial Tissue
+9205,Ball Game
+9206,Travel
+9207,Domestic Travel
+9208,International Travel
+9209,Hotels
+9210,Resorts
+9211,Motels
+9212,Rail Travel
+9213,Online Travel Services
+9214,"Footwear Manufacture, Wholesale, and Retail - All else"
+9215,Sport Footwear
+9216,Lawnmower
+9217,Strimmer
+9218,Golf Putter
+9219,Carpet Cleaner
+9220,Floor Cleaner
+9221,Media Content TV Channel
+9222,DIY Store
+9223,Trading Cards
+9224,Home Goods Store
+9225,Ketchup
+9226,"Mayonnaise, Cold Sauces"
+9227,Appetizers and Dips
+9228,Salad Dressing
+9229,"Pickles, Relish, Olives"
+9230,Herbs and Spices
+9231,Mustard
+9232,Salts
+9233,Vinegar
+9234,Flavored Milk and Milk Drinks
+9235,Chocolate Spread
+9236,Nougat
+9237,Compotes
+9238,Entremets
+9239,Vegetarian Meals
+9240,Meat and Poultry Meals
+9241,Prepared Salads
+9242,"Yogurt Drinks, Flavored, and Low Fat"
+9243,Fireplaces
+9244,Lighting
+9245,Linens and Bedding
+9246,Housewares
+9247,Carpets and Rugs
+9248,Furniture
+9249,Baby and Toddler Furniture
+9250,"BBQ, Grills, Outdoor Dining"
+9251,Beds and Accessories
+9252,Benches
+9253,Cabinets and Storage
+9254,Chairs
+9255,Entertainment Centers and TV Stands
+9256,Furniture Sets
+9257,Outdoor Furniture
+9258,Shelving
+9259,Sofas
+9260,Tables
+9261,Pool and Spa Installation and Maintenance
+9262,Body Scrubbers and Massage Devices
+9263,Dishwasher
+9264,Sewing Machine
+9265,Kettle
+9266,"Non-Alcoholic Aperitifs, Beer, Wine, and Mocktails"
+9267,Flavored Water
+9268,Carpeting and Flooring Services
+9269,Language Learning
+9270,Professional Schools
+9271,Exchange Programs
+9272,Tutoring Services
+9273,Foils and Wraps
+9274,Pest Control
+9275,Laundry Care
+9276,Hosiery
+9277,Toilet Tissue
+9278,Incontinence Products
+9279,Cosmetics - Nail
+9280,Eye Cream
+9281,Teeth Whiteners
+9282,Home/Office Networking
+9283,Cloud Services
+9284,Anti-Snoring
+9285,Anti-Diarrhea
+9286,Anti-Nausea
+9287,Vaccines
+9288,Menopause Prescription
+9289,Menopause
+9290,Hemorrhoid Prescription
+9291,Alcohol Dependence
+9292,Meal Kit Services
+9293,Connected Wearables
+9294,Virtual and Augmented Reality Devices
+9295,Online Advertising Services
+9296,Web Hosting
+9297,Streaming Service
+9298,Digital Media and Game Virtual Store
+9299,"Snack Bars, Granola Bars"
+9300,Travel - All else
+9301,Window and Glass Treatments
+9302,Paint and Paint Accessories
+9303,Oysters and Shellfish
+9304,Fresh Fruit
+9305,Non-Dairy Milk Substitute
+9306,Home Centers and Hardware Stores - All else
+9307,Mobile Games
+9308,Games by Platform
+9309,Computer Games
+9310,Console Games
+9311,Handheld Console Games
+9312,Virtual Reality Games
+9313,Games by Platform - All else
+9314,Budget Cars
+9315,Crossover
+9316,Luxury Cars
+9317,City Cars
+9318,Micro Cars
+9319,Women's Perfume - Luxury
+9320,Men's Perfume - Luxury
+9321,Unisex Perfume
+9322,Unisex Perfume - Luxury
+9323,Supermarkets
+9324,Shopping Centers
+9325,Department Stores
+9326,Local Stores
+9327,Discount and Warehouse Sales
+9328,Audio Accessories
+9329,Beauty Salon
+9330,Recycling
+9331,Ear Products
+9332,Home Repair
+9333,Gift Services
+9334,Hotel and Motel - Lodging - All else
+9335,Boots
+9336,Dress Shoes
+9337,"TV Cable, Pay & Broadcast Networks - All else"
+9338,Home Products - All else
+9339,Bathroom Accessories
+9340,Home Decor
+9341,Kitchen and Dining Products
+9342,Home Products
+9343,Pasta
+9344,Rice
+9345,Retail Subscription Services
+9346,Clothing Subscriptions
+9347,Grocery Subscriptions
+9348,Makeup and Beauty Supscriptions
+9349,Pet Food and Supply Subscriptions
+9350,Personal Care Subscriptions
+9351,Vitamin and Supplement Subscriptions
+9352,Wine Subscriptions
+9353,Retail Subscription Services - All else
+9354,Software Applications - All else
+9355,Grocery Stores
+9356,Retail and General Merchandise - All else
+9357,Department Stores & Discount Stores - All else
+9358,Appliance Repair
+9359,Gift and Holiday Products
+9360,Gift Baskets
+9361,Gift Cards and Coupons
+9362,Gift Certificates
+9363,Greeting Cards
+9364,Holiday and Ethnic Items
+9365,Party Goods
+9366,Clothes Dryers
+9367,Baby and Toddler Products - All else
+9368,Toilet Training Products
+9369,Legal Services - All else
+9370,Pet Breeders
+9371,Pet Grooming
+9372,Pet Sitting
+9373,Pet Supplies
+9374,Pet Treats
+9375,Pet Care and Services - All else
