@@ -13,8 +13,17 @@ from video_service.app.models.job import JobResponse, JobStatus, JobSettings, Ur
 from video_service.core.device import get_diagnostics
 from video_service.core.cluster import cluster
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Video Ad Classification Service")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 NODE_NAME = cluster.self_name
 
 @app.on_event("startup")

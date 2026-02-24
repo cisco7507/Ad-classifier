@@ -78,4 +78,5 @@ class ClusterConfig:
     def get_node_url(self, node_name: str) -> Optional[str]:
         return self.nodes.get(node_name)
 
-cluster = ClusterConfig()
+_config_path = os.environ.get("CLUSTER_CONFIG", "cluster_config.json")
+cluster = ClusterConfig(config_path=_config_path)
