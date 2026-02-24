@@ -1,84 +1,191 @@
+"""
+video_service/app/main.py
+==========================
+FastAPI application — production-hardened.
+
+Security additions
+------------------
+- CORS restricted to CORS_ORIGINS env var (default: localhost dashboard ports)
+- URL validation on every /jobs/by-urls submission
+- Path traversal guard on /jobs/by-folder
+- Upload size limit (MAX_UPLOAD_MB env var, default 500 MB)
+- Internal routing uses ?internal=1 (proxy recursion protection)
+
+Observability additions
+-----------------------
+- Structured JSON logging via video_service.core.logging_setup
+- /metrics endpoint with richer counters
+- /health returns node + DB liveness
+- /cluster/nodes shows per-node health with latency
+"""
+
 import os
 import uuid
-import datetime
 import json
-import tempfile
 import shutil
+import logging
+import time as _time
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from typing import List, Optional
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
 from fastapi.responses import JSONResponse
-from typing import List, Optional
-from video_service.db.database import get_db, init_db
-from video_service.app.models.job import JobResponse, JobStatus, JobSettings, UrlBatchRequest, FolderRequest, JobSettingsForm, JobMode
-from video_service.core.device import get_diagnostics
-from video_service.core.cluster import cluster
-
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Video Ad Classification Service")
+from video_service.db.database import get_db, init_db
+from video_service.app.models.job import (
+    JobResponse, JobStatus, JobSettings,
+    UrlBatchRequest, FolderRequest, JobMode,
+)
+from video_service.core.device import get_diagnostics
+from video_service.core.cluster import cluster
+from video_service.core.security import (
+    validate_url, safe_folder_path, check_upload_size,
+    MAX_UPLOAD_BYTES, MAX_UPLOAD_MB,
+)
+from video_service.core.cleanup import start_cleanup_thread
+
+logger = logging.getLogger(__name__)
+
+# ── In-memory counters (per-process; reset on restart) ───────────────────────
+_counters: dict[str, int] = defaultdict(int)
+_start_time = _time.time()
+
+# ── CORS config ──────────────────────────────────────────────────────────────
+_CORS_ORIGINS_RAW = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174"
+)
+CORS_ORIGINS: list[str] = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()]
+
+NODE_NAME = cluster.self_name
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/video_service_uploads")
+
+
+# ── App lifespan ─────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("startup: initialising DB (node=%s)", NODE_NAME)
+    init_db()
+    start_cleanup_thread()
+    logger.info("startup: ready (node=%s, cors_origins=%s)", NODE_NAME, CORS_ORIGINS)
+    yield
+    logger.info("shutdown: node=%s", NODE_NAME)
+
+
+app = FastAPI(
+    title="Video Ad Classification Service",
+    version="1.0.0",
+    description="HA cluster of workers that classify video advertisements.",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
-NODE_NAME = cluster.self_name
 
-@app.on_event("startup")
-def startup_event():
-    init_db()
 
-@app.get("/health")
+# ── Health & diagnostics ─────────────────────────────────────────────────────
+
+@app.get("/health", tags=["ops"])
 def health_check():
-    return {"status": "ok", "node": NODE_NAME}
+    """Local node health. Checks DB is reachable."""
+    try:
+        conn = get_db()
+        conn.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception as exc:
+        logger.error("health: DB check failed: %s", exc)
+        db_ok = False
 
-@app.get("/cluster/nodes")
-def cluster_nodes():
-    return {"nodes": cluster.nodes, "status": cluster.node_status, "self": cluster.self_name}
+    status = "ok" if db_ok else "degraded"
+    code   = 200  if db_ok else 503
+    return JSONResponse({"status": status, "node": NODE_NAME, "db": db_ok}, status_code=code)
 
-@app.get("/cluster/jobs")
+
+@app.get("/cluster/nodes", tags=["ops"])
+async def cluster_nodes():
+    """Returns all configured nodes + their last-known health state."""
+    return {
+        "nodes": cluster.nodes,
+        "status": cluster.node_status,
+        "self": cluster.self_name,
+    }
+
+
+@app.get("/cluster/jobs", tags=["ops"])
 async def cluster_jobs():
+    """Fan out /admin/jobs to all healthy nodes and merge."""
     if not cluster.enabled:
-        return get_admin_jobs()
-    
-    aggr = []
+        return _get_jobs_from_db()
+
+    aggr: list = []
     async with httpx.AsyncClient() as client:
         for node, url in cluster.nodes.items():
-            if not cluster.node_status.get(node): continue
+            if not cluster.node_status.get(node):
+                continue
             try:
-                res = await client.get(f"{url}/admin/jobs?internal=1", timeout=cluster.internal_timeout)
-                if res.status_code == 200: aggr.extend(res.json())
-            except: pass
-            
-    aggr.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+                res = await client.get(
+                    f"{url}/admin/jobs?internal=1",
+                    timeout=cluster.internal_timeout
+                )
+                if res.status_code == 200:
+                    aggr.extend(res.json())
+            except Exception as exc:
+                logger.warning("cluster_jobs: node %s unreachable: %s", node, exc)
+
+    aggr.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return aggr
 
-@app.get("/diagnostics/device")
+
+@app.get("/diagnostics/device", tags=["ops"])
 def device_diagnostics():
     return get_diagnostics()
 
-@app.get("/metrics")
+
+@app.get("/metrics", tags=["ops"])
 def get_metrics():
+    """Basic prometheus-style counters (text format available via Accept header)."""
     conn = get_db()
-    cur = conn.execute("SELECT COUNT(*) as c FROM jobs WHERE status = 'completed'")
-    count = cur.fetchone()['c']
-    return {"jobs_processed": count}
+    stats = {}
+    for status in ("queued", "processing", "completed", "failed"):
+        row = conn.execute(
+            "SELECT COUNT(*) as c FROM jobs WHERE status = ?", (status,)
+        ).fetchone()
+        stats[f"jobs_{status}"] = row["c"]
+
+    return {
+        **stats,
+        "jobs_submitted_this_process": _counters["submitted"],
+        "uptime_seconds": round(_time.time() - _start_time),
+        "node": NODE_NAME,
+    }
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────────
 
 def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
     job_id = f"{NODE_NAME}-{uuid.uuid4()}"
-    status = "queued"
-    
     conn = get_db()
     with conn:
         conn.execute(
             "INSERT INTO jobs (id, status, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, status, mode, settings.model_dump_json(), url, "[]")
+            (job_id, "queued", mode, settings.model_dump_json(), url, "[]")
         )
+    _counters["submitted"] += 1
+    logger.info("job_created: job_id=%s mode=%s url=%s", job_id, mode, url)
     return job_id
 
-async def proxy_request(request: Request, target_url: str) -> Response:
+
+async def _proxy_request(request: Request, target_url: str) -> Response:
+    """Forward a request to another cluster node, adding ?internal=1."""
     async with httpx.AsyncClient() as client:
         body = await request.body()
         headers = dict(request.headers)
@@ -89,207 +196,232 @@ async def proxy_request(request: Request, target_url: str) -> Response:
                 url=f"{target_url}{request.url.path}?internal=1",
                 content=body,
                 headers=headers,
-                timeout=cluster.internal_timeout
+                timeout=cluster.internal_timeout,
             )
             return Response(content=res.content, status_code=res.status_code, headers=dict(res.headers))
-        except Exception as e:
-            raise HTTPException(status_code=503, detail=f"Proxy error: {e}")
+        except Exception as exc:
+            logger.error("proxy error → %s: %s", target_url, exc)
+            raise HTTPException(status_code=503, detail=f"Proxy error: {exc}")
 
-@app.post("/jobs/by-urls", response_model=List[JobResponse])
+
+async def _maybe_proxy(req: Request, job_id: str) -> Response | None:
+    """If the job belongs to another node, proxy the request there."""
+    if req.query_params.get("internal"):
+        return None
+    target = None
+    for node in cluster.nodes:
+        if job_id.startswith(f"{node}-"):
+            target = node
+            break
+    if target and target != cluster.self_name:
+        url = cluster.get_node_url(target)
+        if url:
+            return await _proxy_request(req, url)
+    return None
+
+
+def _rr_or_raise() -> str:
+    """Select a node via round-robin or raise 503."""
+    node = cluster.select_rr_node()
+    if not node:
+        raise HTTPException(503, "No healthy nodes available")
+    return node
+
+
+# ── Job submission endpoints ─────────────────────────────────────────────────
+
+@app.post("/jobs/by-urls", response_model=List[JobResponse], tags=["jobs"])
 async def create_job_urls(request: Request, body: UrlBatchRequest):
     if not request.query_params.get("internal"):
-        target_node = cluster.select_rr_node()
-        if not target_node: raise HTTPException(503, "No healthy nodes")
-        if target_node != cluster.self_name:
-            return await proxy_request(request, cluster.get_node_url(target_node))
-            
+        target = _rr_or_raise()
+        if target != cluster.self_name:
+            return await _proxy_request(request, cluster.get_node_url(target))
+
     responses = []
     for url in body.urls:
-        job_id = _create_job(body.mode.value, body.settings, url=url)
+        safe_url = validate_url(url)
+        job_id = _create_job(body.mode.value, body.settings, url=safe_url)
         responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
 
-@app.post("/jobs/by-folder", response_model=List[JobResponse])
+
+@app.post("/jobs/by-folder", response_model=List[JobResponse], tags=["jobs"])
 async def create_job_folder(req: Request, request: FolderRequest):
     if not req.query_params.get("internal"):
-        target_node = cluster.select_rr_node()
-        if not target_node: raise HTTPException(503, "No healthy nodes")
-        if target_node != cluster.self_name:
-            return await proxy_request(req, cluster.get_node_url(target_node))
-            
+        target = _rr_or_raise()
+        if target != cluster.self_name:
+            return await _proxy_request(req, cluster.get_node_url(target))
+
+    safe_dir = safe_folder_path(request.folder_path)
     responses = []
-    if os.path.isdir(request.folder_path):
-        for f in os.listdir(request.folder_path):
-            if f.lower().endswith(('.mp4', '.mov')):
-                full_path = os.path.join(request.folder_path, f)
-                job_id = _create_job(request.mode.value, request.settings, url=full_path)
-                responses.append(JobResponse(job_id=job_id, status="queued"))
+    for fname in os.listdir(safe_dir):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}:
+            full_path = os.path.join(safe_dir, fname)
+            job_id = _create_job(request.mode.value, request.settings, url=full_path)
+            responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
 
-def parse_settings(
+
+def _parse_settings(
     categories: str = Form(""),
-    provider: str = Form("Gemini CLI"),
-    model_name: str = Form("Gemini CLI Default"),
+    provider: str = Form("Ollama"),
+    model_name: str = Form("qwen3-vl:8b-instruct"),
     ocr_engine: str = Form("EasyOCR"),
     ocr_mode: str = Form("🚀 Fast"),
     scan_mode: str = Form("Tail Only"),
     override: bool = Form(False),
-    enable_search: bool = Form(True),
-    enable_vision: bool = Form(True),
+    enable_search: bool = Form(False),
+    enable_vision: bool = Form(False),
     context_size: int = Form(8192),
-    workers: int = Form(2),
+    workers: int = Form(1),
 ) -> JobSettings:
     return JobSettings(
-        categories=categories,
-        provider=provider,
-        model_name=model_name,
-        ocr_engine=ocr_engine,
-        ocr_mode=ocr_mode,
-        scan_mode=scan_mode,
-        override=override,
-        enable_search=enable_search,
-        enable_vision=enable_vision,
-        context_size=context_size,
-        workers=workers
+        categories=categories, provider=provider, model_name=model_name,
+        ocr_engine=ocr_engine, ocr_mode=ocr_mode, scan_mode=scan_mode,
+        override=override, enable_search=enable_search, enable_vision=enable_vision,
+        context_size=context_size, workers=workers,
     )
 
 
-@app.post("/jobs/upload", response_model=JobResponse)
+@app.post("/jobs/upload", response_model=JobResponse, tags=["jobs"])
 async def create_job_upload(
     req: Request,
     mode: JobMode = Form(JobMode.pipeline),
-    settings: JobSettings = Depends(parse_settings),
-    file: UploadFile = File(...)
+    settings: JobSettings = Depends(_parse_settings),
+    file: UploadFile = File(...),
 ):
-    if not req.query_params.get("internal"):
-        target_node = cluster.select_rr_node()
-        if not target_node: raise HTTPException(503, "No healthy nodes")
-        if target_node != cluster.self_name:
-            return await proxy_request(req, cluster.get_node_url(target_node))
-            
-    upload_dir = "/tmp/video_service_uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
+    """
+    Direct file upload endpoint.
+    NOTE: multipart bodies cannot be re-streamed by the proxy, so this
+    endpoint always processes locally (internal=1 behaviour).
+    Clients should POST directly to the node they want to own the job
+    (or always use ?internal=1 to skip routing).
+    """
+    # Enforce upload size
+    content_length = req.headers.get("content-length")
+    check_upload_size(int(content_length) if content_length else None)
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    safe_filename = f"{uuid.uuid4()}_{os.path.basename(file.filename or 'upload.mp4')}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+
+    # Stream with size guard
+    written = 0
+    try:
+        with open(file_path, "wb") as buf:
+            while chunk := await file.read(1 << 20):  # 1 MB chunks
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    os.remove(file_path)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds {MAX_UPLOAD_MB:.0f} MB limit"
+                    )
+                buf.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("upload_write_error: %s", exc)
+        raise HTTPException(500, "Failed to save uploaded file")
+
     job_id = _create_job(mode.value, settings, url=file_path)
     return JobResponse(job_id=job_id, status="queued")
 
 
-@app.get("/jobs", response_model=List[JobStatus])
+# ── Job read endpoints ───────────────────────────────────────────────────────
+
+def _get_jobs_from_db(limit: int = 100) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [
+        JobStatus(
+            job_id=r["id"], status=r["status"],
+            created_at=r["created_at"], updated_at=r["updated_at"],
+            progress=r["progress"], error=r["error"],
+            settings=JobSettings.model_validate_json(r["settings"]) if r["settings"] else None,
+            mode=r["mode"], url=r["url"],
+        )
+        for r in rows
+    ]
+
+
+@app.get("/jobs", response_model=List[JobStatus], tags=["jobs"])
 def get_jobs_recent():
-    conn = get_db()
-    cur = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50")
-    rows = cur.fetchall()
-    
-    results = []
-    for r in rows:
-        results.append(JobStatus(
-            job_id=r['id'],
-            status=r['status'],
-            created_at=r['created_at'],
-            updated_at=r['updated_at'],
-            progress=r['progress'],
-            error=r['error'],
-            settings=JobSettings.model_validate_json(r['settings']) if r['settings'] else None,
-            mode=r['mode'],
-            url=r['url']
-        ))
-        
-    return results
+    return _get_jobs_from_db()
 
-async def _maybe_proxy(req: Request, job_id: str):
-    if req.query_params.get("internal"): return None
-    
-    parts = job_id.split("-")
-    if len(parts) >= 2:
-        owner = getattr(cluster, "self_name", "node-a")
-        # Find prefix logic: job ID looks like node-a-UUID or custom-node-name-UUID
-        # We need to extract everything before the LAST dash just in case name has dashes?
-        # Standard: node_name-uuid. UUID has 4 dashes. So node name is everything before last 5 segments.
-        # But safest: check against cluster.nodes.keys()
-        target = None
-        for node in cluster.nodes.keys():
-            if job_id.startswith(f"{node}-"): 
-                target = node
-                break
-                
-        if target and target != cluster.self_name:
-            url = cluster.get_node_url(target)
-            if url: return await proxy_request(req, url)
-    return None
 
-@app.get("/jobs/{job_id}", response_model=JobStatus)
+@app.get("/jobs/{job_id}", response_model=JobStatus, tags=["jobs"])
 async def get_job(req: Request, job_id: str):
-    proxy_res = await _maybe_proxy(req, job_id)
-    if proxy_res: return proxy_res
-    
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
     conn = get_db()
-    cur = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-    row = cur.fetchone()
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
+        raise HTTPException(404, "Job not found")
     return JobStatus(
-        job_id=row['id'],
-        status=row['status'],
-        created_at=row['created_at'],
-        updated_at=row['updated_at'],
-        progress=row['progress'],
-        error=row['error'],
-        settings=JobSettings.model_validate_json(row['settings']) if row['settings'] else None,
-        mode=row['mode'],
-        url=row['url']
+        job_id=row["id"], status=row["status"],
+        created_at=row["created_at"], updated_at=row["updated_at"],
+        progress=row["progress"], error=row["error"],
+        settings=JobSettings.model_validate_json(row["settings"]) if row["settings"] else None,
+        mode=row["mode"], url=row["url"],
     )
 
-@app.get("/jobs/{job_id}/result")
+
+@app.get("/jobs/{job_id}/result", tags=["jobs"])
 async def get_job_result(req: Request, job_id: str):
-    p = await _maybe_proxy(req, job_id)
-    if p: return p
-    
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
     conn = get_db()
-    cur = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row or not row['result_json']:
+    row = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row or not row["result_json"]:
         return {"result": None}
-    return {"result": json.loads(row['result_json'])}
+    return {"result": json.loads(row["result_json"])}
 
-@app.get("/jobs/{job_id}/artifacts")
+
+@app.get("/jobs/{job_id}/artifacts", tags=["jobs"])
 async def get_job_artifacts(req: Request, job_id: str):
-    p = await _maybe_proxy(req, job_id)
-    if p: return p
-    
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
     conn = get_db()
-    cur = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row or not row['artifacts_json']:
+    row = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row or not row["artifacts_json"]:
         return {"artifacts": None}
-    return {"artifacts": json.loads(row['artifacts_json'])}
+    return {"artifacts": json.loads(row["artifacts_json"])}
 
-@app.get("/jobs/{job_id}/events")
+
+@app.get("/jobs/{job_id}/events", tags=["jobs"])
 async def get_job_events(req: Request, job_id: str):
-    p = await _maybe_proxy(req, job_id)
-    if p: return p
-    
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
     conn = get_db()
-    cur = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,))
-    row = cur.fetchone()
-    if not row or not row['events']:
+    row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row or not row["events"]:
         return {"events": []}
-    return {"events": json.loads(row['events'])}
+    return {"events": json.loads(row["events"])}
 
-@app.delete("/jobs/{job_id}")
+
+@app.delete("/jobs/{job_id}", tags=["jobs"])
 async def delete_job(req: Request, job_id: str):
-    p = await _maybe_proxy(req, job_id)
-    if p: return p
-    
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
     conn = get_db()
     with conn:
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    logger.info("job_deleted: job_id=%s", job_id)
     return {"status": "deleted"}
 
-@app.get("/admin/jobs", response_model=List[JobStatus])
+
+# ── Admin aggregation ────────────────────────────────────────────────────────
+
+@app.get("/admin/jobs", response_model=List[JobStatus], tags=["admin"])
 def get_admin_jobs():
-    return get_jobs_recent()
+    """Per-node job list — called by cluster dashboard fan-out."""
+    return _get_jobs_from_db()

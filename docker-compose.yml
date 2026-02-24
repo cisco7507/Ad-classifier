@@ -1,0 +1,154 @@
+# ============================================================
+# docker-compose.yml — Video Ad Classifier
+# ============================================================
+#
+# Single-node:
+#   docker-compose up backend-a worker-a dashboard
+#
+# Two-node cluster:
+#   docker-compose up
+#
+# Prerequisites:
+#   1. Copy .env.example → .env and fill in values
+#   2. Place your cluster_config.json (see cluster_config.json example)
+#   3. docker-compose up --build
+# ============================================================
+
+version: "3.9"
+
+# ── Shared network ──────────────────────────────────────────
+networks:
+  ad-net:
+    driver: bridge
+
+# ── Named volumes ───────────────────────────────────────────
+volumes:
+  data-a:       # node-a DB + artifacts
+  data-b:       # node-b DB + artifacts
+
+# ── Re-usable backend service template ──────────────────────
+x-backend: &backend-base
+  build: .
+  restart: unless-stopped
+  networks: [ad-net]
+  environment:
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    CLEANUP_ENABLED: ${CLEANUP_ENABLED:-true}
+    JOB_TTL_DAYS: ${JOB_TTL_DAYS:-30}
+    MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+  volumes:
+    - ./categories.csv:/app/categories.csv:ro
+
+# ── Services ─────────────────────────────────────────────────
+services:
+
+  # ── node-a API ──────────────────────────────
+  backend-a:
+    <<: *backend-base
+    container_name: ad-backend-a
+    environment:
+      NODE_NAME: node-a
+      PORT: "8000"
+      DATABASE_PATH: /data/video_service.db
+      ARTIFACTS_DIR: /data/artifacts
+      CLUSTER_CONFIG: /app/cluster_config.json
+      # Inherit CORS_ORIGINS etc. from base
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CLEANUP_ENABLED: ${CLEANUP_ENABLED:-true}
+      JOB_TTL_DAYS: ${JOB_TTL_DAYS:-30}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+    volumes:
+      - data-a:/data
+      - ./cluster_config.json:/app/cluster_config.json:ro
+      - ./categories.csv:/app/categories.csv:ro
+      - /tmp/video_service_uploads:/tmp/video_service_uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── node-a worker ───────────────────────────
+  worker-a:
+    <<: *backend-base
+    container_name: ad-worker-a
+    depends_on:
+      backend-a:
+        condition: service_healthy
+    environment:
+      NODE_NAME: node-a
+      DATABASE_PATH: /data/video_service.db
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - data-a:/data
+      - ./categories.csv:/app/categories.csv:ro
+      - /tmp/video_service_uploads:/tmp/video_service_uploads
+    command: python -m video_service.workers.worker
+
+  # ── node-b API (cluster mode only) ──────────
+  backend-b:
+    <<: *backend-base
+    container_name: ad-backend-b
+    profiles: ["cluster"]          # only started with: docker-compose --profile cluster up
+    environment:
+      NODE_NAME: node-b
+      PORT: "8001"
+      DATABASE_PATH: /data/video_service.db
+      ARTIFACTS_DIR: /data/artifacts
+      CLUSTER_CONFIG: /app/cluster_config_b.json
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CLEANUP_ENABLED: ${CLEANUP_ENABLED:-true}
+      JOB_TTL_DAYS: ${JOB_TTL_DAYS:-30}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+    volumes:
+      - data-b:/data
+      - ./cluster_config_b.json:/app/cluster_config_b.json:ro
+      - ./categories.csv:/app/categories.csv:ro
+      - /tmp/video_service_uploads:/tmp/video_service_uploads
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── node-b worker (cluster mode only) ───────
+  worker-b:
+    <<: *backend-base
+    container_name: ad-worker-b
+    profiles: ["cluster"]
+    depends_on:
+      backend-b:
+        condition: service_healthy
+    environment:
+      NODE_NAME: node-b
+      DATABASE_PATH: /data/video_service.db
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - data-b:/data
+      - ./categories.csv:/app/categories.csv:ro
+      - /tmp/video_service_uploads:/tmp/video_service_uploads
+    command: python -m video_service.workers.worker
+
+  # ── dashboard ────────────────────────────────
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: ad-dashboard
+    restart: unless-stopped
+    networks: [ad-net]
+    ports:
+      - "5173:80"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend-a

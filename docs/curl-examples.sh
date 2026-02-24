@@ -6,7 +6,7 @@ curl -X POST http://127.0.0.1:8000/jobs/by-urls \
       "https://video.adsoftheworld.com/bzoe961keml3r4b5uo66q1gftv9m.mp4"
     ],
     "settings": {
-      "categories": "Cars, Insurance, Finance",
+      "categories": "",
       "provider": "Ollama",
       "model_name": "qwen3-vl:8b-instruct",
       "ocr_engine": "EasyOCR",
