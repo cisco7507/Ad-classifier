@@ -18,6 +18,11 @@
   - Existing rows are backfilled with:
     - `stage = COALESCE(stage, status, 'queued')`
     - `stage_detail = COALESCE(stage_detail, '')`
+- Jobs table dashboard-summary fields:
+  - `brand TEXT`
+  - `category TEXT`
+  - `category_id TEXT`
+  - Added with backward-compatible startup migration and backfilled to empty strings when null.
 
 ## Category Mapping
 - Category-ID lookup is loaded by `video_service.core.category_mapping`.
@@ -92,6 +97,9 @@
 - `JobStatus` now exposes:
   - `stage`
   - `stage_detail`
+  - `brand`
+  - `category`
+  - `category_id`
 - `/jobs`, `/jobs/{job_id}`, `/admin/jobs`, and `/cluster/jobs` payloads carry stage fields.
 - Jobs table UI shows:
   - status badge
@@ -121,3 +129,23 @@
 - If cache is missing, ReACT attempts to lazily build `category_mapper.vision_text_features` from taxonomy prompts.
 - This change is isolated to ReACT path and does not modify pipeline execution flow.
 - ReACT inner-monologue stream now emits incremental deltas (thought/step/result chunks) instead of replaying the full accumulated memory each iteration.
+
+## Search Toggle Contract
+- Job settings now accept search toggle aliases for dashboard/API parity:
+  - `enable_search` (existing)
+  - `enable_web_search` (dashboard-facing alias)
+  - `enable_agentic_search` (compat alias)
+- Normalization resolves these to a single runtime boolean used by worker execution.
+- Upload form parser accepts the same aliases and persists normalized settings in `jobs.settings`.
+
+## Artifact Contract (Dashboard Tabs)
+- Static artifact files are served via:
+  - `GET /artifacts/<job_id>/...` (FastAPI `StaticFiles` mount)
+- Worker materializes structured artifacts in `jobs.artifacts_json` at completion.
+- `GET /jobs/{job_id}/artifacts` always returns normalized keys:
+  - `latest_frames`: list of `{timestamp, label, url}`
+  - `ocr_text`: `{text, lines, url}`
+  - `vision_board`: `{image_url, plot_url, top_matches, metadata}`
+  - `extras.events_url`: link to `/jobs/{job_id}/events`
+- Backward compatibility:
+  - endpoint still returns `{"artifacts": ...}` and now also mirrors normalized keys at top level for direct tab consumption.

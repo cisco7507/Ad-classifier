@@ -11,9 +11,13 @@ import time
 import os
 import sys
 import json
+import re
 import logging
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
+
+import cv2
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -32,6 +36,8 @@ from video_service.core import run_pipeline_job, run_agent_job
 from video_service.core.device import get_diagnostics, DEVICE
 
 logger = logging.getLogger(__name__)
+ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts"))
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _short(text: str | None, max_len: int = 220) -> str:
@@ -39,6 +45,139 @@ def _short(text: str | None, max_len: int = 220) -> str:
         return ""
     compact = " ".join(str(text).split())
     return compact[:max_len]
+
+
+def _sanitize_job_id(job_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", job_id or "")
+
+
+def _resolve_enable_web_search(settings: dict) -> bool:
+    if "enable_web_search" in settings:
+        return bool(settings.get("enable_web_search"))
+    if "enable_agentic_search" in settings:
+        return bool(settings.get("enable_agentic_search"))
+    return bool(settings.get("enable_search", False))
+
+
+def _build_default_artifacts(job_id: str) -> dict:
+    return {
+        "latest_frames": [],
+        "ocr_text": {"text": "", "lines": [], "url": None},
+        "vision_board": {"image_url": None, "plot_url": None, "top_matches": [], "metadata": {}},
+        "extras": {"events_url": f"/jobs/{job_id}/events"},
+    }
+
+
+def _extract_timestamp_seconds(label: str) -> float | None:
+    if not label:
+        return None
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)s", str(label))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except Exception:
+        return None
+
+
+def _write_text_artifact(job_id: str, relative_name: str, text: str) -> str | None:
+    if not text:
+        return None
+    safe_job = _sanitize_job_id(job_id)
+    rel_path = Path(safe_job) / relative_name
+    abs_path = ARTIFACTS_DIR / rel_path
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(text, encoding="utf-8")
+    return f"/artifacts/{rel_path.as_posix()}"
+
+
+def _save_gallery_frames(job_id: str, gallery: list) -> list[dict]:
+    frames: list[dict] = []
+    safe_job = _sanitize_job_id(job_id)
+    rel_dir = Path(safe_job) / "latest_frames"
+    abs_dir = ARTIFACTS_DIR / rel_dir
+    abs_dir.mkdir(parents=True, exist_ok=True)
+    for idx, item in enumerate(gallery or []):
+        if not isinstance(item, (tuple, list)) or len(item) < 2:
+            continue
+        image_obj, label = item[0], str(item[1])
+        if image_obj is None:
+            continue
+        filename = f"frame_{idx+1:03d}.jpg"
+        rel_path = rel_dir / filename
+        abs_path = ARTIFACTS_DIR / rel_path
+        try:
+            cv2.imwrite(str(abs_path), image_obj)
+        except Exception:
+            continue
+        frames.append(
+            {
+                "timestamp": _extract_timestamp_seconds(label),
+                "label": label,
+                "url": f"/artifacts/{rel_path.as_posix()}",
+            }
+        )
+    return frames
+
+
+def _vision_board_from_scores(scores: dict) -> dict:
+    top_matches = []
+    for label, score in (scores or {}).items():
+        top_matches.append({"label": str(label), "score": float(score)})
+    return {
+        "image_url": None,
+        "plot_url": None,
+        "top_matches": top_matches,
+        "metadata": {"source": "pipeline_scores", "count": len(top_matches)},
+    }
+
+
+def _vision_board_from_nebula(job_id: str, nebula) -> dict:
+    board = {
+        "image_url": None,
+        "plot_url": None,
+        "top_matches": [],
+        "metadata": {"source": "agent_nebula", "count": 0},
+    }
+    if nebula is None or not hasattr(nebula, "to_plotly_json"):
+        return board
+    try:
+        payload = nebula.to_plotly_json()
+        raw = json.dumps(payload)
+        url = _write_text_artifact(job_id, "vision_board/plotly.json", raw)
+        board["plot_url"] = url
+        board["metadata"]["trace_count"] = len(payload.get("data", []))
+    except Exception as exc:
+        logger.debug("vision_board_export_failed: %s", exc)
+    return board
+
+
+def _extract_summary_fields(result_json: str | None) -> tuple[str, str, str]:
+    if not result_json:
+        return "", "", ""
+    try:
+        payload = json.loads(result_json)
+    except Exception:
+        return "", "", ""
+    if not isinstance(payload, list) or not payload:
+        return "", "", ""
+    row = payload[0] if isinstance(payload[0], dict) else {}
+    brand = str(row.get("Brand") or row.get("brand") or "")
+    category = str(row.get("Category") or row.get("category") or "")
+    category_id = str(row.get("Category ID") or row.get("category_id") or "")
+    return brand, category, category_id
+
+
+def _extract_agent_ocr_text(events: list[str]) -> str:
+    for evt in events:
+        if not evt or "[Scene" not in evt:
+            continue
+        if "Observation:" not in evt:
+            continue
+        idx = evt.find("Observation:")
+        if idx >= 0:
+            return evt[idx + len("Observation:") :].strip()
+    return ""
 
 
 def _append_job_event(job_id: str, message: str) -> None:
@@ -137,13 +276,14 @@ def claim_and_process_job() -> bool:
 
         events: list[str] = []
         result_json: str | None = None
-        error_msg:   str | None = None
+        artifacts_payload: dict = _build_default_artifacts(job_id)
+        error_msg: str | None = None
 
         try:
             if mode == "pipeline":
-                result_json = _run_pipeline(job_id, url, settings)
+                result_json, artifacts_payload = _run_pipeline(job_id, url, settings)
             elif mode == "agent":
-                result_json, events = _run_agent(job_id, url, settings)
+                result_json, events, artifacts_payload = _run_agent(job_id, url, settings)
             else:
                 raise ValueError(f"Unknown mode: {mode}")
 
@@ -164,9 +304,18 @@ def claim_and_process_job() -> bool:
                 logger.error("job_failed: error=%.200s", error_msg)
             else:
                 _set_stage(job_id, "persist", "persisting result payload")
+                brand, category, category_id = _extract_summary_fields(result_json)
                 update_conn.execute(
-                    "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    ("result persisted", result_json, job_id),
+                    "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (
+                        "result persisted",
+                        result_json,
+                        json.dumps(artifacts_payload),
+                        brand,
+                        category,
+                        category_id,
+                        job_id,
+                    ),
                 )
                 _append_job_event(
                     job_id,
@@ -186,9 +335,10 @@ def claim_and_process_job() -> bool:
         reset_job_context(job_token)
 
 
-def _run_pipeline(job_id: str, url: str, settings: dict) -> str | None:
+def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, dict]:
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
+    enable_web_search = _resolve_enable_web_search(settings)
     generator = run_pipeline_job(
         job_id=job_id,
         src="Web URLs",
@@ -201,30 +351,48 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> str | None:
         om=settings.get("ocr_mode", "🚀 Fast"),
         override=settings.get("override", False),
         sm=settings.get("scan_mode", "Tail Only"),
-        enable_search=settings.get("enable_search", False),
+        enable_search=enable_web_search,
         enable_vision=settings.get("enable_vision", False),
         ctx=settings.get("context_size", 8192),
         workers=1,
         stage_callback=stage_cb,
     )
     final_df = None
+    latest_scores: dict = {}
+    latest_ocr_text = ""
+    latest_gallery = []
     for content in generator:
         if len(content) == 5:
+            latest_scores = content[0] if isinstance(content[0], dict) else {}
+            latest_ocr_text = content[1] if isinstance(content[1], str) else ""
+            latest_gallery = content[3] if isinstance(content[3], list) else []
             final_df = content[4]
+
+    artifacts_payload = _build_default_artifacts(job_id)
+    artifacts_payload["latest_frames"] = _save_gallery_frames(job_id, latest_gallery)
+    artifacts_payload["ocr_text"]["text"] = latest_ocr_text
+    artifacts_payload["ocr_text"]["lines"] = [
+        line for line in (latest_ocr_text or "").splitlines() if line.strip()
+    ]
+    artifacts_payload["ocr_text"]["url"] = _write_text_artifact(
+        job_id, "ocr/ocr_output.txt", latest_ocr_text
+    )
+    artifacts_payload["vision_board"] = _vision_board_from_scores(latest_scores)
 
     if final_df is not None and not final_df.empty:
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))
-        return result
+        return result, artifacts_payload
 
     logger.warning("pipeline_empty: no result rows")
-    return None
+    return None, artifacts_payload
 
 
-def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[str]]:
+def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[str], dict]:
     events: list[str] = []
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
+    enable_web_search = _resolve_enable_web_search(settings)
     generator = run_agent_job(
         job_id=job_id,
         src="Web URLs",
@@ -237,17 +405,21 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
         om=settings.get("ocr_mode", "🚀 Fast"),
         override=settings.get("override", False),
         sm=settings.get("scan_mode", "Tail Only"),
-        enable_search=settings.get("enable_search", False),
+        enable_search=enable_web_search,
         enable_vision=settings.get("enable_vision", False),
         ctx=settings.get("context_size", 8192),
         stage_callback=stage_cb,
     )
     final_df = None
+    latest_gallery = []
+    latest_nebula = None
     for content in generator:
         if len(content) == 4:
             log_str, gallery, df, nebula = content
             events.append(log_str)
             final_df = df
+            latest_gallery = gallery if isinstance(gallery, list) else latest_gallery
+            latest_nebula = nebula
             agent_log = log_str or ""
             if len(agent_log) > 12000:
                 agent_log = f"{agent_log[:12000]}\n...[truncated]"
@@ -257,6 +429,16 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
             )
             logger.debug("agent_event: events=%d", len(events))
 
+    artifacts_payload = _build_default_artifacts(job_id)
+    artifacts_payload["latest_frames"] = _save_gallery_frames(job_id, latest_gallery)
+    ocr_text = _extract_agent_ocr_text(events)
+    artifacts_payload["ocr_text"]["text"] = ocr_text
+    artifacts_payload["ocr_text"]["lines"] = [line for line in ocr_text.split(" | ") if line.strip()]
+    artifacts_payload["ocr_text"]["url"] = _write_text_artifact(
+        job_id, "ocr/ocr_output.txt", ocr_text
+    )
+    artifacts_payload["vision_board"] = _vision_board_from_nebula(job_id, latest_nebula)
+
     result_json = None
     if final_df is not None and not final_df.empty:
         result_json = json.dumps(final_df.to_dict(orient="records"))
@@ -264,7 +446,7 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
     else:
         logger.warning("agent_empty: no result rows")
 
-    return result_json, events
+    return result_json, events, artifacts_payload
 
 
 def run_worker() -> None:

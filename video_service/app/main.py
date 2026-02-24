@@ -33,6 +33,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from video_service.core.logging_setup import configure_logging
 configure_logging()
@@ -66,6 +67,8 @@ CORS_ORIGINS: list[str] = [o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.
 
 NODE_NAME = cluster.self_name
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/video_service_uploads")
+ARTIFACTS_DIR = os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts")
+os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
 
 # ── App lifespan ─────────────────────────────────────────────────────────────
@@ -86,6 +89,7 @@ app = FastAPI(
     description="HA cluster of workers that classify video advertisements.",
     lifespan=lifespan,
 )
+app.mount("/artifacts", StaticFiles(directory=ARTIFACTS_DIR), name="artifacts")
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,6 +221,71 @@ def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
     return job_id
 
 
+def _default_job_artifacts(job_id: str) -> dict:
+    return {
+        "latest_frames": [],
+        "ocr_text": {
+            "text": "",
+            "lines": [],
+            "url": None,
+        },
+        "vision_board": {
+            "image_url": None,
+            "plot_url": None,
+            "top_matches": [],
+            "metadata": {},
+        },
+        "extras": {
+            "events_url": f"/jobs/{job_id}/events",
+        },
+    }
+
+
+def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
+    payload = _default_job_artifacts(job_id)
+    if not isinstance(artifacts, dict):
+        return payload
+
+    payload["latest_frames"] = artifacts.get("latest_frames") or []
+
+    ocr_payload = artifacts.get("ocr_text")
+    if isinstance(ocr_payload, dict):
+        payload["ocr_text"]["text"] = ocr_payload.get("text") or ""
+        payload["ocr_text"]["lines"] = ocr_payload.get("lines") or []
+        payload["ocr_text"]["url"] = ocr_payload.get("url")
+    elif isinstance(ocr_payload, str):
+        payload["ocr_text"]["text"] = ocr_payload
+        payload["ocr_text"]["lines"] = [line for line in ocr_payload.splitlines() if line.strip()]
+
+    vision_payload = artifacts.get("vision_board")
+    if isinstance(vision_payload, dict):
+        payload["vision_board"]["image_url"] = vision_payload.get("image_url")
+        payload["vision_board"]["plot_url"] = vision_payload.get("plot_url")
+        payload["vision_board"]["top_matches"] = vision_payload.get("top_matches") or []
+        payload["vision_board"]["metadata"] = vision_payload.get("metadata") or {}
+
+    extras = artifacts.get("extras")
+    if isinstance(extras, dict):
+        payload["extras"].update(extras)
+
+    for key, value in artifacts.items():
+        if key not in payload:
+            payload[key] = value
+    return payload
+
+
+def _resolve_enable_web_search(
+    enable_search: bool,
+    enable_web_search: Optional[bool],
+    enable_agentic_search: Optional[bool],
+) -> bool:
+    if enable_web_search is not None:
+        return bool(enable_web_search)
+    if enable_agentic_search is not None:
+        return bool(enable_agentic_search)
+    return bool(enable_search)
+
+
 async def _proxy_request(request: Request, target_url: str) -> Response:
     """Forward a request to another cluster node, adding ?internal=1."""
     async with httpx.AsyncClient() as client:
@@ -305,14 +374,25 @@ def _parse_settings(
     scan_mode: str = Form("Tail Only"),
     override: bool = Form(False),
     enable_search: bool = Form(False),
+    enable_web_search: Optional[bool] = Form(None),
+    enable_agentic_search: Optional[bool] = Form(None),
     enable_vision: bool = Form(False),
     context_size: int = Form(8192),
     workers: int = Form(1),
 ) -> JobSettings:
+    resolved_search = _resolve_enable_web_search(
+        enable_search=enable_search,
+        enable_web_search=enable_web_search,
+        enable_agentic_search=enable_agentic_search,
+    )
     return JobSettings(
         categories=categories, provider=provider, model_name=model_name,
         ocr_engine=ocr_engine, ocr_mode=ocr_mode, scan_mode=scan_mode,
-        override=override, enable_search=enable_search, enable_vision=enable_vision,
+        override=override,
+        enable_search=resolved_search,
+        enable_web_search=resolved_search,
+        enable_agentic_search=resolved_search,
+        enable_vision=enable_vision,
         context_size=context_size, workers=workers,
     )
 
@@ -365,6 +445,9 @@ async def create_job_upload(
 # ── Job read endpoints ───────────────────────────────────────────────────────
 
 def _get_jobs_from_db(limit: int = 100) -> list:
+    def row_value(r, key: str, default=None):
+        return r[key] if key in r.keys() else default
+
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
@@ -372,11 +455,12 @@ def _get_jobs_from_db(limit: int = 100) -> list:
     return [
         JobStatus(
             job_id=r["id"], status=r["status"],
-            stage=r["stage"], stage_detail=r["stage_detail"],
+            stage=row_value(r, "stage"), stage_detail=row_value(r, "stage_detail"),
             created_at=r["created_at"], updated_at=r["updated_at"],
-            progress=r["progress"], error=r["error"],
+            progress=r["progress"], error=row_value(r, "error"),
             settings=JobSettings.model_validate_json(r["settings"]) if r["settings"] else None,
-            mode=r["mode"], url=r["url"],
+            mode=row_value(r, "mode"), url=row_value(r, "url"),
+            brand=row_value(r, "brand"), category=row_value(r, "category"), category_id=row_value(r, "category_id"),
         )
         for r in rows
     ]
@@ -411,13 +495,16 @@ async def get_job(req: Request, job_id: str):
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Job not found")
+    def row_value(r, key: str, default=None):
+        return r[key] if key in r.keys() else default
     return JobStatus(
         job_id=row["id"], status=row["status"],
-        stage=row["stage"], stage_detail=row["stage_detail"],
+        stage=row_value(row, "stage"), stage_detail=row_value(row, "stage_detail"),
         created_at=row["created_at"], updated_at=row["updated_at"],
-        progress=row["progress"], error=row["error"],
+        progress=row["progress"], error=row_value(row, "error"),
         settings=JobSettings.model_validate_json(row["settings"]) if row["settings"] else None,
-        mode=row["mode"], url=row["url"],
+        mode=row_value(row, "mode"), url=row_value(row, "url"),
+        brand=row_value(row, "brand"), category=row_value(row, "category"), category_id=row_value(row, "category_id"),
     )
 
 
@@ -441,8 +528,14 @@ async def get_job_artifacts(req: Request, job_id: str):
     conn = get_db()
     row = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row or not row["artifacts_json"]:
-        return {"artifacts": None}
-    return {"artifacts": json.loads(row["artifacts_json"])}
+        payload = _default_job_artifacts(job_id)
+    else:
+        try:
+            parsed = json.loads(row["artifacts_json"])
+        except Exception:
+            parsed = None
+        payload = _normalize_job_artifacts(job_id, parsed)
+    return {"artifacts": payload, **payload}
 
 
 @app.get("/jobs/{job_id}/events", tags=["jobs"])

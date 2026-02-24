@@ -84,3 +84,45 @@ def test_cluster_jobs_dedupes_by_job_id_and_keeps_newest_updated_at(monkeypatch)
     deduped = next(job for job in jobs if job["job_id"] == "node-a-uuid-1")
     assert deduped["updated_at"] == "2026-02-24 11:05:00"
     assert deduped["status"] == "completed"
+
+
+def test_cluster_jobs_dedup_preserves_latest_summary_fields(monkeypatch):
+    monkeypatch.setattr(main.cluster, "enabled", True, raising=False)
+    monkeypatch.setattr(main.cluster, "nodes", {"node-a": "http://node-a", "node-b": "http://node-b"}, raising=False)
+    monkeypatch.setattr(main.cluster, "node_status", {"node-a": True, "node-b": True}, raising=False)
+    monkeypatch.setattr(main.cluster, "internal_timeout", 1.0, raising=False)
+
+    payloads = {
+        "http://node-a/admin/jobs?internal=1": [
+            {
+                "job_id": "node-a-uuid-3",
+                "created_at": "2026-02-24 11:10:00",
+                "updated_at": "2026-02-24 11:11:00",
+                "status": "processing",
+                "brand": "",
+                "category": "",
+                "category_id": "",
+            }
+        ],
+        "http://node-b/admin/jobs?internal=1": [
+            {
+                "job_id": "node-a-uuid-3",
+                "created_at": "2026-02-24 11:10:00",
+                "updated_at": "2026-02-24 11:12:00",
+                "status": "completed",
+                "brand": "Volvo",
+                "category": "Automotive",
+                "category_id": "123",
+            }
+        ],
+    }
+    monkeypatch.setattr(main.httpx, "AsyncClient", lambda: _DummyAsyncClient(payloads))
+
+    jobs = asyncio.run(main.cluster_jobs())
+
+    assert len(jobs) == 1
+    assert jobs[0]["job_id"] == "node-a-uuid-3"
+    assert jobs[0]["status"] == "completed"
+    assert jobs[0]["brand"] == "Volvo"
+    assert jobs[0]["category"] == "Automotive"
+    assert jobs[0]["category_id"] == "123"

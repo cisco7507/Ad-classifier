@@ -1,5 +1,5 @@
 from typing import List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 class JobMode(str, Enum):
@@ -15,9 +15,32 @@ class JobSettings(BaseModel):
     scan_mode: str = "Tail Only"
     override: bool = False
     enable_search: bool = True
+    enable_web_search: Optional[bool] = None
+    enable_agentic_search: Optional[bool] = None
     enable_vision: bool = True
     context_size: int = 8192
     workers: int = 2
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_search_aliases(cls, data):
+        if not isinstance(data, dict):
+            return data
+
+        enable_search = data.get("enable_search")
+        enable_web_search = data.get("enable_web_search")
+        enable_agentic_search = data.get("enable_agentic_search")
+
+        if enable_search is None:
+            if enable_web_search is not None:
+                data["enable_search"] = bool(enable_web_search)
+            elif enable_agentic_search is not None:
+                data["enable_search"] = bool(enable_agentic_search)
+        if enable_web_search is None:
+            data["enable_web_search"] = bool(data.get("enable_search", True))
+        if enable_agentic_search is None:
+            data["enable_agentic_search"] = bool(data.get("enable_search", True))
+        return data
 
 class JobSettingsForm(JobSettings):
     mode: JobMode = JobMode.pipeline
@@ -48,3 +71,6 @@ class JobStatus(BaseModel):
     settings: Optional[JobSettings]
     mode: Optional[JobMode]
     url: Optional[str] = None
+    brand: Optional[str] = None
+    category: Optional[str] = None
+    category_id: Optional[str] = None

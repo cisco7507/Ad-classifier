@@ -27,6 +27,9 @@ def init_db():
                 status TEXT NOT NULL,
                 stage TEXT,
                 stage_detail TEXT,
+                brand TEXT,
+                category TEXT,
+                category_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 progress REAL DEFAULT 0,
@@ -48,6 +51,15 @@ def init_db():
             conn.execute("ALTER TABLE jobs ADD COLUMN stage TEXT")
         if "stage_detail" not in existing_cols:
             conn.execute("ALTER TABLE jobs ADD COLUMN stage_detail TEXT")
+        if "brand" not in existing_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN brand TEXT")
+        if "category" not in existing_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN category TEXT")
+        if "category_id" not in existing_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN category_id TEXT")
 
         conn.execute("UPDATE jobs SET stage = COALESCE(stage, status, 'queued') WHERE stage IS NULL")
         conn.execute("UPDATE jobs SET stage_detail = COALESCE(stage_detail, '') WHERE stage_detail IS NULL")
+        conn.execute("UPDATE jobs SET brand = COALESCE(brand, '') WHERE brand IS NULL")
+        conn.execute("UPDATE jobs SET category = COALESCE(category, '') WHERE category IS NULL")
+        conn.execute("UPDATE jobs SET category_id = COALESCE(category_id, '') WHERE category_id IS NULL")
