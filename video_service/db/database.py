@@ -25,6 +25,8 @@ def init_db():
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
+                stage TEXT,
+                stage_detail TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 progress REAL DEFAULT 0,
@@ -37,3 +39,15 @@ def init_db():
                 events TEXT DEFAULT '[]'
             )
         """)
+
+        existing_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        if "stage" not in existing_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN stage TEXT")
+        if "stage_detail" not in existing_cols:
+            conn.execute("ALTER TABLE jobs ADD COLUMN stage_detail TEXT")
+
+        conn.execute("UPDATE jobs SET stage = COALESCE(stage, status, 'queued') WHERE stage IS NULL")
+        conn.execute("UPDATE jobs SET stage_detail = COALESCE(stage_detail, '') WHERE stage_detail IS NULL")

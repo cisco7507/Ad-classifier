@@ -34,6 +34,8 @@ export interface JobSettings {
 export interface JobStatus {
   job_id:     string;
   status:     string;
+  stage?:     string;
+  stage_detail?: string;
   created_at: string;
   updated_at: string;
   progress:   number;

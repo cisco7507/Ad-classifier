@@ -20,13 +20,60 @@ RESULT_COLUMNS = [
 ]
 
 
+def _ensure_react_vision_ready() -> bool:
+    if not category_mapper.categories:
+        return False
+    if siglip_model is None or siglip_processor is None:
+        return False
+    if getattr(category_mapper, "vision_text_features", None) is not None:
+        return True
+
+    try:
+        vision_prompts = [f"A video ad for {cat}" for cat in category_mapper.categories]
+        text_inputs = siglip_processor(
+            text=vision_prompts,
+            padding="max_length",
+            return_tensors="pt",
+        ).to(device)
+        with torch.no_grad():
+            text_features = siglip_model.get_text_features(**text_inputs)
+            category_mapper.vision_text_features = text_features / text_features.norm(
+                p=2, dim=-1, keepdim=True
+            )
+        logger.info(
+            "react_vision_cache_ready: categories=%d",
+            len(category_mapper.categories),
+        )
+    except Exception as exc:
+        category_mapper.vision_text_features = None
+        logger.warning("react_vision_cache_failed: %s", exc)
+
+    return getattr(category_mapper, "vision_text_features", None) is not None
+
+
 class AdClassifierAgent:
     def __init__(self, max_iterations=4):
         self.max_iterations = max_iterations
 
-    def run(self, frames_data, categories, provider, model, ocr_engine, ocr_mode, allow_override, enable_search, enable_vision, context_size, job_id=None, ocr_summary=""):
+    def run(
+        self,
+        frames_data,
+        categories,
+        provider,
+        model,
+        ocr_engine,
+        ocr_mode,
+        allow_override,
+        enable_search,
+        enable_vision,
+        context_size,
+        job_id=None,
+        ocr_summary="",
+        stage_callback=None,
+    ):
         memory_log = "Initial State: I am investigating a chronological storyboard of scenes extracted from an ad.\n"
         pil_images = [f["image"] for f in frames_data]
+        yield memory_log, "Unknown", "Unknown", "", "N/A", "Agent is thinking...", "pending", None
         
         for step in range(self.max_iterations):
             tools_list = ["- [TOOL: OCR] (Use first to extract all visible text from the video frames)"]
@@ -40,7 +87,8 @@ class AdClassifierAgent:
                 protocol_steps.append(f"{step_num}. You MUST use [TOOL: SEARCH] at least once to fact-check the brand name or slogan found in the OCR before you are allowed to finish.")
                 step_num += 1
                 
-            if enable_vision and category_mapper.categories and siglip_model is not None:
+            vision_tool_available = enable_vision and _ensure_react_vision_ready()
+            if vision_tool_available:
                 tools_list.append('- [TOOL: VISION] (Use to check the visual probability against our official industry categories)')
                 examples_list.append('[TOOL: VISION]')
                 protocol_steps.append(f"{step_num}. (Optional) Use [TOOL: VISION] if you are still unsure about the product context.")
@@ -75,15 +123,16 @@ Valid Examples:
 Current Memory:
 {memory_log}"""
             
-            yield memory_log, "Unknown", "Unknown", "", "N/A", "Agent is thinking..."
-            
+            if stage_callback:
+                stage_callback("llm", f"calling provider={provider.lower()} model={model}")
             response = llm_engine.query_agent(provider, model, system_prompt, images=pil_images, force_multimodal=enable_vision, context_size=context_size)
             
             if not response:
                 response = "[TOOL: ERROR | reason=\"LLM returned absolute empty string. Check backend.\"]"
 
             thought = response.split('[TOOL:')[0].strip() if '[TOOL:' in response else response
-            yield memory_log + f"\n🤔 Thought: {thought}\n", "Unknown", "Unknown", "", "N/A", "Executing Tool..."
+            thought_delta = f"🤔 Thought: {thought}\n" if thought else "🤔 Thought:\n"
+            yield thought_delta, "Unknown", "Unknown", "", "N/A", "Executing Tool...", "pending", None
             
             tool_match = re.search(r"\[TOOL:\s*(.*?)(?:\|\s*(.*?))?\]", response)
             observation = ""
@@ -107,9 +156,15 @@ Current Memory:
                     reason = kwargs.get("reason", "No reason provided")
                     if raw_cat != official_cat:
                         reason += f" [Mapped from '{raw_cat}']"
-                    
-                    memory_log += f"\n✅ FINAL CONCLUSION REACHED."
-                    yield memory_log, brand, official_cat, cat_id, "N/A", reason, category_match["category_match_method"], category_match["category_match_score"]
+
+                    final_delta = (
+                        f"--- Step {step + 1} ---\n"
+                        f"Action: {response}\n"
+                        "Result: Final tool accepted.\n"
+                        "✅ FINAL CONCLUSION REACHED.\n"
+                    )
+                    memory_log += f"\n{final_delta}"
+                    yield final_delta, brand, official_cat, cat_id, "N/A", reason, category_match["category_match_method"], category_match["category_match_score"]
                     return
                     
                 elif tool_name == "OCR":
@@ -122,7 +177,7 @@ Current Memory:
                 elif tool_name == "VISION":
                     if not enable_vision:
                         observation = "Observation: Formatting ERROR. The VISION tool is disabled by user settings. Proceed without it."
-                    elif category_mapper.categories and siglip_model is not None and getattr(category_mapper, 'vision_text_features', None) is not None:
+                    elif _ensure_react_vision_ready():
                         with torch.no_grad():
                             image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
                             if TORCH_DTYPE != torch.float32:
@@ -149,7 +204,9 @@ Current Memory:
             else:
                 observation = "Observation: Formatting ERROR. Missing [TOOL: ] syntax. Remember to ONLY output the tool command."
 
-            memory_log += f"\n--- Step {step + 1} ---\nAction: {response}\nResult: {observation}\n"
+            step_delta = f"--- Step {step + 1} ---\nAction: {response}\nResult: {observation}\n"
+            memory_log += f"\n{step_delta}"
+            yield step_delta, "Unknown", "Unknown", "", "N/A", "Step completed", "pending", None
 
         category_match = category_mapper.map_category(
             raw_category="Unknown",
@@ -158,8 +215,10 @@ Current Memory:
             predicted_brand="Unknown",
             ocr_summary=ocr_summary,
         )
+        timeout_delta = "⚠️ Agent Timeout: Max iterations reached.\n"
+        memory_log += f"\n{timeout_delta}"
         yield (
-            memory_log,
+            timeout_delta,
             "Unknown",
             category_match["canonical_category"],
             category_match["category_id"],
@@ -169,8 +228,28 @@ Current Memory:
             category_match["category_match_score"],
         )
 
-def run_agent_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, job_id=None):
+def run_agent_job(
+    src,
+    urls,
+    fldr,
+    cats,
+    p,
+    m,
+    oe,
+    om,
+    override,
+    sm,
+    enable_search,
+    enable_vision,
+    ctx,
+    job_id=None,
+    stage_callback=None,
+):
+    if stage_callback:
+        stage_callback("ingest", "resolving input sources")
     urls_list = resolve_urls(src, urls, fldr)
+    if stage_callback:
+        stage_callback("ingest", f"resolved {len(urls_list)} input item(s)")
     cat_list = [c.strip() for c in cats.split(",") if c.strip()]
     master = []
     agent = AdClassifierAgent()
@@ -178,18 +257,24 @@ def run_agent_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_sear
     for url in urls_list:
         yield f"Processing {url}...", [], pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot()
         try:
+            if stage_callback:
+                stage_callback("frame_extract", "extracting frames for agent mode")
             frames, cap = extract_frames_for_agent(url)
             if cap and cap.isOpened():
                 cap.release()
             gallery = [(f["ocr_image"], f"{f['time']}s") for f in frames]
             ocr_chunks = []
+            if stage_callback:
+                stage_callback("ocr", f"ocr engine={oe.lower()}")
             for f in frames:
                 txt = ocr_manager.extract_text(oe, f["ocr_image"], mode=om)
                 if txt:
                     ocr_chunks.append(txt)
             ocr_summary = " ".join(ocr_chunks)[:600]
+            if stage_callback and enable_vision:
+                stage_callback("vision", "vision enabled; evaluating category cues")
             
-            for log, b, c, cid, conf, r, match_method, match_score in agent.run(
+            for agent_output in agent.run(
                 frames,
                 cat_list,
                 p,
@@ -202,13 +287,22 @@ def run_agent_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_sear
                 ctx,
                 job_id=job_id,
                 ocr_summary=ocr_summary,
+                stage_callback=stage_callback,
             ):
+                if len(agent_output) == 8:
+                    log, b, c, cid, conf, r, match_method, match_score = agent_output
+                elif len(agent_output) == 6:
+                    log, b, c, cid, conf, r = agent_output
+                    match_method, match_score = "pending", None
+                else:
+                    raise ValueError(f"Unexpected agent output length: {len(agent_output)}")
+
                 brand, cat, cat_id, reason = b, c, cid, r
                 category_match_method, category_match_score = match_method, match_score
                 yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             
             master.append([url, brand, cat_id, cat, "N/A", reason, category_match_method, category_match_score])
-            yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
+            yield "✅ Result row appended.\n", gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             time.sleep(4)
         except Exception as e:
             master.append([url, "Error", "", "Error", "N/A", str(e), "none", None])

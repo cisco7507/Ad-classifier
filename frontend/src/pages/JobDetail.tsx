@@ -38,12 +38,16 @@ export function JobDetail() {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState<string>('');
 
-  const containerRef = useRef<HTMLDivElement>(null);
+  const scratchboardRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   // Scroll agent log to bottom on new events
   useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    if (scratchboardRef.current) {
+      scratchboardRef.current.scrollTop = scratchboardRef.current.scrollHeight;
+    }
+    if (historyRef.current) {
+      historyRef.current.scrollTop = historyRef.current.scrollHeight;
     }
   }, [events]);
 
@@ -69,7 +73,7 @@ export function JobDetail() {
           } catch {}
         }
 
-        if (j.mode === 'agent' && (j.status === 'processing' || j.status === 'completed')) {
+        if (j.status === 'processing' || j.status === 'completed' || j.status === 'failed') {
           try {
             const e = await getJobEvents(id);
             if (e.events && !unmounted) setEvents(e.events);
@@ -118,6 +122,13 @@ export function JobDetail() {
 
   const progressPercent = Math.round(job.progress ?? 0);
   const firstRow = result?.[0];
+  const agentScratchboardEvents = events
+    .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
+    .map((evt) => {
+      if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
+      if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
+      return evt;
+    });
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -179,6 +190,17 @@ export function JobDetail() {
             <div className="text-sm text-slate-400 break-all max-w-3xl font-mono opacity-80 bg-slate-950/50 p-2 rounded border border-slate-800">
               {job.url}
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
+                <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
+                <div className="text-slate-300">{job.stage_detail || '—'}</div>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-col items-end gap-1 text-sm text-slate-500 shrink-0">
@@ -229,13 +251,27 @@ export function JobDetail() {
         </div>
       )}
 
-      {/* Agent log */}
-      {job.mode === 'agent' && events.length > 0 && (
+      {/* ReACT scratchboard */}
+      {job.mode === 'agent' && agentScratchboardEvents.length > 0 && (
+        <div className="bg-slate-950 border border-fuchsia-900/40 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
+          <div className="bg-slate-900/80 px-4 py-3 border-b border-fuchsia-900/40 font-semibold text-fuchsia-200 flex items-center gap-2">
+            <MagicWandIcon className="text-fuchsia-400" /> Agent Scratchboard
+          </div>
+          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-300" ref={scratchboardRef}>
+            {agentScratchboardEvents.map((evt, i) => (
+              <div key={i} className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Stage/Event history */}
+      {events.length > 0 && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
           <div className="bg-slate-900/80 px-4 py-3 border-b border-slate-800 font-semibold text-slate-300 flex items-center gap-2">
-            <MagicWandIcon className="text-fuchsia-400" /> Agent Sub-Routine Log
+            <MagicWandIcon className="text-fuchsia-400" /> Stage / Event History
           </div>
-          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={containerRef}>
+          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={historyRef}>
             {events.map((evt, i) => (
               <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
             ))}
