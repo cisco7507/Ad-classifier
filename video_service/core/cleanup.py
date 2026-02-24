@@ -19,6 +19,8 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+from video_service.db.database import DB_PATH as DATABASE_DB_PATH
+
 logger = logging.getLogger(__name__)
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -26,7 +28,7 @@ JOB_TTL_DAYS: int         = int(os.environ.get("JOB_TTL_DAYS", "30"))
 CLEANUP_INTERVAL_HOURS: float = float(os.environ.get("CLEANUP_INTERVAL_HOURS", "6"))
 ARTIFACTS_DIR: str        = os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts")
 UPLOAD_DIR: str           = os.environ.get("UPLOAD_DIR", "/tmp/video_service_uploads")
-DB_PATH: str              = os.environ.get("DATABASE_PATH", "video_service.db")
+DB_PATH: str              = DATABASE_DB_PATH
 CLEANUP_ENABLED: bool     = os.environ.get("CLEANUP_ENABLED", "true").lower() in ("1", "true", "yes")
 
 

@@ -9,7 +9,19 @@ from video_service.core.categories import category_mapper, siglip_model, siglip_
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine
 
-def process_single_video(url, categories, p, m, oe, om, override, sm, enable_search, enable_vision, ctx):
+RESULT_COLUMNS = [
+    "URL / Path",
+    "Brand",
+    "Category ID",
+    "Category",
+    "Confidence",
+    "Reasoning",
+    "category_match_method",
+    "category_match_score",
+]
+
+
+def process_single_video(url, categories, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, job_id=None):
     try:
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
         frames, cap = extract_frames_for_pipeline(url)
@@ -18,7 +30,7 @@ def process_single_video(url, categories, p, m, oe, om, override, sm, enable_sea
         
         if not frames: 
             logger.warning(f"[{url}] Extraction yielded no frames.")
-            return {}, "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty"]
+            return {}, "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty", "none", None]
         
         sorted_vision = {}
         if enable_vision and category_mapper.categories and siglip_model is not None and getattr(category_mapper, 'vision_text_features', None) is not None:
@@ -42,22 +54,56 @@ def process_single_video(url, categories, p, m, oe, om, override, sm, enable_sea
         ocr_text = "\n".join([f"[{f['time']:.1f}s] {ocr_manager.extract_text(oe, f['ocr_image'], om)}" for f in frames])
         res = llm_engine.query_pipeline(p, m, ocr_text, categories, frames[-1]["image"], override, enable_search, enable_vision, ctx)
         
-        cat_out, cat_id_out = category_mapper.get_closest_official_category(res.get("category", "Unknown"))
-        row = [url, res.get("brand", "Unknown"), cat_id_out, cat_out, res.get("confidence", 0.0), res.get("reasoning", "")]
+        category_match = category_mapper.map_category(
+            raw_category=res.get("category", "Unknown"),
+            job_id=job_id,
+            suggested_categories_text=", ".join(categories) if categories else "",
+            predicted_brand=res.get("brand", "Unknown"),
+            ocr_summary=ocr_text,
+        )
+        cat_out = category_match["canonical_category"]
+        cat_id_out = category_match["category_id"]
+        row = [
+            url,
+            res.get("brand", "Unknown"),
+            cat_id_out,
+            cat_out,
+            res.get("confidence", 0.0),
+            res.get("reasoning", ""),
+            category_match["category_match_method"],
+            category_match["category_match_score"],
+        ]
         
         return sorted_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row
         
     except Exception as e: 
         logger.error(f"[{url}] Pipeline Worker Crash: {str(e)}", exc_info=True)
-        return {}, "Err", str(e), [], [url, "Err", "", "Err", 0, str(e)]
+        return {}, "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None]
 
-def run_pipeline_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, workers):
+def run_pipeline_job(src, urls, fldr, cats, p, m, oe, om, override, sm, enable_search, enable_vision, ctx, workers, job_id=None):
     urls_list = resolve_urls(src, urls, fldr)
     cat_list = [c.strip() for c in cats.split(",") if c.strip()]
     master = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(process_single_video, u, cat_list, p, m, oe, om, override, sm, enable_search, enable_vision, ctx): u for u in urls_list}
+        futures = {
+            ex.submit(
+                process_single_video,
+                u,
+                cat_list,
+                p,
+                m,
+                oe,
+                om,
+                override,
+                sm,
+                enable_search,
+                enable_vision,
+                ctx,
+                job_id,
+            ): u
+            for u in urls_list
+        }
         for fut in concurrent.futures.as_completed(futures):
             v, t, d, g, row = fut.result()
             master.append(row)
-            yield v, t, d, g, pd.DataFrame(master, columns=["URL / Path", "Brand", "Category ID", "Category", "Confidence", "Reasoning"])
+            yield v, t, d, g, pd.DataFrame(master, columns=RESULT_COLUMNS)

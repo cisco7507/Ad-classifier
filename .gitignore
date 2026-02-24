@@ -93,6 +93,7 @@ desktop.ini
 
 # User data exports / analysis results
 *.csv
+!video_service/data/categories.csv
 *.xlsx
 *.ods
 *.jsonl

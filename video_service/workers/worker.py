@@ -90,6 +90,7 @@ def claim_and_process_job() -> bool:
 
 def _run_pipeline(job_id: str, url: str, settings: dict) -> str | None:
     generator = run_pipeline_job(
+        job_id=job_id,
         src="Web URLs",
         urls=url,
         fldr="",
@@ -122,6 +123,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> str | None:
 def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[str]]:
     events: list[str] = []
     generator = run_agent_job(
+        job_id=job_id,
         src="Web URLs",
         urls=url,
         fldr="",
