@@ -11,6 +11,13 @@
   - `video_service_${NODE_NAME}.db`
   - This prevents local multi-node collisions when running with different `NODE_NAME` values.
 - Cleanup logic (`video_service.core.cleanup`) uses the same resolved DB path as the DB module.
+- Jobs table observability fields:
+  - `stage TEXT`
+  - `stage_detail TEXT`
+  - `init_db()` performs automatic backward-compatible migration using `PRAGMA table_info(jobs)` + `ALTER TABLE` if columns are missing.
+  - Existing rows are backfilled with:
+    - `stage = COALESCE(stage, status, 'queued')`
+    - `stage_detail = COALESCE(stage_detail, '')`
 
 ## Category Mapping
 - Category-ID lookup is loaded by `video_service.core.category_mapping`.
@@ -45,6 +52,57 @@
     - `category_csv_path_used`
     - `last_error`
 
+## Observability and Logging
+- Centralized logging setup is in `video_service.core.logging_setup`.
+- Log context is propagated with `contextvars`:
+  - `job_id`
+  - `stage`
+  - `stage_detail`
+- Worker uses context helpers:
+  - `set_job_context(job_id)` at claim/start
+  - `set_stage_context(stage, detail)` on each stage transition
+- Default logging behavior:
+  - app logs at `INFO` (or `LOG_LEVEL` override)
+  - noisy libraries (`uvicorn`, `httpx`, `transformers`, `PIL`, etc.) forced to `WARNING` unless DEBUG.
+- Log format includes:
+  - timestamp
+  - level
+  - `job_id`
+  - `stage`
+  - logger name + message
+
+## Job Stage Lifecycle
+- Worker persists stage transitions directly to `jobs.stage` and `jobs.stage_detail`:
+  - `claim`
+  - `ingest`
+  - `frame_extract`
+  - `ocr`
+  - `vision` (when enabled)
+  - `llm`
+  - `persist`
+  - terminal: `completed` / `failed`
+- Failures always set:
+  - `status='failed'`
+  - `stage='failed'`
+  - `stage_detail` with concise error summary.
+- Event trail:
+  - stage transitions and agent events are appended to `jobs.events` with bounded history.
+
+## Dashboard Contract (Jobs + Detail)
+- `JobStatus` now exposes:
+  - `stage`
+  - `stage_detail`
+- `/jobs`, `/jobs/{job_id}`, `/admin/jobs`, and `/cluster/jobs` payloads carry stage fields.
+- Jobs table UI shows:
+  - status badge
+  - compact stage
+  - truncated stage detail with tooltip.
+- Job detail UI shows:
+  - current stage
+  - stage detail
+  - stage/event history (`/jobs/{job_id}/events`) for processing/completed/failed jobs.
+  - in `agent` mode, a dedicated "Agent Scratchboard" panel renders full agent-thinking event payloads from the same events stream.
+
 ## Cluster Jobs Aggregation
 - `GET /cluster/jobs` fan-outs to each healthy node’s `/admin/jobs?internal=1`.
 - Aggregation now deduplicates by `job_id`.
@@ -57,3 +115,9 @@
 - Job results include mapping metadata:
   - `category_match_method="embeddings"`
   - `category_match_score=<float>`
+
+## ReACT Vision Tooling
+- ReACT (`video_service.core.agent`) now performs a ReACT-local SigLIP text-feature readiness check before exposing/executing `[TOOL: VISION]`.
+- If cache is missing, ReACT attempts to lazily build `category_mapper.vision_text_features` from taxonomy prompts.
+- This change is isolated to ReACT path and does not modify pipeline execution flow.
+- ReACT inner-monologue stream now emits incremental deltas (thought/step/result chunks) instead of replaying the full accumulated memory each iteration.

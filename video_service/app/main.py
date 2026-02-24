@@ -34,6 +34,9 @@ from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File,
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from video_service.core.logging_setup import configure_logging
+configure_logging()
+
 from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
@@ -197,8 +200,17 @@ def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
     conn = get_db()
     with conn:
         conn.execute(
-            "INSERT INTO jobs (id, status, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?)",
-            (job_id, "queued", mode, settings.model_dump_json(), url, "[]")
+            "INSERT INTO jobs (id, status, stage, stage_detail, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                job_id,
+                "queued",
+                "queued",
+                "waiting for worker claim",
+                mode,
+                settings.model_dump_json(),
+                url,
+                "[]",
+            ),
         )
     _counters["submitted"] += 1
     logger.info("job_created: job_id=%s mode=%s url=%s", job_id, mode, url)
@@ -360,6 +372,7 @@ def _get_jobs_from_db(limit: int = 100) -> list:
     return [
         JobStatus(
             job_id=r["id"], status=r["status"],
+            stage=r["stage"], stage_detail=r["stage_detail"],
             created_at=r["created_at"], updated_at=r["updated_at"],
             progress=r["progress"], error=r["error"],
             settings=JobSettings.model_validate_json(r["settings"]) if r["settings"] else None,
@@ -400,6 +413,7 @@ async def get_job(req: Request, job_id: str):
         raise HTTPException(404, "Job not found")
     return JobStatus(
         job_id=row["id"], status=row["status"],
+        stage=row["stage"], stage_detail=row["stage_detail"],
         created_at=row["created_at"], updated_at=row["updated_at"],
         progress=row["progress"], error=row["error"],
         settings=JobSettings.model_validate_json(row["settings"]) if row["settings"] else None,

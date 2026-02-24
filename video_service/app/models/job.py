@@ -39,6 +39,8 @@ class JobResponse(BaseModel):
 class JobStatus(BaseModel):
     job_id: str
     status: str
+    stage: Optional[str] = None
+    stage_detail: Optional[str] = None
     created_at: str
     updated_at: str
     progress: float

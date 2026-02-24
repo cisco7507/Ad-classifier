@@ -188,16 +188,17 @@ export function Jobs() {
                       <tr>
                           <th className="px-6 py-4">Job Target</th>
                           <th className="px-6 py-4">Status</th>
-                          <th className="px-6 py-4">Module Flow</th>
+                          <th className="px-6 py-4">Stage</th>
+                          <th className="px-6 py-4">Stage Detail</th>
                           <th className="px-6 py-4 text-right">Progress</th>
                           <th className="px-6 py-4">Created</th>
                       </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/50">
                       {loading && jobs.length === 0 ? (
-                          <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
+                          <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
                       ) : filteredJobs.length === 0 ? (
-                          <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-500">No telemetry found matching filters.</td></tr>
+                          <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-500">No telemetry found matching filters.</td></tr>
                       ) : filteredJobs.map(job => (
                           <tr key={job.job_id} className="hover:bg-slate-800/20 transition-colors group">
                               <td className="px-6 py-4">
@@ -216,7 +217,12 @@ export function Jobs() {
                                       {job.status}
                                   </span>
                               </td>
-                              <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-slate-400">{job.mode}</td>
+                              <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-slate-400">
+                                  {job.stage || 'unknown'}
+                              </td>
+                              <td className="px-6 py-4 text-xs text-slate-400 max-w-xs truncate" title={job.stage_detail || ''}>
+                                  {job.stage_detail || '—'}
+                              </td>
                               <td className="px-6 py-4 font-mono text-xs text-right text-slate-300">
                                   {job.status === 'processing' ? `${job.progress.toFixed(1)}%` : job.status === 'completed' ? '100%' : '---'}
                               </td>
