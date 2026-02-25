@@ -84,12 +84,18 @@ def process_single_video(
             extracted_mode = "full video" if frames[0].get("type") == "scene" else "tail only"
             stage_callback("frame_extract", f"extracted {len(frames)} frames ({extracted_mode})")
         
-        sorted_vision = {}
-        if enable_vision:
-            ready, reason = category_mapper.ensure_vision_text_features()
-            siglip_model = categories_runtime.siglip_model
-            siglip_processor = categories_runtime.siglip_processor
-            if ready and siglip_model is not None and siglip_processor is not None:
+        def _do_vision() -> dict[str, float]:
+            logger.debug("[%s] parallel_task_start: vision", url)
+            try:
+                ready, reason = category_mapper.ensure_vision_text_features()
+                siglip_model = categories_runtime.siglip_model
+                siglip_processor = categories_runtime.siglip_processor
+                if not ready or siglip_model is None or siglip_processor is None:
+                    if stage_callback:
+                        stage_callback("vision", f"vision skipped; {reason}")
+                    logger.info("[%s] vision skipped: %s", url, reason)
+                    return {}
+
                 if stage_callback:
                     stage_callback("vision", "vision enabled; computing visual category scores")
                 start_time = time.time()
@@ -97,59 +103,90 @@ def process_single_video(
                     pil_images = [f["image"] for f in frames]
                     image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
                     if TORCH_DTYPE != torch.float32:
-                        image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
+                        image_inputs = {
+                            k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v
+                            for k, v in image_inputs.items()
+                        }
                     image_features = siglip_model.get_image_features(**image_inputs)
                     image_features = normalize_feature_tensor(
                         image_features,
                         source="SigLIP.get_image_features",
                     )
-                    
+
                     logit_scale = siglip_model.logit_scale.exp()
                     logit_bias = siglip_model.logit_bias
                     logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
                     probs = torch.sigmoid(logits_per_image)
-                    
+
                 scores = probs.mean(dim=0).cpu().numpy()
-                sorted_vision = dict(sorted({category_mapper.categories[i]: float(scores[i]) for i in range(len(category_mapper.categories))}.items(), key=lambda item: item[1], reverse=True)[:5])
-                logger.debug("[%s] vision_scoring_done in %.2fs", url, time.time() - start_time)
-            else:
+                sorted_vision_local = dict(
+                    sorted(
+                        {
+                            category_mapper.categories[i]: float(scores[i])
+                            for i in range(len(category_mapper.categories))
+                        }.items(),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:5]
+                )
+                logger.debug("[%s] vision_task_done in %.2fs", url, time.time() - start_time)
+                return sorted_vision_local
+            except Exception as exc:
+                logger.error("[%s] vision task failed: %s", url, exc, exc_info=True)
+                raise
+
+        def _do_ocr() -> str:
+            logger.debug("[%s] parallel_task_start: ocr", url)
+            try:
                 if stage_callback:
-                    stage_callback("vision", f"vision skipped; {reason}")
-                logger.info("[%s] vision skipped: %s", url, reason)
-        
-        if stage_callback:
-            stage_callback("ocr", f"ocr engine={oe.lower()}")
-        dedup_threshold = _resolve_ocr_dedup_threshold()
-        ocr_lines: list[str] = []
-        prev_normalized: str | None = None
-        skipped_count = 0
-        last_index = len(frames) - 1
-        for idx, frame in enumerate(frames):
-            raw_text = ocr_manager.extract_text(oe, frame["ocr_image"], om)
-            normalized = _normalize_ocr(raw_text)
-            is_last_frame = idx == last_index
-            if (
-                prev_normalized is not None
-                and not is_last_frame
-                and _ocr_texts_similar(normalized, prev_normalized, dedup_threshold)
-            ):
-                skipped_count += 1
-                logger.debug(
-                    "ocr_dedup_skip: frame at %.1fs similar to previous threshold=%.2f",
-                    frame["time"],
+                    stage_callback("ocr", f"ocr engine={oe.lower()}")
+                dedup_threshold = _resolve_ocr_dedup_threshold()
+                ocr_lines: list[str] = []
+                prev_normalized: str | None = None
+                skipped_count = 0
+                last_index = len(frames) - 1
+                for idx, frame in enumerate(frames):
+                    raw_text = ocr_manager.extract_text(oe, frame["ocr_image"], om)
+                    normalized = _normalize_ocr(raw_text)
+                    is_last_frame = idx == last_index
+                    if (
+                        prev_normalized is not None
+                        and not is_last_frame
+                        and _ocr_texts_similar(normalized, prev_normalized, dedup_threshold)
+                    ):
+                        skipped_count += 1
+                        logger.debug(
+                            "ocr_dedup_skip: frame at %.1fs similar to previous threshold=%.2f",
+                            frame["time"],
+                            dedup_threshold,
+                        )
+                        continue
+                    ocr_lines.append(f"[{frame['time']:.1f}s] {raw_text}")
+                    prev_normalized = normalized
+                logger.info(
+                    "ocr_dedup: processed=%d skipped=%d total_frames=%d threshold=%.2f",
+                    len(ocr_lines),
+                    skipped_count,
+                    len(frames),
                     dedup_threshold,
                 )
-                continue
-            ocr_lines.append(f"[{frame['time']:.1f}s] {raw_text}")
-            prev_normalized = normalized
-        ocr_text = "\n".join(ocr_lines)
-        logger.info(
-            "ocr_dedup: processed=%d skipped=%d total_frames=%d threshold=%.2f",
-            len(ocr_lines),
-            skipped_count,
-            len(frames),
-            dedup_threshold,
-        )
+                logger.debug("[%s] parallel_task_done: ocr", url)
+                return "\n".join(ocr_lines)
+            except Exception as exc:
+                logger.error("[%s] ocr task failed: %s", url, exc, exc_info=True)
+                raise
+
+        sorted_vision: dict[str, float] = {}
+        if enable_vision:
+            parallel_t0 = time.time()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                vision_future = pool.submit(_do_vision)
+                ocr_future = pool.submit(_do_ocr)
+                ocr_text = ocr_future.result()
+                sorted_vision = vision_future.result()
+            logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)
+        else:
+            ocr_text = _do_ocr()
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
         res = llm_engine.query_pipeline(p, m, ocr_text, categories, frames[-1]["image"], override, enable_search, enable_vision, ctx)
