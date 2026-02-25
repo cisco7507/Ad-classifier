@@ -10,6 +10,7 @@ import re
 import subprocess
 import os
 import requests
+from PIL import Image
 from ddgs import DDGS
 from video_service.core.utils import logger
 
@@ -57,10 +58,20 @@ class SearchManager:
 search_manager = SearchManager()
 
 class HybridLLM:
-    def _pil_to_base64(self, pil_image):
-        if not pil_image: return None
+    def _pil_to_base64(self, pil_image, max_dimension=768):
+        if not pil_image:
+            return None
+
+        w, h = pil_image.size
+        if max(w, h) > max_dimension:
+            scale = max_dimension / float(max(w, h))
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+            lanczos = getattr(Image, "Resampling", Image).LANCZOS
+            pil_image = pil_image.resize((new_w, new_h), lanczos)
+
         buffered = io.BytesIO()
-        pil_image.save(buffered, format="JPEG")
+        pil_image.save(buffered, format="JPEG", quality=85)
         return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
     def _clean_and_parse_json(self, raw_text):
