@@ -270,7 +270,10 @@ class HybridLLM:
 
     # --- PIPELINE MODE LOGIC ---
     def query_pipeline(self, provider, backend_model, text, categories, tail_image=None, override=False, enable_search=False, force_multimodal=False, context_size=8192):
-        sys_msg = "You are a Senior Marketing Analyst. Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        sys_msg = ("You are a Senior Marketing Analyst and Global Brand Expert. Your goal is to categorize video advertisements by combining extracted text (OCR) with your vast internal knowledge of companies, slogans, and industries. Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this internal database as your absolute primary source of truth. "
+                   "Treat OCR as Noisy Hints: The extracted OCR text is machine-generated and highly prone to typos, missing letters, and random artifacts. DO NOT blindly trust or copy the OCR text. Use your knowledge to autocorrect it. "
+                   "(e.g., if OCR says 'Strbcks' or 'Star bucks co', you know the true brand is 'Starbucks'). "
+                   "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}")
         usr_msg = f"Categories: {categories}\nOverride: {override}\nOCR Text: \"{text}\""
         b64_img = self._pil_to_base64(tail_image) if tail_image else None
 
@@ -288,6 +291,7 @@ class HybridLLM:
             except Exception as e: return {"error": str(e)}
 
         res = call_model(sys_msg, usr_msg, b64_img if force_multimodal else None)
+        print(f'res is:{res}')
         
         brand = res.get("brand", "Unknown") if isinstance(res, dict) else "Unknown"
         if brand.lower() in ["unknown", "none", "n/a", ""] and enable_search:

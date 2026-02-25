@@ -11,7 +11,7 @@ curl -X POST http://127.0.0.1:8000/jobs/by-urls \
       "model_name": "qwen3-vl:8b-instruct",
       "ocr_engine": "EasyOCR",
       "ocr_mode": "🚀 Fast",
-      "scan_mode": "Tail Only",
+      "scan_mode": "Full Video",
       "override": false,
       "enable_search": true,
       "enable_vision": true,
