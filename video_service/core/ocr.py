@@ -5,6 +5,7 @@ import easyocr
 import threading
 import time
 from contextlib import contextmanager
+from typing import Any
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM
 from transformers.configuration_utils import PretrainedConfig
@@ -104,6 +105,29 @@ class OCRManager:
         fast_default = int(os.environ.get("FLORENCE_MAX_NEW_TOKENS_FAST", "256"))
         return fast_default if "Fast" in mode else detailed_default
 
+    @staticmethod
+    def _resolve_easyocr_readtext_kwargs(mode: str) -> dict[str, Any]:
+        # EasyOCR has no Florence-style beam toggle.
+        # This is a best-effort heuristic split:
+        # - Fast: stricter thresholds and larger min_size for speed.
+        # - Detailed: lower thresholds to capture more text.
+        mode_lower = (mode or "").lower()
+        if "fast" in mode_lower:
+            return {
+                "detail": 1,
+                "paragraph": False,
+                "min_size": 20,
+                "text_threshold": 0.8,
+                "width_ths": 0.7,
+            }
+        return {
+            "detail": 1,
+            "paragraph": False,
+            "min_size": 8,
+            "text_threshold": 0.6,
+            "width_ths": 0.5,
+        }
+
     def _build_florence_engine(self):
         def fixed_get_imports(filename):
             imports = get_imports(filename)
@@ -175,7 +199,7 @@ class OCRManager:
             self.current_name = name
             return self.current_engine
 
-    def extract_text(self, engine_name, image_rgb, mode="Detailed"):
+    def extract_text(self, engine_name: str, image_rgb: Any, mode: str = "Detailed") -> str:
         try:
             engine = self.get_engine(engine_name)
 
@@ -221,7 +245,23 @@ class OCRManager:
             if engine is None:
                 return ""
             if hasattr(engine, "readtext"):
-                results = engine.readtext(image_rgb, detail=1)
+                easyocr_kwargs = self._resolve_easyocr_readtext_kwargs(mode)
+                profile = "fast" if "fast" in (mode or "").lower() else "detailed"
+                logger.debug(
+                    "easyocr_mode profile=%s mode=%s kwargs=%s",
+                    profile,
+                    mode,
+                    easyocr_kwargs,
+                )
+                try:
+                    results = engine.readtext(image_rgb, **easyocr_kwargs)
+                except TypeError as exc:
+                    logger.warning(
+                        "easyocr_mode_kwargs_unsupported mode=%s error=%s; falling back to defaults",
+                        mode,
+                        exc,
+                    )
+                    results = engine.readtext(image_rgb, detail=1)
                 annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/image_rgb.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
                 return " ".join(annotated)
             logger.warning("Unknown OCR engine payload type for %s: %s", engine_name, type(engine).__name__)

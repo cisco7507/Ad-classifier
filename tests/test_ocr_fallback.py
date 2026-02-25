@@ -265,3 +265,55 @@ def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
     text2 = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
     assert "fallback-ocr" in text2
     assert mgr.florence_unavailable_reason == before
+
+
+def test_easyocr_mode_profiles_adjust_readtext_kwargs(monkeypatch):
+    captured: list[dict] = []
+
+    class _DummyReader:
+        def readtext(self, _image_rgb, **kwargs):
+            captured.append(dict(kwargs))
+            return [(
+                [(0, 0), (10, 0), (10, 10), (0, 10)],
+                "mode-line",
+                0.99,
+            )]
+
+    mgr = ocr_module.OCRManager()
+    monkeypatch.setattr(mgr, "get_engine", lambda _name: _DummyReader())
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+
+    fast_text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
+    detailed_text = mgr.extract_text("EasyOCR", image, mode="🧠 Detailed")
+
+    assert "mode-line" in fast_text
+    assert "mode-line" in detailed_text
+    assert len(captured) == 2
+    assert captured[0]["min_size"] > captured[1]["min_size"]
+    assert captured[0]["text_threshold"] > captured[1]["text_threshold"]
+
+
+def test_easyocr_mode_kwargs_fallback_on_type_error(monkeypatch):
+    calls: list[dict] = []
+
+    class _LegacyReader:
+        def readtext(self, _image_rgb, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                raise TypeError("unexpected keyword argument")
+            return [(
+                [(0, 0), (10, 0), (10, 10), (0, 10)],
+                "legacy-line",
+                0.88,
+            )]
+
+    mgr = ocr_module.OCRManager()
+    monkeypatch.setattr(mgr, "get_engine", lambda _name: _LegacyReader())
+    image = np.zeros((32, 32, 3), dtype=np.uint8)
+
+    text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
+
+    assert "legacy-line" in text
+    assert calls[0]["detail"] == 1
+    assert calls[0]["min_size"] == 20
+    assert calls[1] == {"detail": 1}
