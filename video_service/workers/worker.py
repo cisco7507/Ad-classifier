@@ -18,6 +18,7 @@ import multiprocessing
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import closing
 
 import cv2
 
@@ -192,7 +193,7 @@ def _append_job_event(job_id: str, message: str) -> None:
     while attempts < 8:
         attempts += 1
         try:
-            with get_db() as conn:
+            with closing(get_db()) as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
                 events = []
@@ -223,7 +224,7 @@ def _append_job_event(job_id: str, message: str) -> None:
 def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 10) -> None:
     for attempt in range(1, attempts + 1):
         try:
-            with get_db() as conn:
+            with closing(get_db()) as conn:
                 conn.execute(sql, params)
             return
         except sqlite3.OperationalError as exc:

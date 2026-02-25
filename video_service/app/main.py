@@ -26,7 +26,7 @@ import shutil
 import logging
 import time as _time
 from collections import defaultdict
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from typing import List, Optional
 
 import httpx
@@ -111,8 +111,8 @@ app.add_middleware(
 def health_check():
     """Local node health. Checks DB is reachable."""
     try:
-        conn = get_db()
-        conn.execute("SELECT 1").fetchone()
+        with closing(get_db()) as conn:
+            conn.execute("SELECT 1").fetchone()
         db_ok = True
     except Exception as exc:
         logger.error("health: DB check failed: %s", exc)
@@ -191,13 +191,13 @@ def category_mapping_diagnostics_legacy():
 @app.get("/metrics", tags=["ops"])
 def get_metrics():
     """Basic prometheus-style counters (text format available via Accept header)."""
-    conn = get_db()
     stats = {}
-    for status in ("queued", "processing", "completed", "failed"):
-        row = conn.execute(
-            "SELECT COUNT(*) as c FROM jobs WHERE status = ?", (status,)
-        ).fetchone()
-        stats[f"jobs_{status}"] = row["c"]
+    with closing(get_db()) as conn:
+        for status in ("queued", "processing", "completed", "failed"):
+            row = conn.execute(
+                "SELECT COUNT(*) as c FROM jobs WHERE status = ?", (status,)
+            ).fetchone()
+            stats[f"jobs_{status}"] = row["c"]
 
     return {
         **stats,
@@ -211,21 +211,21 @@ def get_metrics():
 
 def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
     job_id = f"{NODE_NAME}-{uuid.uuid4()}"
-    conn = get_db()
-    with conn:
-        conn.execute(
-            "INSERT INTO jobs (id, status, stage, stage_detail, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                job_id,
-                "queued",
-                "queued",
-                "waiting for worker claim",
-                mode,
-                settings.model_dump_json(),
-                url,
-                "[]",
-            ),
-        )
+    with closing(get_db()) as conn:
+        with conn:
+            conn.execute(
+                "INSERT INTO jobs (id, status, stage, stage_detail, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    job_id,
+                    "queued",
+                    "queued",
+                    "waiting for worker claim",
+                    mode,
+                    settings.model_dump_json(),
+                    url,
+                    "[]",
+                ),
+            )
     _counters["submitted"] += 1
     logger.info("job_created: job_id=%s mode=%s url=%s", job_id, mode, url)
     return job_id
@@ -471,10 +471,10 @@ def _get_jobs_from_db(limit: int = 100) -> list:
     def row_value(r, key: str, default=None):
         return r[key] if key in r.keys() else default
 
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
-    ).fetchall()
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
     return [
         JobStatus(
             job_id=r["id"], status=r["status"],
@@ -514,8 +514,8 @@ async def get_job(req: Request, job_id: str):
     proxy = await _maybe_proxy(req, job_id)
     if proxy:
         return proxy
-    conn = get_db()
-    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Job not found")
     def row_value(r, key: str, default=None):
@@ -536,8 +536,8 @@ async def get_job_result(req: Request, job_id: str):
     proxy = await _maybe_proxy(req, job_id)
     if proxy:
         return proxy
-    conn = get_db()
-    row = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT result_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row or not row["result_json"]:
         return {"result": None}
     return {"result": json.loads(row["result_json"])}
@@ -548,8 +548,8 @@ async def get_job_artifacts(req: Request, job_id: str):
     proxy = await _maybe_proxy(req, job_id)
     if proxy:
         return proxy
-    conn = get_db()
-    row = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT artifacts_json FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row or not row["artifacts_json"]:
         payload = _default_job_artifacts(job_id)
     else:
@@ -566,8 +566,8 @@ async def get_job_events(req: Request, job_id: str):
     proxy = await _maybe_proxy(req, job_id)
     if proxy:
         return proxy
-    conn = get_db()
-    row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if not row or not row["events"]:
         return {"events": []}
     return {"events": json.loads(row["events"])}
@@ -578,9 +578,9 @@ async def delete_job(req: Request, job_id: str):
     proxy = await _maybe_proxy(req, job_id)
     if proxy:
         return proxy
-    conn = get_db()
-    with conn:
-        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    with closing(get_db()) as conn:
+        with conn:
+            conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
     logger.info("job_deleted: job_id=%s", job_id)
     return {"status": "deleted"}
 
