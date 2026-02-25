@@ -110,6 +110,52 @@ def test_florence_build_meta_linspace_guard_avoids_item_on_meta(monkeypatch):
     assert engine["type"] == "florence2"
 
 
+def test_florence_extract_text_disables_cache_for_generation(monkeypatch):
+    captured = {}
+
+    class _FakeProcessor:
+        def __call__(self, text, images, return_tensors):
+            assert text == "<OCR_WITH_REGION>"
+            assert return_tensors == "pt"
+            return {
+                "input_ids": torch.tensor([[1, 2]], dtype=torch.long),
+                "pixel_values": torch.zeros((1, 3, 16, 16), dtype=torch.float32),
+            }
+
+        def batch_decode(self, _generated_ids, skip_special_tokens=False):
+            assert skip_special_tokens is False
+            return ["<OCR_WITH_REGION> demo"]
+
+        def post_process_generation(self, _text, task, image_size):
+            assert task == "<OCR_WITH_REGION>"
+            assert image_size == (16, 16)
+            return {
+                "<OCR_WITH_REGION>": {
+                    "labels": ["demo-line"],
+                    "quad_boxes": [[0, 0, 10, 0, 10, 2, 0, 2]],
+                }
+            }
+
+    class _FakeModel:
+        def generate(self, **kwargs):
+            captured.update(kwargs)
+            return torch.tensor([[0, 1, 2]], dtype=torch.long)
+
+    mgr = ocr_module.OCRManager()
+    monkeypatch.setattr(
+        mgr,
+        "get_engine",
+        lambda _name: {"type": "florence2", "model": _FakeModel(), "processor": _FakeProcessor()},
+    )
+    image = np.zeros((16, 16, 3), dtype=np.uint8)
+    text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
+
+    assert text == "demo-line"
+    assert captured["use_cache"] is False
+    assert captured["num_beams"] == 1
+    assert captured["max_new_tokens"] == 1024
+
+
 def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
     class _DummyReader:
         def readtext(self, _image_rgb, detail=1):

@@ -169,7 +169,14 @@ class OCRManager:
                 inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
                 inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
                 with torch.inference_mode():
-                    generated_ids = engine["model"].generate(**inputs, max_new_tokens=1024, num_beams=1 if "Fast" in mode else 3)
+                    generated_ids = engine["model"].generate(
+                        **inputs,
+                        max_new_tokens=1024,
+                        num_beams=1 if "Fast" in mode else 3,
+                        # Florence remote generation expects legacy tuple cache shape.
+                        # On modern transformers, EncoderDecoderCache can break that path.
+                        use_cache=False,
+                    )
                 parsed = engine["processor"].post_process_generation(engine["processor"].batch_decode(generated_ids, skip_special_tokens=False)[0], task="<OCR_WITH_REGION>", image_size=(pil_img.width, pil_img.height))
                 ocr_data = parsed.get("<OCR_WITH_REGION>", {})
                 annotated = [f"{'[HUGE] ' if (b[5]-b[1])/pil_img.height > 0.15 else ''}{l}" for l, b in zip(ocr_data.get("labels", []), ocr_data.get("quad_boxes", []))]
