@@ -56,6 +56,25 @@ def test_configure_logging_force_reapplies_after_mutation(monkeypatch):
     assert httpcore_logger.propagate is False
 
 
+def test_configure_logging_hard_gates_transformers_problem_loggers(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+    logging_setup.configure_logging(force=True)
+
+    attn_logger = logging.getLogger("transformers.modeling_attn_mask_utils")
+    model_utils_logger = logging.getLogger("transformers.modeling_utils")
+    assert attn_logger.level == logging.ERROR
+    assert model_utils_logger.level == logging.ERROR
+    assert attn_logger.propagate is False
+    assert model_utils_logger.propagate is False
+    assert attn_logger.handlers
+    assert model_utils_logger.handlers
+    assert attn_logger.handlers[0].level == logging.ERROR
+    assert model_utils_logger.handlers[0].level == logging.ERROR
+
+
 def test_configure_logging_repo_env_overrides_shell_log_level(monkeypatch, tmp_path):
     repo_root = tmp_path / "repo"
     (repo_root / "video_service" / "core").mkdir(parents=True)

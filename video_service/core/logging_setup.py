@@ -33,6 +33,14 @@ _FORCE_QUIET_LOGGERS = (
     "transformers",
     "sentence_transformers",
 )
+_FORCE_ERROR_LOGGERS = (
+    # Transformers emits a warning_once call in this module using a non-format
+    # argument shape that can trigger logging TypeError on Python 3.14.
+    "transformers.modeling_attn_mask_utils",
+    # Florence remote model load report warnings are noisy and not actionable
+    # for runtime job observability.
+    "transformers.modeling_utils",
+)
 
 
 class ContextEnricherFilter(logging.Filter):
@@ -114,6 +122,17 @@ def configure_logging(force: bool = False) -> None:
             hard_handler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
             hard_handler.addFilter(context_filter)
             noisy_logger.addHandler(hard_handler)
+
+        for logger_name in _FORCE_ERROR_LOGGERS:
+            err_logger = logging.getLogger(logger_name)
+            err_logger.setLevel(logging.ERROR)
+            err_logger.propagate = False
+            err_logger.handlers.clear()
+            err_handler = logging.StreamHandler()
+            err_handler.setLevel(logging.ERROR)
+            err_handler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
+            err_handler.addFilter(context_filter)
+            err_logger.addHandler(err_handler)
 
     _configured = True
 
