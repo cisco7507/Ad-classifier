@@ -82,6 +82,13 @@ type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
 type ReasoningTermType = 'brand' | 'url' | 'evidence';
 type ReasoningTerm = { text: string; type: ReasoningTermType };
 type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
+type FlyingTimelineMessage = {
+  id: number;
+  text: string;
+  stageIndex: number;
+  side: 'above' | 'below';
+  row: number;
+};
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
@@ -139,6 +146,28 @@ function sanitizeInlineReasoningFragment(text: string): string {
     .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function extractEventDetail(eventLine: string): string {
+  return eventLine
+    .replace(/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?\s*/, '')
+    .trim();
+}
+
+function inferEventStageIndex(detail: string, stages: readonly string[]): number {
+  const lower = detail.toLowerCase();
+  for (let i = 0; i < stages.length; i += 1) {
+    const stage = stages[i].toLowerCase();
+    if (
+      lower.includes(`stage=${stage}`)
+      || lower.startsWith(`${stage}:`)
+      || lower.includes(` ${stage}:`)
+      || lower.startsWith(stage)
+    ) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 function reasoningPillClass(type: ReasoningTermType): string {
@@ -313,12 +342,12 @@ export function JobDetail() {
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
-  const [flyingMessage, setFlyingMessage] = useState<string | null>(null);
+  const [flyingMessages, setFlyingMessages] = useState<FlyingTimelineMessage[]>([]);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-  const flyingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevEventCountRef = useRef(0);
+  const nextFlyingIdRef = useRef(0);
   const firstRow = result?.[0];
   const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const reasoningRaw = firstRow
@@ -426,40 +455,51 @@ export function JobDetail() {
   }, [reasoningText]);
 
   useEffect(() => {
-    if (job?.status !== 'processing') {
-      if (flyingTimeoutRef.current) {
-        clearTimeout(flyingTimeoutRef.current);
-        flyingTimeoutRef.current = null;
-      }
-      setFlyingMessage(null);
-      prevEventCountRef.current = events.length;
-      return;
-    }
+    prevEventCountRef.current = 0;
+    nextFlyingIdRef.current = 0;
+    setFlyingMessages([]);
+  }, [id]);
 
-    if (prevEventCountRef.current === 0 && events.length > 0) {
-      prevEventCountRef.current = events.length;
-      return;
+  useEffect(() => {
+    const stageSequence = (job?.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES) as readonly string[];
+    const currentStageIndex = stageSequence.indexOf((job?.stage || '').trim() as (typeof stageSequence)[number]);
+
+    if (events.length < prevEventCountRef.current) {
+      prevEventCountRef.current = 0;
+      setFlyingMessages([]);
     }
 
     if (events.length > prevEventCountRef.current) {
-      const latestEvent = events[events.length - 1] || '';
-      const detail = latestEvent
-        .replace(/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?\s*/, '')
-        .trim();
-      const compact = detail.length > 140 ? `${detail.slice(0, 137)}...` : detail;
-      setFlyingMessage(compact || null);
-      if (flyingTimeoutRef.current) clearTimeout(flyingTimeoutRef.current);
-      flyingTimeoutRef.current = setTimeout(() => {
-        setFlyingMessage(null);
-      }, 3000);
+      const newEvents = events.slice(prevEventCountRef.current);
+      setFlyingMessages((existing) => {
+        const next = [...existing];
+        newEvents.forEach((eventLine) => {
+          const detail = extractEventDetail(eventLine);
+          if (!detail) return;
+          const compact = detail.length > 120 ? `${detail.slice(0, 117)}...` : detail;
+          const inferredIndex = inferEventStageIndex(detail, stageSequence);
+          const stageIndex = inferredIndex >= 0 ? inferredIndex : Math.max(0, currentStageIndex);
+          const idValue = nextFlyingIdRef.current;
+          const side: 'above' | 'below' = idValue % 2 === 0 ? 'above' : 'below';
+          const row = next.filter((msg) => msg.side === side && msg.stageIndex === stageIndex).length % 3;
+          nextFlyingIdRef.current += 1;
+          next.push({
+            id: idValue,
+            text: compact,
+            stageIndex,
+            side,
+            row,
+          });
+        });
+        if (next.length > 24) {
+          return next.slice(next.length - 24);
+        }
+        return next;
+      });
     }
 
     prevEventCountRef.current = events.length;
-  }, [events, job?.status]);
-
-  useEffect(() => () => {
-    if (flyingTimeoutRef.current) clearTimeout(flyingTimeoutRef.current);
-  }, []);
+  }, [events, job?.mode, job?.stage]);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -553,6 +593,9 @@ export function JobDetail() {
   const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
   const currentStage = (job.stage || '').trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
+  const timelineStageCount = Math.max(1, stages.length);
+  const flyingMessagesAbove = flyingMessages.filter((msg) => msg.side === 'above');
+  const flyingMessagesBelow = flyingMessages.filter((msg) => msg.side === 'below');
 
   const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
   const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
@@ -916,72 +959,94 @@ export function JobDetail() {
       {(events.length > 0 || job.stage) && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
           <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto relative">
-            <div className="min-w-[680px] flex items-center gap-0 w-full px-1 pb-5">
-              {stages.map((stage, idx) => {
-                const isDone = job.status === 'completed' || currentIdx > idx || (job.status === 'failed' && currentIdx > idx);
-                const isCurrent = job.status === 'processing' && currentIdx === idx;
-                const isFailed = job.status === 'failed' && currentIdx === idx;
-                const stageLabel = formatStageName(stage);
-                const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
-                return (
-                  <Fragment key={stage}>
-                    {idx > 0 && (
-                      <div
-                        className={`flex-1 h-0.5 ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-red-500' : 'bg-slate-800'}`}
-                      />
-                    )}
-                    <div className="relative shrink-0 flex flex-col items-center gap-1">
-                      <div
-                        title={dotTitle}
-                        className={`w-3 h-3 rounded-full border-2 ${
-                          isDone
-                            ? 'bg-emerald-500 border-emerald-400'
-                            : isCurrent
-                              ? 'bg-blue-500 border-blue-400 animate-pulse'
-                              : isFailed
-                                ? 'bg-red-500 border-red-400'
-                                : 'bg-slate-800 border-slate-700'
-                        }`}
-                      />
-                      <span
-                        className={`text-[9px] uppercase tracking-wider absolute -bottom-5 whitespace-nowrap ${
-                          isDone
-                            ? 'text-emerald-500'
-                            : isCurrent
-                              ? 'text-blue-400'
-                              : isFailed
-                                ? 'text-red-400'
-                                : 'text-slate-600'
-                        }`}
-                      >
-                        {stageLabel}
-                      </span>
+            <div className="min-w-[680px] w-full px-1">
+              <div className="relative h-16 mb-1">
+                {flyingMessagesAbove.map((message) => (
+                  <div
+                    key={message.id}
+                    className="absolute -translate-x-1/2 max-w-[220px]"
+                    style={{
+                      left: `${((message.stageIndex + 0.5) / timelineStageCount) * 100}%`,
+                      bottom: `${message.row * 24}px`,
+                    }}
+                  >
+                    <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-2.5 py-1 text-[10px] text-blue-300 font-mono truncate shadow-lg shadow-blue-500/5">
+                      {message.text}
                     </div>
-                  </Fragment>
-                );
-              })}
-            </div>
-            <div className="relative h-8 mt-2 min-w-[680px]">
-              {flyingMessage && job.status === 'processing' && currentIdx >= 0 && (
-                <div
-                  key={flyingMessage}
-                  className="absolute -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-xs"
-                  style={{ left: `${((currentIdx + 0.5) / stages.length) * 100}%` }}
-                >
-                  <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-3 py-1.5 text-xs text-blue-300 font-mono whitespace-nowrap truncate shadow-lg shadow-blue-500/5">
-                    {flyingMessage}
                   </div>
-                </div>
-              )}
+                ))}
+              </div>
+
+              <div className="flex items-center gap-0 w-full pb-5">
+                {stages.map((stage, idx) => {
+                  const isDone = job.status === 'completed' || currentIdx > idx || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = job.status === 'processing' && currentIdx === idx;
+                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  const stageLabel = formatStageName(stage);
+                  const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
+                  return (
+                    <Fragment key={stage}>
+                      {idx > 0 && (
+                        <div
+                          className={`flex-1 h-0.5 ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-red-500' : 'bg-slate-800'}`}
+                        />
+                      )}
+                      <div className="relative shrink-0 flex flex-col items-center gap-1">
+                        <div
+                          title={dotTitle}
+                          className={`w-3 h-3 rounded-full border-2 ${
+                            isDone
+                              ? 'bg-emerald-500 border-emerald-400'
+                              : isCurrent
+                                ? 'bg-blue-500 border-blue-400 animate-pulse'
+                                : isFailed
+                                  ? 'bg-red-500 border-red-400'
+                                  : 'bg-slate-800 border-slate-700'
+                          }`}
+                        />
+                        <span
+                          className={`text-[9px] uppercase tracking-wider absolute -bottom-5 whitespace-nowrap ${
+                            isDone
+                              ? 'text-emerald-500'
+                              : isCurrent
+                                ? 'text-blue-400'
+                                : isFailed
+                                  ? 'text-red-400'
+                                  : 'text-slate-600'
+                          }`}
+                        >
+                          {stageLabel}
+                        </span>
+                      </div>
+                    </Fragment>
+                  );
+                })}
+              </div>
+
+              <div className="relative h-16 mt-1">
+                {flyingMessagesBelow.map((message) => (
+                  <div
+                    key={message.id}
+                    className="absolute -translate-x-1/2 max-w-[220px]"
+                    style={{
+                      left: `${((message.stageIndex + 0.5) / timelineStageCount) * 100}%`,
+                      top: `${message.row * 24}px`,
+                    }}
+                  >
+                    <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-2.5 py-1 text-[10px] text-blue-300 font-mono truncate shadow-lg shadow-blue-500/5">
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
           <details
             className="bg-slate-950 border-t border-slate-800 overflow-hidden shadow-sm group"
-            open={job.status === 'processing'}
           >
             <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
               <MagicWandIcon className="text-fuchsia-400" />
-              <span>Stage / Event History</span>
+              <span>Event Hisory</span>
               <span className="text-xs text-slate-600 font-normal ml-2">({events.length} events)</span>
             </summary>
             {events.length > 0 ? (
