@@ -91,6 +91,18 @@ export function JobDetail() {
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const ocrText = artifacts?.ocr_text?.text || '';
+  const ocrByTimestamp = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const line of (ocrText || '').split('\n')) {
+      const match = line.match(/^\[([\d.]+)s\]\s*(.*)$/);
+      if (!match) continue;
+      const ts = Number.parseFloat(match[1]);
+      if (!Number.isFinite(ts)) continue;
+      map.set(ts.toFixed(1), match[2] || '');
+    }
+    return map;
+  }, [ocrText]);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -186,21 +198,9 @@ export function JobDetail() {
       return evt;
     });
 
-  const ocrText = artifacts?.ocr_text?.text || '';
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
   const frameCount = frameItems.length;
-  const ocrByTimestamp = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const line of (ocrText || '').split('\n')) {
-      const match = line.match(/^\[([\d.]+)s\]\s*(.*)$/);
-      if (!match) continue;
-      const ts = Number.parseFloat(match[1]);
-      if (!Number.isFinite(ts)) continue;
-      map.set(ts.toFixed(1), match[2] || '');
-    }
-    return map;
-  }, [ocrText]);
   const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
   const currentStage = (job.stage || '').trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
