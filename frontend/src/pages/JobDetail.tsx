@@ -38,6 +38,26 @@ function formatMatchMethod(value: unknown): string {
     .join(' ');
 }
 
+function formatSummaryMatch(method: unknown, score: unknown): string {
+  if (typeof method !== 'string') return '—';
+  const normalized = method.trim().toLowerCase();
+  if (!normalized || normalized === 'none' || normalized === 'pending') return '—';
+
+  const label = normalized === 'semantic'
+    ? 'Semantic'
+    : normalized === 'exact'
+      ? 'Exact'
+      : normalized === 'embeddings'
+        ? 'Embed.'
+        : normalized === 'vision'
+          ? 'Vision'
+          : formatMatchMethod(method) || '—';
+
+  const scoreValue = toNumber(score);
+  if (scoreValue === null) return label;
+  return `${label} (${scoreValue.toFixed(2)})`;
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -460,6 +480,21 @@ export function JobDetail() {
       : confidenceValue >= 0.5
         ? 'from-amber-500 to-amber-400'
         : 'from-red-500 to-red-400';
+  const confidenceSummaryDisplay = confidenceValue === null ? '—' : confidenceValue.toFixed(2);
+  const confidenceSummaryTextColor = confidenceValue === null
+    ? 'text-slate-500'
+    : confidenceValue >= 0.8
+      ? 'text-emerald-400'
+      : confidenceValue >= 0.5
+        ? 'text-amber-400'
+        : 'text-red-400';
+  const confidenceSummaryDotColor = confidenceValue === null
+    ? 'bg-slate-500'
+    : confidenceValue >= 0.8
+      ? 'bg-emerald-400'
+      : confidenceValue >= 0.5
+        ? 'bg-amber-400'
+        : 'bg-red-400';
 
   const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
   const matchMethodLabel = formatMatchMethod(matchMethodRaw);
@@ -469,6 +504,11 @@ export function JobDetail() {
       ? `${matchMethodLabel} Match`
       : `${matchMethodLabel} Match (${matchScoreValue.toFixed(2)})`
     : '';
+  const summaryMatchDisplay = formatSummaryMatch(
+    matchMethodRaw,
+    firstRow ? (firstRow as any).category_match_score : null,
+  );
+  const summaryFrameDisplay = artifacts ? String(frameCount) : '—';
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -543,12 +583,46 @@ export function JobDetail() {
       </div>
 
       {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-6 py-3 text-sm text-emerald-300">
-          <span className="font-semibold">✅ {brandText || 'Unknown Brand'} → {categoryText || 'Unknown Category'}</span>
-          {categoryIdText && <span>{` (ID: ${categoryIdText})`}</span>}
-          <span>{` | Confidence: ${confidenceDisplay}`}</span>
-          {matchMethodText && <span>{` | ${matchMethodText}`}</span>}
-          {frameCount > 0 && <span>{` | ${frameCount} frames`}</span>}
+        <div className="bg-slate-900 border border-emerald-500/20 border-t-2 border-t-emerald-500/50 rounded-xl px-4 md:px-6 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <CheckCircledIcon className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span
+              title={brandText || 'Unknown Brand'}
+              className="text-base md:text-lg font-bold text-white max-w-[14rem] md:max-w-xs truncate"
+            >
+              {brandText || 'Unknown Brand'}
+            </span>
+            <span className="text-slate-600 shrink-0">→</span>
+            <span
+              title={categoryText || 'Unknown Category'}
+              className="text-base md:text-lg font-bold text-emerald-400 max-w-[14rem] md:max-w-sm truncate"
+            >
+              {categoryText || 'Unknown Category'}
+            </span>
+            {categoryIdText && (
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded shrink-0">
+                ID: {categoryIdText}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-stretch self-stretch md:self-auto shrink-0">
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Confidence</div>
+              <div className={`inline-flex items-center justify-center gap-1 text-sm font-bold ${confidenceSummaryTextColor}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${confidenceSummaryDotColor}`} aria-hidden />
+                <span>{confidenceSummaryDisplay}</span>
+              </div>
+            </div>
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Match</div>
+              <div className="text-sm font-mono text-cyan-400">{summaryMatchDisplay}</div>
+            </div>
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Frames</div>
+              <div className="text-sm font-mono text-slate-300">{summaryFrameDisplay}</div>
+            </div>
+          </div>
         </div>
       )}
 
