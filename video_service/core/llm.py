@@ -8,6 +8,7 @@ import base64
 import json
 import re
 import subprocess
+import os
 import requests
 from ddgs import DDGS
 from video_service.core.utils import logger
@@ -72,6 +73,16 @@ class HybridLLM:
         except Exception as e: return {"error": f"JSON Parse Failed: {str(e)}"}
 
     def query_pipeline(self, provider, backend_model, text, categories, tail_image=None, override=False, enable_search=False, force_multimodal=False, context_size=8192):
+        validation_threshold_raw = os.environ.get("LLM_VALIDATION_THRESHOLD", "0.7")
+        try:
+            validation_threshold = float(validation_threshold_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "invalid_llm_validation_threshold value=%r fallback=0.7",
+                validation_threshold_raw,
+            )
+            validation_threshold = 0.7
+
         sys_msg = (
             "You are a Senior Marketing Analyst and Global Brand Expert. "
             "Your goal is to categorize video advertisements by combining extracted text (OCR) with your vast internal knowledge of companies, slogans, and industries. "
@@ -98,7 +109,7 @@ class HybridLLM:
             except Exception as e: return {"error": str(e)}
 
         res = call_model(sys_msg, usr_msg, b64_img if force_multimodal else None)
-        print(f'RES VALUE IS: {res}')
+        logger.debug("llm_pipeline_initial_result: %s", res)
         
         brand = res.get("brand", "Unknown") if isinstance(res, dict) else "Unknown"
         if brand.lower() in ["unknown", "none", "n/a", ""] and enable_search:
@@ -107,11 +118,41 @@ class HybridLLM:
                 res = call_model(sys_msg + "\nAGENTIC RECOVERY", f"OCR: {text}\nWEB: {sr}")
                 res["reasoning"] = "(Recovered) " + res.get("reasoning", "")
                 brand = res.get("brand", "Unknown")
-                
+
+        confidence_raw = res.get("confidence", 0.0) if isinstance(res, dict) else 0.0
+        try:
+            confidence = float(confidence_raw)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        needs_validation = (
+            validation_threshold <= 0.0
+            or confidence <= 0.0
+            or confidence < validation_threshold
+        )
+
         if "category" in res and enable_search and brand.lower() not in ["unknown", "none", "n/a", ""]:
-            if val_snippets := search_manager.search(f"{brand} official brand company"):
-                val_res = call_model(sys_msg + "\nVALIDATION MODE", f"Brand: {brand}\nWeb: {val_snippets}\nCorrect brand name. Keep category {res.get('category')}.")
-                if "category" in val_res: return val_res
+            if needs_validation:
+                if validation_threshold <= 0.0:
+                    logger.debug(
+                        "llm_validation_triggered: confidence=%.2f threshold=%.2f (threshold<=0 forces validation)",
+                        confidence,
+                        validation_threshold,
+                    )
+                else:
+                    logger.debug(
+                        "llm_validation_triggered: confidence=%.2f < threshold=%.2f",
+                        confidence,
+                        validation_threshold,
+                    )
+                if val_snippets := search_manager.search(f"{brand} official brand company"):
+                    val_res = call_model(sys_msg + "\nVALIDATION MODE", f"Brand: {brand}\nWeb: {val_snippets}\nCorrect brand name. Keep category {res.get('category')}.")
+                    if "category" in val_res: return val_res
+            else:
+                logger.debug(
+                    "llm_validation_skipped: confidence=%.2f >= threshold=%.2f",
+                    confidence,
+                    validation_threshold,
+                )
         return res
 
     def query_agent(self, provider, backend_model, prompt, images=None, force_multimodal=False, context_size=8192):
