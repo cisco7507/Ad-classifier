@@ -117,8 +117,9 @@ function isValidSignalPill(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length > 50) return false;
   if (trimmed.length < 2) return false;
-  if (/^[—\-,;:)\.\!\?]/.test(trimmed)) return false;
-  if (/[,;:\(]$/.test(trimmed)) return false;
+  if (/^[—\-,;:)\.\!\?'’]/.test(trimmed)) return false;
+  if (/[,;:\('’]$/.test(trimmed)) return false;
+  if (/[\[\]]/.test(trimmed)) return false;
   const wordCount = trimmed.split(/\s+/).length;
   if (wordCount > 10) return false;
   return true;
