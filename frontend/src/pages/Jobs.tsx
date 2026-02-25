@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { getClusterJobs, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
+import { deleteJobsBulk, getClusterJobs, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
 import type { JobStatus, JobSettings } from '../lib/api';
-import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon } from '@radix-ui/react-icons';
+import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
 
 type InputMode = 'urls' | 'filepath' | 'dirpath';
@@ -34,6 +34,8 @@ export function Jobs() {
   // Filtering
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchJobs = async () => {
     try {
@@ -124,6 +126,61 @@ export function Jobs() {
     (inputMode === 'urls' && !urls.trim()) ||
     (inputMode === 'filepath' && !filePath.trim()) ||
     (inputMode === 'dirpath' && !folderPath.trim());
+
+  const toggleSelectJob = (jobId: string) => {
+    setSelectedJobs((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedJobs.size === filteredJobs.length) {
+      setSelectedJobs(new Set());
+      return;
+    }
+    setSelectedJobs(new Set(filteredJobs.map((job) => job.job_id)));
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setSelectedJobs(new Set());
+  };
+
+  const handleStatusFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setSelectedJobs(new Set());
+  };
+
+  const isAllSelected = filteredJobs.length > 0 && selectedJobs.size === filteredJobs.length;
+  const hasSelection = selectedJobs.size > 0;
+
+  const handleBulkDelete = async () => {
+    if (!hasSelection) return;
+
+    const count = selectedJobs.size;
+    const confirmed = window.confirm(`Delete ${count} job${count > 1 ? 's' : ''}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    setDeleteLoading(true);
+    try {
+      const result = await deleteJobsBulk([...selectedJobs]);
+      if (result.failed > 0) {
+        console.error(`Bulk delete completed with failures. deleted=${result.deleted} failed=${result.failed}`);
+      }
+      setSelectedJobs(new Set());
+      await fetchJobs();
+    } catch (err) {
+      console.error('Bulk delete failed:', err);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -255,9 +312,9 @@ export function Jobs() {
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
               <MagnifyingGlassIcon className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-500" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search job, brand, category..." className="pl-8 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 w-56 focus:ring-1 focus:ring-primary-500 font-mono" />
+              <input value={search} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search job, brand, category..." className="pl-8 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 w-56 focus:ring-1 focus:ring-primary-500 font-mono" />
             </div>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="py-1.5 px-3 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 font-medium tracking-wide">
+            <select value={statusFilter} onChange={(e) => handleStatusFilterChange(e.target.value)} className="py-1.5 px-3 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 font-medium tracking-wide">
               <option value="all">ALL STATUSES</option>
               <option value="queued">QUEUED</option>
               <option value="processing">PROCESSING</option>
@@ -270,10 +327,47 @@ export function Jobs() {
           </div>
         </div>
 
+        {hasSelection && (
+          <div className="px-6 py-3 bg-red-500/5 border-b border-red-500/20 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-slate-300">
+                <span className="font-bold text-white">{selectedJobs.size}</span> job{selectedJobs.size > 1 ? 's' : ''} selected
+              </span>
+              <button
+                onClick={() => setSelectedJobs(new Set())}
+                className="text-xs text-slate-500 hover:text-slate-300 transition-colors underline"
+              >
+                Clear selection
+              </button>
+            </div>
+            <button
+              onClick={handleBulkDelete}
+              disabled={deleteLoading}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg bg-red-600 hover:bg-red-500 active:bg-red-700 text-white transition-colors disabled:opacity-50 shadow-sm"
+            >
+              {deleteLoading ? (
+                <UpdateIcon className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <TrashIcon className="w-3.5 h-3.5" />
+              )}
+              {deleteLoading ? 'Deleting...' : `Delete ${selectedJobs.size} Job${selectedJobs.size > 1 ? 's' : ''}`}
+            </button>
+          </div>
+        )}
+
         <div className="overflow-x-auto min-h-[400px]">
           <table className="w-full text-sm text-left whitespace-nowrap">
             <thead className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-950/50">
               <tr>
+                <th className="px-4 py-4 w-10">
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+                    title={isAllSelected ? 'Deselect all' : 'Select all'}
+                  />
+                </th>
                 <th className="px-6 py-4">Job</th>
                 <th className="px-6 py-4">Brand</th>
                 <th className="px-6 py-4">Category</th>
@@ -286,11 +380,19 @@ export function Jobs() {
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {loading && jobs.length === 0 ? (
-                <tr><td colSpan={8} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
+                <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
               ) : filteredJobs.length === 0 ? (
-                <tr><td colSpan={8} className="px-6 py-12 text-center text-slate-500">No jobs found.</td></tr>
+                <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-500">No jobs found.</td></tr>
               ) : filteredJobs.map((job) => (
-                <tr key={job.job_id} className="hover:bg-slate-800/20 transition-colors group">
+                <tr key={job.job_id} className={`hover:bg-slate-800/20 transition-colors group ${selectedJobs.has(job.job_id) ? 'bg-primary-500/5' : ''}`}>
+                  <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedJobs.has(job.job_id)}
+                      onChange={() => toggleSelectJob(job.job_id)}
+                      className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+                    />
+                  </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
                       <Link to={`/jobs/${job.job_id}`} className="font-mono text-xs text-primary-400 group-hover:text-primary-300 transition-colors">{job.job_id}</Link>

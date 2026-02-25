@@ -63,6 +63,9 @@ class JobResponse(BaseModel):
     job_id: str
     status: str
 
+class BulkDeleteRequest(BaseModel):
+    job_ids: List[str]
+
 class JobStatus(BaseModel):
     job_id: str
     status: str

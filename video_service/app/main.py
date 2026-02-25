@@ -41,7 +41,7 @@ configure_logging()
 from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
-    UrlBatchRequest, FolderRequest, FilePathRequest, JobMode,
+    UrlBatchRequest, FolderRequest, FilePathRequest, BulkDeleteRequest, JobMode,
 )
 from video_service.core.device import get_diagnostics
 from video_service.core.concurrency import get_concurrency_diagnostics
@@ -583,6 +583,25 @@ async def delete_job(req: Request, job_id: str):
             conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
     logger.info("job_deleted: job_id=%s", job_id)
     return {"status": "deleted"}
+
+
+@app.post("/jobs/bulk-delete", tags=["jobs"])
+async def bulk_delete_jobs(body: BulkDeleteRequest):
+    """Delete multiple jobs from local storage; skips IDs that don't exist."""
+    if not body.job_ids:
+        raise HTTPException(status_code=400, detail="No job IDs provided")
+    if len(body.job_ids) > 500:
+        raise HTTPException(status_code=400, detail="Too many IDs (max 500)")
+
+    deleted = 0
+    with closing(get_db()) as conn:
+        with conn:
+            for job_id in body.job_ids:
+                cursor = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+                deleted += cursor.rowcount
+
+    logger.info("bulk_delete: requested=%d deleted=%d", len(body.job_ids), deleted)
+    return {"status": "deleted", "requested": len(body.job_ids), "deleted": deleted}
 
 
 # ── Admin aggregation ────────────────────────────────────────────────────────
