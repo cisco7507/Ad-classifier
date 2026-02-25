@@ -55,6 +55,11 @@ class FolderRequest(BaseModel):
     folder_path: str
     settings: JobSettings
 
+class FilePathRequest(BaseModel):
+    mode: JobMode = JobMode.pipeline
+    file_path: str
+    settings: JobSettings
+
 class JobResponse(BaseModel):
     job_id: str
     status: str

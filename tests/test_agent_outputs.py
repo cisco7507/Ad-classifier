@@ -75,7 +75,7 @@ def test_run_agent_job_accepts_intermediate_six_field_agent_outputs(monkeypatch)
 
 def test_ensure_react_vision_ready_builds_text_features(monkeypatch):
     class _DummyMapper:
-        categories = ["Automotive"]
+        categories = ["Category Alpha"]
         vision_text_features = None
 
     class _DummyTextInputs(dict):
@@ -90,7 +90,10 @@ def test_ensure_react_vision_ready_builds_text_features(monkeypatch):
     class _DummyModel:
         @staticmethod
         def get_text_features(**kwargs):
-            return torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)
+            class _Output:
+                pooler_output = torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)
+
+            return _Output()
 
     dummy_mapper = _DummyMapper()
     monkeypatch.setattr(agent_module, "category_mapper", dummy_mapper)
@@ -102,14 +105,33 @@ def test_ensure_react_vision_ready_builds_text_features(monkeypatch):
     assert tuple(dummy_mapper.vision_text_features.shape) == (1, 3)
 
 
+def test_ensure_react_vision_ready_uses_runtime_siglip_handles(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category Alpha"]
+        vision_text_features = None
+
+        @staticmethod
+        def ensure_vision_text_features():
+            return True, "ready"
+
+    dummy_mapper = _DummyMapper()
+    monkeypatch.setattr(agent_module, "category_mapper", dummy_mapper)
+    monkeypatch.setattr(agent_module, "siglip_model", None)
+    monkeypatch.setattr(agent_module, "siglip_processor", None)
+    monkeypatch.setattr(agent_module.categories_runtime, "siglip_model", object())
+    monkeypatch.setattr(agent_module.categories_runtime, "siglip_processor", object())
+
+    assert agent_module._ensure_react_vision_ready() is True
+
+
 def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
     class _DummyMapper:
-        categories = ["Automotive"]
+        categories = ["Category Alpha"]
 
         @staticmethod
         def map_category(**kwargs):
             return {
-                "canonical_category": "Automotive",
+                "canonical_category": "Category Alpha",
                 "category_id": "10",
                 "category_match_method": "embeddings",
                 "category_match_score": 0.99,
@@ -123,7 +145,7 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
     responses = iter(
         [
             "[TOOL: OCR]",
-            '[TOOL: FINAL | brand="Volvo" category="Automotive" reason="Detected brand"]',
+            '[TOOL: FINAL | brand="Volvo" category="Category Alpha" reason="Detected brand"]',
         ]
     )
 
@@ -139,7 +161,7 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
     outputs = list(
         agent_module.AdClassifierAgent(max_iterations=3).run(
             frames_data=frames,
-            categories=["Automotive"],
+            categories=["Category Alpha"],
             provider="Ollama",
             model="qwen3-vl:8b-instruct",
             ocr_engine="EasyOCR",
@@ -161,5 +183,5 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
 
     final = outputs[-1]
     assert final[1] == "Volvo"
-    assert final[2] == "Automotive"
+    assert final[2] == "Category Alpha"
     assert final[3] == "10"

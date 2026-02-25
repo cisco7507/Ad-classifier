@@ -41,7 +41,7 @@ configure_logging()
 from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
-    UrlBatchRequest, FolderRequest, JobMode,
+    UrlBatchRequest, FolderRequest, FilePathRequest, JobMode,
 )
 from video_service.core.device import get_diagnostics
 from video_service.core.cluster import cluster
@@ -75,6 +75,10 @@ os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Re-apply logging gates after server bootstrap to suppress noisy libs
+    # even if another component touched logger levels/handlers.
+    configure_logging(force=True)
+    cluster.start_health_checks()
     logger.info("startup: initialising DB (node=%s)", NODE_NAME)
     init_db()
     start_cleanup_thread()
@@ -363,6 +367,20 @@ async def create_job_folder(req: Request, request: FolderRequest):
             job_id = _create_job(request.mode.value, request.settings, url=full_path)
             responses.append(JobResponse(job_id=job_id, status="queued"))
     return responses
+
+
+@app.post("/jobs/by-filepath", response_model=JobResponse, tags=["jobs"])
+async def create_job_filepath(req: Request, request: FilePathRequest):
+    if not req.query_params.get("internal"):
+        target = _rr_or_raise()
+        if target != cluster.self_name:
+            return await _proxy_request(req, cluster.get_node_url(target))
+
+    file_path = (request.file_path or "").strip()
+    if not file_path:
+        raise HTTPException(status_code=400, detail="Empty file path")
+    job_id = _create_job(request.mode.value, request.settings, url=file_path)
+    return JobResponse(job_id=job_id, status="queued")
 
 
 def _parse_settings(

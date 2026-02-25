@@ -56,6 +56,9 @@
     - `category_mapping_count`
     - `category_csv_path_used`
     - `last_error`
+  - `POST /jobs/by-filepath`
+    - Accepts server-side file path submission (`file_path`) with existing job settings payload.
+    - Non-breaking addition; `by-urls`, `by-folder`, and upload routes remain unchanged.
 
 ## Observability and Logging
 - Centralized logging setup is in `video_service.core.logging_setup`.
@@ -101,8 +104,14 @@
   - `category`
   - `category_id`
 - `/jobs`, `/jobs/{job_id}`, `/admin/jobs`, and `/cluster/jobs` payloads carry stage fields.
+- Job summary payloads also carry:
+  - `brand`
+  - `category`
+  - `category_id`
 - Jobs table UI shows:
   - status badge
+  - brand/category
+  - mode
   - compact stage
   - truncated stage detail with tooltip.
 - Job detail UI shows:
@@ -110,6 +119,10 @@
   - stage detail
   - stage/event history (`/jobs/{job_id}/events`) for processing/completed/failed jobs.
   - in `agent` mode, a dedicated "Agent Scratchboard" panel renders full agent-thinking event payloads from the same events stream.
+  - artifact tabs rendered from API data:
+    - Vision Board
+    - OCR Output
+    - Latest Frames
 
 ## Cluster Jobs Aggregation
 - `GET /cluster/jobs` fan-outs to each healthy node’s `/admin/jobs?internal=1`.
@@ -137,6 +150,7 @@
   - `enable_agentic_search` (compat alias)
 - Normalization resolves these to a single runtime boolean used by worker execution.
 - Upload form parser accepts the same aliases and persists normalized settings in `jobs.settings`.
+- Dashboard submission sends `enable_web_search` explicitly for clarity and parity with combined.py terminology.
 
 ## Artifact Contract (Dashboard Tabs)
 - Static artifact files are served via:
@@ -149,3 +163,10 @@
   - `extras.events_url`: link to `/jobs/{job_id}/events`
 - Backward compatibility:
   - endpoint still returns `{"artifacts": ...}` and now also mirrors normalized keys at top level for direct tab consumption.
+
+## Path Submission Contract
+- Dashboard submission supports three input modes:
+  - URLs (`POST /jobs/by-urls`)
+  - File Path (`POST /jobs/by-filepath`)
+  - Directory Path (`POST /jobs/by-folder`)
+- File/Directory path values are sent as raw strings (including Windows drive paths and UNC format), without client-side path normalization.

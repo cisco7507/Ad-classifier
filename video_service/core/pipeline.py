@@ -6,7 +6,8 @@ import concurrent.futures
 from contextvars import copy_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls
-from video_service.core.categories import category_mapper, siglip_model, siglip_processor
+from video_service.core import categories as categories_runtime
+from video_service.core.categories import category_mapper, normalize_feature_tensor
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine
 
@@ -53,25 +54,37 @@ def process_single_video(
             stage_callback("frame_extract", f"extracted {len(frames)} frames ({sm.lower()})")
         
         sorted_vision = {}
-        if enable_vision and category_mapper.categories and siglip_model is not None and getattr(category_mapper, 'vision_text_features', None) is not None:
-            if stage_callback:
-                stage_callback("vision", "vision enabled; computing visual category scores")
-            start_time = time.time()
-            with torch.no_grad():
-                pil_images = [f["image"] for f in frames]
-                image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
-                if TORCH_DTYPE != torch.float32:
-                    image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
-                image_features = siglip_model.get_image_features(**image_inputs)
-                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-                
-                logit_scale = siglip_model.logit_scale.exp()
-                logit_bias = siglip_model.logit_bias
-                logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
-                probs = torch.sigmoid(logits_per_image)
-                
-            scores = probs.mean(dim=0).cpu().numpy()
-            sorted_vision = dict(sorted({category_mapper.categories[i]: float(scores[i]) for i in range(len(category_mapper.categories))}.items(), key=lambda item: item[1], reverse=True)[:5])
+        if enable_vision:
+            ready, reason = category_mapper.ensure_vision_text_features()
+            siglip_model = categories_runtime.siglip_model
+            siglip_processor = categories_runtime.siglip_processor
+            if ready and siglip_model is not None and siglip_processor is not None:
+                if stage_callback:
+                    stage_callback("vision", "vision enabled; computing visual category scores")
+                start_time = time.time()
+                with torch.no_grad():
+                    pil_images = [f["image"] for f in frames]
+                    image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
+                    if TORCH_DTYPE != torch.float32:
+                        image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
+                    image_features = siglip_model.get_image_features(**image_inputs)
+                    image_features = normalize_feature_tensor(
+                        image_features,
+                        source="SigLIP.get_image_features",
+                    )
+                    
+                    logit_scale = siglip_model.logit_scale.exp()
+                    logit_bias = siglip_model.logit_bias
+                    logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
+                    probs = torch.sigmoid(logits_per_image)
+                    
+                scores = probs.mean(dim=0).cpu().numpy()
+                sorted_vision = dict(sorted({category_mapper.categories[i]: float(scores[i]) for i in range(len(category_mapper.categories))}.items(), key=lambda item: item[1], reverse=True)[:5])
+                logger.debug("[%s] vision_scoring_done in %.2fs", url, time.time() - start_time)
+            else:
+                if stage_callback:
+                    stage_callback("vision", f"vision skipped; {reason}")
+                logger.info("[%s] vision skipped: %s", url, reason)
         
         if stage_callback:
             stage_callback("ocr", f"ocr engine={oe.lower()}")
@@ -83,7 +96,7 @@ def process_single_video(
         category_match = category_mapper.map_category(
             raw_category=res.get("category", "Unknown"),
             job_id=job_id,
-            suggested_categories_text=", ".join(categories) if categories else "",
+            suggested_categories_text="",
             predicted_brand=res.get("brand", "Unknown"),
             ocr_summary=ocr_text,
         )

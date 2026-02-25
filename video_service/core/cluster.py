@@ -17,12 +17,22 @@ class ClusterConfig:
         self.enabled = False
         self.node_status: Dict[str, bool] = {}
         self.last_rr_index = 0
+        self._health_thread: Optional[threading.Thread] = None
+        self._health_started = False
         
         self.load_config(config_path)
-        
-        if self.enabled:
-            self._health_thread = threading.Thread(target=self._health_check_loop, daemon=True)
-            self._health_thread.start()
+
+    def start_health_checks(self) -> None:
+        if not self.enabled or self._health_started:
+            return
+        self._health_thread = threading.Thread(target=self._health_check_loop, daemon=True)
+        self._health_thread.start()
+        self._health_started = True
+        logger.info(
+            "cluster: health checks started (interval=%ss, nodes=%d)",
+            self.health_check_interval,
+            len(self.nodes),
+        )
 
     def load_config(self, config_path: str):
         if not os.path.exists(config_path):

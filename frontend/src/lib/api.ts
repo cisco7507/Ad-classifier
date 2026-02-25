@@ -26,6 +26,8 @@ export interface JobSettings {
   scan_mode:     string;
   override:      boolean;
   enable_search: boolean;
+  enable_web_search?: boolean;
+  enable_agentic_search?: boolean;
   enable_vision: boolean;
   context_size:  number;
   workers:       number;
@@ -43,6 +45,41 @@ export interface JobStatus {
   settings?:  JobSettings;
   mode:       string;
   url:        string;
+  brand?:     string;
+  category?:  string;
+  category_id?: string;
+}
+
+export interface ArtifactFrame {
+  timestamp?: number | null;
+  label?: string;
+  url: string;
+}
+
+export interface ArtifactOCR {
+  text?: string;
+  lines?: string[];
+  url?: string | null;
+}
+
+export interface ArtifactVisionMatch {
+  label: string;
+  score: number;
+}
+
+export interface ArtifactVisionBoard {
+  image_url?: string | null;
+  plot_url?: string | null;
+  top_matches?: ArtifactVisionMatch[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface JobArtifacts {
+  latest_frames: ArtifactFrame[];
+  ocr_text: ArtifactOCR;
+  vision_board: ArtifactVisionBoard;
+  extras?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface ResultRow {
@@ -90,10 +127,12 @@ export const getClusterJobs   = () => safe(() => api.get<JobStatus[]>('/cluster/
 export const getMetrics       = () => safe(() => api.get<Metrics>('/metrics').then(r => r.data));
 export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/jobs/${id}`).then(r => r.data));
 export const getJobResult     = (id: string) => safe(() => api.get<{ result: ResultRow[] | null }>(`/jobs/${id}/result`).then(r => r.data));
-export const getJobArtifacts  = (id: string) => safe(() => api.get(`/jobs/${id}/artifacts`).then(r => r.data));
+export const getJobArtifacts  = (id: string) => safe(() => api.get<{ artifacts: JobArtifacts }>(`/jobs/${id}/artifacts`).then(r => r.data));
 export const getJobEvents     = (id: string) => safe(() => api.get<{ events: string[] }>(`/jobs/${id}/events`).then(r => r.data));
 export const deleteJob        = (id: string) => safe(() => api.delete(`/jobs/${id}`).then(r => r.data));
 export const submitUrls       = (data: unknown) => safe(() => api.post('/jobs/by-urls', data).then(r => r.data));
+export const submitFilePath   = (data: unknown) => safe(() => api.post('/jobs/by-filepath', data).then(r => r.data));
+export const submitFolderPath = (data: unknown) => safe(() => api.post('/jobs/by-folder', data).then(r => r.data));
 
 // ── CSV export ───────────────────────────────────────────────────────────────
 
