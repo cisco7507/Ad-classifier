@@ -15,6 +15,28 @@ function toApiUrl(url?: string | null): string {
   return `${API_BASE}${url}`;
 }
 
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatMatchMethod(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'none' || normalized === 'pending') return '';
+  return normalized
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -146,6 +168,39 @@ export function JobDetail() {
   const ocrText = artifacts?.ocr_text?.text || '';
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
+  const frameCount = frameItems.length;
+
+  const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
+  const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
+  const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
+  const categoryIdText = typeof categoryIdRaw === 'string' ? categoryIdRaw.trim() : String(categoryIdRaw ?? '').trim();
+
+  const reasoningRaw = firstRow
+    ? (firstRow.Reasoning ?? (firstRow as any).reasoning ?? firstRow['Reasoning'])
+    : '';
+  const reasoningText = typeof reasoningRaw === 'string' ? reasoningRaw.trim() : '';
+
+  const confidenceValue = toNumber(firstRow?.Confidence);
+  const confidenceDisplay = confidenceValue === null ? 'N/A' : confidenceValue.toFixed(2);
+  const confidencePercent = confidenceValue === null
+    ? 0
+    : Math.max(0, Math.min(100, confidenceValue * 100));
+  const confidenceGradient = confidenceValue === null
+    ? 'from-slate-500 to-slate-400'
+    : confidenceValue >= 0.8
+      ? 'from-emerald-500 to-emerald-400'
+      : confidenceValue >= 0.5
+        ? 'from-amber-500 to-amber-400'
+        : 'from-red-500 to-red-400';
+
+  const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
+  const matchMethodLabel = formatMatchMethod(matchMethodRaw);
+  const matchScoreValue = toNumber(firstRow ? (firstRow as any).category_match_score : null);
+  const matchMethodText = matchMethodLabel
+    ? matchScoreValue === null
+      ? `${matchMethodLabel} Match`
+      : `${matchMethodLabel} Match (${matchScoreValue.toFixed(2)})`
+    : '';
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -219,6 +274,16 @@ export function JobDetail() {
         )}
       </div>
 
+      {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-6 py-3 text-sm text-emerald-300">
+          <span className="font-semibold">✅ {brandText || 'Unknown Brand'} → {categoryText || 'Unknown Category'}</span>
+          {categoryIdText && <span>{` (ID: ${categoryIdText})`}</span>}
+          <span>{` | Confidence: ${confidenceDisplay}`}</span>
+          {matchMethodText && <span>{` | ${matchMethodText}`}</span>}
+          {frameCount > 0 && <span>{` | ${frameCount} frames`}</span>}
+        </div>
+      )}
+
       {firstRow && firstRow.Brand !== 'Err' && (
         <div className="grid gap-6 animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -227,15 +292,44 @@ export function JobDetail() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
               <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Category</div>
-              <div className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">{firstRow.Category || 'None'}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">
+                  {categoryText || 'None'}
+                </div>
+                {categoryIdText && (
+                  <span className="text-xs font-mono text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded ml-2">
+                    ID: {categoryIdText}
+                  </span>
+                )}
+              </div>
+              {matchMethodText && (
+                <div className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">
+                  {matchMethodText}
+                </div>
+              )}
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
               <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Brand Detected</div>
-              <div className="text-2xl font-bold text-white drop-shadow-sm">{firstRow.Brand || 'N/A'}</div>
+              <div className="text-2xl font-bold text-white drop-shadow-sm">{brandText || 'N/A'}</div>
             </div>
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
               <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Confidence Score</div>
-              <div className="text-2xl font-bold text-cyan-400 drop-shadow-sm">{firstRow.Confidence}</div>
+              <div className="text-2xl font-bold text-cyan-400 drop-shadow-sm">{confidenceDisplay}</div>
+              <div className="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${confidenceGradient} transition-all duration-500`}
+                  style={{ width: `${confidencePercent}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold text-slate-200">💡 LLM Reasoning</h3>
+              <CopyButton text={reasoningText || 'No reasoning available'} label="Copy Reasoning" />
+            </div>
+            <div className="text-sm text-slate-300 whitespace-pre-wrap">
+              {reasoningText || 'No reasoning available'}
             </div>
           </div>
         </div>
