@@ -17,6 +17,10 @@ pip install -r requirements.txt
 
 cp .env.example .env          # edit as needed
 
+# Optional concurrency knobs in .env:
+#   WORKER_PROCESSES=4          # up to 4 jobs in parallel per node
+#   PIPELINE_THREADS_PER_JOB=1  # threads within a single pipeline job
+
 # 2. Start API + worker
 uvicorn video_service.app.main:app --port 8000 &
 DATABASE_PATH=video_service.db python -m video_service.workers.worker &

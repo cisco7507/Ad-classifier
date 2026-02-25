@@ -14,6 +14,8 @@ import json
 import re
 import logging
 import traceback
+import multiprocessing
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +35,11 @@ configure_logging()
 
 from video_service.db.database import get_db, init_db
 from video_service.core import run_pipeline_job, run_agent_job
+from video_service.core.concurrency import (
+    get_concurrency_diagnostics,
+    get_pipeline_threads_per_job,
+    get_worker_processes_config,
+)
 from video_service.core.device import get_diagnostics, DEVICE
 
 logger = logging.getLogger(__name__)
@@ -181,25 +188,48 @@ def _extract_agent_ocr_text(events: list[str]) -> str:
 
 
 def _append_job_event(job_id: str, message: str) -> None:
-    try:
-        with get_db() as conn:
-            row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
-            events = []
-            if row and row["events"]:
-                try:
-                    events = json.loads(row["events"])
-                except Exception:
-                    events = []
+    attempts = 0
+    while attempts < 8:
+        attempts += 1
+        try:
+            with get_db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                events = []
+                if row and row["events"]:
+                    try:
+                        events = json.loads(row["events"])
+                    except Exception:
+                        events = []
 
-            events.append(message)
-            # Keep event payload bounded.
-            events = events[-400:]
-            conn.execute(
-                "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(events), job_id),
-            )
-    except Exception as exc:
-        logger.warning("event_append_failed: %s", exc)
+                events.append(message)
+                # Keep event payload bounded.
+                events = events[-400:]
+                conn.execute(
+                    "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(events), job_id),
+                )
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempts >= 8:
+                logger.warning("event_append_failed: %s", exc)
+                return
+            time.sleep(0.05 * attempts)
+        except Exception as exc:
+            logger.warning("event_append_failed: %s", exc)
+            return
+
+
+def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 10) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            with get_db() as conn:
+                conn.execute(sql, params)
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == attempts:
+                raise
+            time.sleep(0.05 * attempt)
 
 
 def _set_stage(
@@ -225,8 +255,7 @@ def _set_stage(
     sql += " WHERE id = ?"
     params.append(job_id)
 
-    with get_db() as conn:
-        conn.execute(sql, tuple(params))
+    _execute_job_update_with_retry(sql, tuple(params))
 
     logger.info("%s", detail_msg)
     _append_job_event(
@@ -242,17 +271,18 @@ def _stage_callback(job_id: str):
 
 
 def claim_and_process_job() -> bool:
-    conn = get_db()
     job_token = None
+    claim_conn = None
     try:
-        cur = conn.cursor()
-        conn.execute("BEGIN EXCLUSIVE")
+        claim_conn = get_db()
+        cur = claim_conn.cursor()
+        claim_conn.execute("BEGIN IMMEDIATE")
 
         cur.execute("SELECT * FROM jobs WHERE status = 'queued' LIMIT 1")
         row = cur.fetchone()
 
         if not row:
-            conn.rollback()
+            claim_conn.rollback()
             return False
 
         job_id = row["id"]
@@ -260,7 +290,9 @@ def claim_and_process_job() -> bool:
             "UPDATE jobs SET status = 'processing', stage = 'claim', stage_detail = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             ("worker claimed job", job_id),
         )
-        conn.commit()
+        claim_conn.commit()
+        claim_conn.close()
+        claim_conn = None
 
         job_token = set_job_context(job_id)
         set_stage_context("claim", "worker claimed job")
@@ -292,45 +324,47 @@ def claim_and_process_job() -> bool:
             error_msg = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
 
         # Persist result
-        with get_db() as update_conn:
-            if error_msg:
-                _set_stage(
+        if error_msg:
+            _set_stage(
+                job_id,
+                "failed",
+                f"job failed: {_short(error_msg, 180)}",
+                status="failed",
+                error=error_msg,
+            )
+            logger.error("job_failed: error=%.200s", error_msg)
+        else:
+            _set_stage(job_id, "persist", "persisting result payload")
+            brand, category, category_id = _extract_summary_fields(result_json)
+            _execute_job_update_with_retry(
+                "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    "result persisted",
+                    result_json,
+                    json.dumps(artifacts_payload),
+                    brand,
+                    category,
+                    category_id,
                     job_id,
-                    "failed",
-                    f"job failed: {_short(error_msg, 180)}",
-                    status="failed",
-                    error=error_msg,
-                )
-                logger.error("job_failed: error=%.200s", error_msg)
-            else:
-                _set_stage(job_id, "persist", "persisting result payload")
-                brand, category, category_id = _extract_summary_fields(result_json)
-                update_conn.execute(
-                    "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (
-                        "result persisted",
-                        result_json,
-                        json.dumps(artifacts_payload),
-                        brand,
-                        category,
-                        category_id,
-                        job_id,
-                    ),
-                )
-                _append_job_event(
-                    job_id,
-                    f"{datetime.now(timezone.utc).isoformat()} completed: result persisted",
-                )
-                set_stage_context("completed", "result persisted")
-                logger.info("job_completed")
+                ),
+            )
+            _append_job_event(
+                job_id,
+                f"{datetime.now(timezone.utc).isoformat()} completed: result persisted",
+            )
+            set_stage_context("completed", "result persisted")
+            logger.info("job_completed")
 
         return True
 
     except Exception as exc:
-        conn.rollback()
+        if claim_conn is not None:
+            claim_conn.rollback()
         logger.error("worker_lock_error: %s", exc)
         return False
     finally:
+        if claim_conn is not None:
+            claim_conn.close()
         reset_stage_context()
         reset_job_context(job_token)
 
@@ -339,6 +373,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
     enable_web_search = _resolve_enable_web_search(settings)
+    pipeline_threads = get_pipeline_threads_per_job()
     generator = run_pipeline_job(
         job_id=job_id,
         src="Web URLs",
@@ -354,7 +389,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         enable_search=enable_web_search,
         enable_vision=settings.get("enable_vision", False),
         ctx=settings.get("context_size", 8192),
-        workers=1,
+        workers=pipeline_threads,
         stage_callback=stage_cb,
     )
     final_df = None
@@ -450,7 +485,19 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
 
 
 def run_worker() -> None:
-    logger.info("worker_start: diagnostics=%s", json.dumps(get_diagnostics()))
+    process_count = _get_worker_process_count()
+    if process_count > 1:
+        _run_worker_supervisor(process_count)
+        return
+    _run_single_worker()
+
+
+def _run_single_worker() -> None:
+    logger.info(
+        "worker_start: diagnostics=%s concurrency=%s",
+        json.dumps(get_diagnostics()),
+        json.dumps(get_concurrency_diagnostics()),
+    )
     init_db()
     while True:
         try:
@@ -460,6 +507,63 @@ def run_worker() -> None:
             processed = False
         if not processed:
             time.sleep(1)
+
+
+def _get_worker_process_count() -> int:
+    return get_worker_processes_config()
+
+
+def _worker_child_main(index: int) -> None:
+    logger.info("worker_child_start: index=%d", index)
+    _run_single_worker()
+
+
+def _spawn_worker_child(index: int) -> multiprocessing.Process:
+    return multiprocessing.Process(
+        target=_worker_child_main,
+        kwargs={"index": index},
+        name=f"worker-{index}",
+        daemon=False,
+    )
+
+
+def _run_worker_supervisor(process_count: int) -> None:
+    logger.info("worker_supervisor_start: processes=%d", process_count)
+    children: list[multiprocessing.Process] = []
+    for index in range(1, process_count + 1):
+        proc = _spawn_worker_child(index)
+        proc.start()
+        logger.info("worker_child_spawned: index=%d pid=%s", index, proc.pid)
+        children.append(proc)
+
+    try:
+        while True:
+            time.sleep(1.0)
+            for idx, proc in enumerate(children, start=1):
+                if proc.is_alive():
+                    continue
+                logger.warning(
+                    "worker_child_exited: index=%d pid=%s exit_code=%s; restarting",
+                    idx,
+                    proc.pid,
+                    proc.exitcode,
+                )
+                replacement = _spawn_worker_child(idx)
+                replacement.start()
+                logger.info("worker_child_spawned: index=%d pid=%s", idx, replacement.pid)
+                children[idx - 1] = replacement
+    except KeyboardInterrupt:
+        logger.info("worker_supervisor_shutdown: terminating children")
+    finally:
+        for proc in children:
+            if proc.is_alive():
+                proc.terminate()
+        for proc in children:
+            proc.join(timeout=5.0)
+            if proc.is_alive():
+                logger.warning("worker_child_force_kill: pid=%s", proc.pid)
+                proc.kill()
+                proc.join(timeout=2.0)
 
 
 if __name__ == "__main__":

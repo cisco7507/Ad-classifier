@@ -5,3 +5,5 @@ sentence-transformers
 sentencepiece
 python-dotenv
 protobuf
+einops
+timm

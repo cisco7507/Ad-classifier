@@ -3,6 +3,7 @@ import easyocr
 import threading
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM
+from transformers.configuration_utils import PretrainedConfig
 from transformers.dynamic_module_utils import get_imports
 from unittest.mock import patch
 from video_service.core.utils import logger, device, TORCH_DTYPE
@@ -13,40 +14,82 @@ class OCRManager:
         self.current_engine = None
         self.current_name = ""
         self.lock = threading.Lock()
+        self.florence_unavailable_reason = None
+
+    @staticmethod
+    def _build_easyocr_reader():
+        use_gpu = (device == "cuda")
+        logger.info(f"Initializing EasyOCR. GPU mode: {use_gpu}")
+        return easyocr.Reader(['en', 'fr'], gpu=use_gpu, verbose=False)
+
+    @staticmethod
+    def _ensure_florence_config_compat():
+        # Compatibility shim for newer transformers + Florence remote config.
+        # Some versions access forced_bos_token_id before instance assignment.
+        if not hasattr(PretrainedConfig, "forced_bos_token_id"):
+            setattr(PretrainedConfig, "forced_bos_token_id", None)
+
+    def _build_florence_engine(self):
+        def fixed_get_imports(filename):
+            imports = get_imports(filename)
+            if "flash_attn" in imports:
+                imports.remove("flash_attn")
+            return imports
+
+        with patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports):
+            self._ensure_florence_config_compat()
+            model_id = "microsoft/Florence-2-base"
+            logger.info(f"Initializing Florence-2 on {device} with dtype {TORCH_DTYPE}")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_id,
+                trust_remote_code=True,
+                torch_dtype=TORCH_DTYPE,
+            ).to(device).eval()
+            try:
+                processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+            except Exception:
+                processor = AutoProcessor.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
+                    use_fast=False,
+                )
+            return {"type": "florence2", "model": model, "processor": processor}
 
     def get_engine(self, name):
         with self.lock:
-            if name == self.current_name: return self.current_engine
+            if name == self.current_name:
+                return self.current_engine
             self.current_engine = None
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
-            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
             if name == "EasyOCR":
-                use_gpu = (device == "cuda")
-                logger.info(f"Initializing EasyOCR. GPU mode: {use_gpu}")
-                self.current_engine = easyocr.Reader(['en', 'fr'], gpu=use_gpu, verbose=False)
+                self.current_engine = self._build_easyocr_reader()
             elif name == "Florence-2 (Microsoft)":
-                def fixed_get_imports(filename):
-                    imports = get_imports(filename)
-                    if "flash_attn" in imports: imports.remove("flash_attn")
-                    return imports
-                with patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports):
-                    model_id = "microsoft/Florence-2-base"
-                    logger.info(f"Initializing Florence-2 on {device} with dtype {TORCH_DTYPE}")
-                    self.current_engine = {
-                        "model": AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True, torch_dtype=TORCH_DTYPE).to(device).eval(),
-                        "processor": AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-                    }
+                if self.florence_unavailable_reason:
+                    logger.warning(
+                        "Florence-2 unavailable in this runtime; using EasyOCR fallback: %s",
+                        self.florence_unavailable_reason,
+                    )
+                    self.current_engine = self._build_easyocr_reader()
+                else:
+                    try:
+                        self.current_engine = self._build_florence_engine()
+                    except Exception as exc:
+                        self.florence_unavailable_reason = f"{type(exc).__name__}: {exc}"
+                        logger.warning(
+                            "Florence-2 init failed; falling back to EasyOCR: %s",
+                            self.florence_unavailable_reason,
+                        )
+                        self.current_engine = self._build_easyocr_reader()
             self.current_name = name
             return self.current_engine
 
     def extract_text(self, engine_name, image_rgb, mode="Detailed"):
-        engine = self.get_engine(engine_name)
         try:
-            if engine_name == "EasyOCR":
-                results = engine.readtext(image_rgb, detail=1)
-                annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/image_rgb.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
-                return " ".join(annotated)
-            elif engine_name == "Florence-2 (Microsoft)":
+            engine = self.get_engine(engine_name)
+
+            if isinstance(engine, dict) and engine.get("type") == "florence2":
                 pil_img = Image.fromarray(image_rgb)
                 inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
                 inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
@@ -56,6 +99,16 @@ class OCRManager:
                 ocr_data = parsed.get("<OCR_WITH_REGION>", {})
                 annotated = [f"{'[HUGE] ' if (b[5]-b[1])/pil_img.height > 0.15 else ''}{l}" for l, b in zip(ocr_data.get("labels", []), ocr_data.get("quad_boxes", []))]
                 return " ".join(annotated)
+
+            # EasyOCR path (selected explicitly or Florence fallback).
+            if engine is None:
+                return ""
+            if hasattr(engine, "readtext"):
+                results = engine.readtext(image_rgb, detail=1)
+                annotated = [f"{'[HUGE] ' if (max(p[1] for p in b) - min(p[1] for p in b))/image_rgb.shape[0] > 0.15 else ''}{t}" for b, t, c in results]
+                return " ".join(annotated)
+            logger.warning("Unknown OCR engine payload type for %s: %s", engine_name, type(engine).__name__)
+            return ""
         except Exception as e:
             logger.error(f"OCR Error: {e}")
             return ""

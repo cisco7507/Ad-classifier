@@ -44,6 +44,7 @@ from video_service.app.models.job import (
     UrlBatchRequest, FolderRequest, FilePathRequest, JobMode,
 )
 from video_service.core.device import get_diagnostics
+from video_service.core.concurrency import get_concurrency_diagnostics
 from video_service.core.cluster import cluster
 from video_service.core.categories import category_mapper
 from video_service.core.security import (
@@ -166,6 +167,11 @@ async def cluster_jobs():
 @app.get("/diagnostics/device", tags=["ops"])
 def device_diagnostics():
     return get_diagnostics()
+
+
+@app.get("/diagnostics/concurrency", tags=["ops"])
+def concurrency_diagnostics():
+    return get_concurrency_diagnostics()
 
 
 def _get_category_mapping_diagnostics():
@@ -396,7 +402,6 @@ def _parse_settings(
     enable_agentic_search: Optional[bool] = Form(None),
     enable_vision: bool = Form(False),
     context_size: int = Form(8192),
-    workers: int = Form(1),
 ) -> JobSettings:
     resolved_search = _resolve_enable_web_search(
         enable_search=enable_search,
@@ -411,7 +416,7 @@ def _parse_settings(
         enable_web_search=resolved_search,
         enable_agentic_search=resolved_search,
         enable_vision=enable_vision,
-        context_size=context_size, workers=workers,
+        context_size=context_size,
     )
 
 

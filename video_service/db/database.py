@@ -8,10 +8,14 @@ def _default_database_path() -> str:
 
 
 DB_PATH = os.environ.get("DATABASE_PATH") or _default_database_path()
+SQLITE_TIMEOUT_SECONDS = float(os.environ.get("SQLITE_TIMEOUT_SECONDS", "30"))
+SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get("SQLITE_BUSY_TIMEOUT_MS", "30000"))
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn = sqlite3.connect(DB_PATH, timeout=SQLITE_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
+    # busy_timeout is per-connection; set it for every connection.
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS};")
     return conn
 
 def init_db():
