@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import type { ReactElement } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getJob, getJobResult, getJobEvents, getJobArtifacts, exportResultsCSV, copyToClipboard } from '../lib/api';
 import type { JobStatus, ResultRow, JobArtifacts } from '../lib/api';
@@ -57,6 +58,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 type ArtifactTab = 'vision' | 'ocr' | 'frames';
+type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
@@ -79,6 +81,155 @@ function formatStageName(stage: string): string {
   return stage.replace(/_/g, ' ');
 }
 
+function parseToolSegment(line: string): { tool: ScratchTool | null; query: string; finalFields: Record<string, string> } {
+  const toolMatch = line.match(/\[TOOL:\s*(OCR|SEARCH|VISION|FINAL|ERROR)\b([^\]]*)\]/i);
+  if (!toolMatch) return { tool: null, query: '', finalFields: {} };
+
+  const tool = toolMatch[1].toUpperCase() as ScratchTool;
+  const segment = toolMatch[0];
+  const queryMatch = segment.match(/query\s*=\s*["']([^"']+)["']/i);
+
+  const finalFields: Record<string, string> = {};
+  if (tool === 'FINAL') {
+    const quoted = /(\w+)\s*=\s*"([^"]*)"/g;
+    let match = quoted.exec(segment);
+    while (match) {
+      finalFields[match[1].toLowerCase()] = match[2].trim();
+      match = quoted.exec(segment);
+    }
+    const unquoted = /(\w+)\s*=\s*([^,\]\|]+)/g;
+    match = unquoted.exec(segment);
+    while (match) {
+      const key = match[1].toLowerCase();
+      if (!(key in finalFields)) finalFields[key] = match[2].trim();
+      match = unquoted.exec(segment);
+    }
+  }
+
+  return { tool, query: queryMatch?.[1]?.trim() || '', finalFields };
+}
+
+function toolTone(tool: ScratchTool | null): { icon: string; badge: string; border: string; text: string } {
+  switch (tool) {
+    case 'OCR':
+      return { icon: '📝', badge: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300', border: 'border-cyan-500/50', text: 'text-cyan-300' };
+    case 'SEARCH':
+      return { icon: '🔍', badge: 'bg-amber-500/10 border-amber-500/30 text-amber-300', border: 'border-amber-500/50', text: 'text-amber-300' };
+    case 'VISION':
+      return { icon: '👁️', badge: 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-300', border: 'border-fuchsia-500/50', text: 'text-fuchsia-300' };
+    case 'FINAL':
+      return { icon: '✅', badge: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300', border: 'border-emerald-500/50', text: 'text-emerald-300' };
+    case 'ERROR':
+      return { icon: '❌', badge: 'bg-red-500/10 border-red-500/30 text-red-300', border: 'border-red-500/50', text: 'text-red-300' };
+    default:
+      return { icon: '•', badge: 'bg-slate-800 border-slate-700 text-slate-300', border: 'border-slate-700', text: 'text-slate-300' };
+  }
+}
+
+function renderScratchboardEvent(event: string, index: number): ReactElement {
+  const lines = event.split('\n');
+  let currentTool: ScratchTool | null = null;
+  const renderedLines: ReactElement[] = [];
+
+  lines.forEach((rawLine, lineIndex) => {
+    const trimmed = rawLine.trim();
+    const key = `${index}-${lineIndex}`;
+
+    if (!trimmed) {
+      renderedLines.push(<div key={key} className="h-1" />);
+      return;
+    }
+
+    if (/^---\s*Step\s+\d+\s*---/i.test(trimmed)) {
+      renderedLines.push(
+        <div key={key} className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-800 pb-1 mb-2 mt-4">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (trimmed.includes('✅ FINAL CONCLUSION')) {
+      renderedLines.push(
+        <div key={key} className="bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-2 text-emerald-300 font-semibold">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^🤔\s*Thought:/i.test(trimmed)) {
+      renderedLines.push(
+        <div key={key} className="italic text-slate-500">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^Action:/i.test(trimmed)) {
+      const actionText = trimmed.replace(/^Action:\s*/i, '');
+      const parsed = parseToolSegment(actionText);
+      if (parsed.tool) currentTool = parsed.tool;
+      const tone = toolTone(parsed.tool);
+      const trailingText = actionText.replace(/\[TOOL:[^\]]+\]/i, '').trim();
+
+      renderedLines.push(
+        <div key={key} className="text-slate-300 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-200">Action:</span>
+            {parsed.tool ? (
+              <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}>
+                <span>{tone.icon}</span>
+                <span>{parsed.tool}</span>
+              </span>
+            ) : (
+              <span className="text-slate-300">{actionText}</span>
+            )}
+            {trailingText && <span className="text-slate-400">{trailingText}</span>}
+            {parsed.tool === 'SEARCH' && parsed.query && (
+              <span className="bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono">
+                {parsed.query}
+              </span>
+            )}
+          </div>
+          {parsed.tool === 'FINAL' && Object.keys(parsed.finalFields).length > 0 && (
+            <div className="ml-6 grid gap-1 text-[10px] text-emerald-200">
+              {parsed.finalFields.brand && <div><span className="text-slate-500 uppercase mr-1">Brand:</span>{parsed.finalFields.brand}</div>}
+              {parsed.finalFields.category && <div><span className="text-slate-500 uppercase mr-1">Category:</span>{parsed.finalFields.category}</div>}
+              {parsed.finalFields.reason && <div><span className="text-slate-500 uppercase mr-1">Reason:</span>{parsed.finalFields.reason}</div>}
+            </div>
+          )}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^(Result:|Observation:)/i.test(trimmed)) {
+      const parsed = parseToolSegment(trimmed);
+      const tone = toolTone(parsed.tool || currentTool);
+      renderedLines.push(
+        <div key={key} className={`ml-2 pl-3 border-l-2 ${tone.border} text-slate-400 whitespace-pre-wrap`}>
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    renderedLines.push(
+      <div key={key} className="text-slate-300 whitespace-pre-wrap">
+        {rawLine}
+      </div>,
+    );
+  });
+
+  return (
+    <div className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0">
+      {renderedLines}
+    </div>
+  );
+}
+
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const [job, setJob] = useState<JobStatus | null>(null);
@@ -92,6 +243,16 @@ export function JobDetail() {
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const ocrText = artifacts?.ocr_text?.text || '';
+  const agentScratchboardEvents = useMemo(
+    () => events
+      .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
+      .map((evt) => {
+        if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
+        if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
+        return evt;
+      }),
+    [events],
+  );
   const ocrByTimestamp = useMemo(() => {
     const map = new Map<string, string>();
     for (const line of (ocrText || '').split('\n')) {
@@ -190,13 +351,6 @@ export function JobDetail() {
 
   const progressPercent = Math.round(job.progress ?? 0);
   const firstRow = result?.[0];
-  const agentScratchboardEvents = events
-    .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
-    .map((evt) => {
-      if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
-      if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
-      return evt;
-    });
 
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
@@ -445,7 +599,7 @@ export function JobDetail() {
           </div>
           <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-300" ref={scratchboardRef}>
             {agentScratchboardEvents.map((evt, i) => (
-              <div key={i} className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+              <Fragment key={i}>{renderScratchboardEvent(evt, i)}</Fragment>
             ))}
           </div>
         </div>
