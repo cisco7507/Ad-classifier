@@ -85,6 +85,13 @@ type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+const COMMON_SIGNAL_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'he', 'her', 'his',
+  'in', 'is', 'it', 'its', 'of', 'on', 'or', 'she', 'so', 'the', 'their', 'them', 'then', 'there',
+  'they', 'this', 'to', 'too', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'who', 'will',
+  'with', 'would', 'but', 'if', 'not', 'no', 'yes', 'that', 'than', 'also', 'been', 'being', 'both',
+  'each', 'had', 'may', 'most', 'must', 'likely', 'likely meant', 'however', 'therefore', 'thus',
+]);
 
 function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: string }): string | null {
   if (typeof frame.timestamp === 'number' && Number.isFinite(frame.timestamp)) {
@@ -122,6 +129,7 @@ function isValidSignalPill(text: string): boolean {
   if (/[\[\]]/.test(trimmed)) return false;
   const wordCount = trimmed.split(/\s+/).length;
   if (wordCount > 10) return false;
+  if (COMMON_SIGNAL_WORDS.has(trimmed.toLowerCase())) return false;
   return true;
 }
 
@@ -547,17 +555,6 @@ export function JobDetail() {
   const categoryIdText = typeof categoryIdRaw === 'string' ? categoryIdRaw.trim() : String(categoryIdRaw ?? '').trim();
 
   const confidenceValue = toNumber(firstRow?.Confidence);
-  const confidenceDisplay = confidenceValue === null ? 'N/A' : confidenceValue.toFixed(2);
-  const confidencePercent = confidenceValue === null
-    ? 0
-    : Math.max(0, Math.min(100, confidenceValue * 100));
-  const confidenceGradient = confidenceValue === null
-    ? 'from-slate-500 to-slate-400'
-    : confidenceValue >= 0.8
-      ? 'from-emerald-500 to-emerald-400'
-      : confidenceValue >= 0.5
-        ? 'from-amber-500 to-amber-400'
-        : 'from-red-500 to-red-400';
   const confidenceSummaryDisplay = confidenceValue === null ? '—' : confidenceValue.toFixed(2);
   const confidenceSummaryTextColor = confidenceValue === null
     ? 'text-slate-500'
@@ -575,13 +572,6 @@ export function JobDetail() {
         : 'bg-red-400';
 
   const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
-  const matchMethodLabel = formatMatchMethod(matchMethodRaw);
-  const matchScoreValue = toNumber(firstRow ? (firstRow as any).category_match_score : null);
-  const matchMethodText = matchMethodLabel
-    ? matchScoreValue === null
-      ? `${matchMethodLabel} Match`
-      : `${matchMethodLabel} Match (${matchScoreValue.toFixed(2)})`
-    : '';
   const summaryMatchDisplay = formatSummaryMatch(
     matchMethodRaw,
     firstRow ? (firstRow as any).category_match_score : null,
@@ -634,16 +624,18 @@ export function JobDetail() {
 
             <div className="text-sm text-slate-400 break-all max-w-3xl font-mono opacity-80 bg-slate-950/50 p-2 rounded border border-slate-800">{job.url}</div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
-                <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+            {job.status !== 'completed' && job.status !== 'failed' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                  <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
+                  <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                  <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
+                  <div className="text-slate-300">{job.stage_detail || '—'}</div>
+                </div>
               </div>
-              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
-                <div className="text-slate-300">{job.stage_detail || '—'}</div>
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-1 text-sm text-slate-500 shrink-0">
@@ -661,19 +653,19 @@ export function JobDetail() {
       </div>
 
       {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
-        <div className="bg-slate-900 border border-emerald-500/20 border-t-2 border-t-emerald-500/50 rounded-xl px-4 md:px-6 py-3 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
+        <div className="bg-slate-900 border border-emerald-500/20 border-t-2 border-t-emerald-500/50 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
           <div className="flex items-center gap-3 min-w-0">
             <CheckCircledIcon className="w-5 h-5 text-emerald-400 shrink-0" />
             <span
               title={brandText || 'Unknown Brand'}
-              className="text-base md:text-lg font-bold text-white max-w-[14rem] md:max-w-xs truncate"
+              className="text-lg md:text-xl font-bold text-white max-w-[14rem] md:max-w-xs truncate"
             >
               {brandText || 'Unknown Brand'}
             </span>
             <span className="text-slate-600 shrink-0">→</span>
             <span
               title={categoryText || 'Unknown Category'}
-              className="text-base md:text-lg font-bold text-emerald-400 max-w-[14rem] md:max-w-sm truncate"
+              className="text-lg md:text-xl font-bold text-emerald-400 max-w-[14rem] md:max-w-sm truncate"
             >
               {categoryText || 'Unknown Category'}
             </span>
@@ -705,44 +697,7 @@ export function JobDetail() {
       )}
 
       {firstRow && firstRow.Brand !== 'Err' && (
-        <div className="grid gap-6 animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <CheckCircledIcon className="text-emerald-400" /> Final Classification
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Category</div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">
-                  {categoryText || 'None'}
-                </div>
-                {categoryIdText && (
-                  <span className="text-xs font-mono text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded ml-2">
-                    ID: {categoryIdText}
-                  </span>
-                )}
-              </div>
-              {matchMethodText && (
-                <div className="mt-2 text-[10px] uppercase tracking-wider text-slate-500">
-                  {matchMethodText}
-                </div>
-              )}
-            </div>
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Brand Detected</div>
-              <div className="text-2xl font-bold text-white drop-shadow-sm">{brandText || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Confidence Score</div>
-              <div className="text-2xl font-bold text-cyan-400 drop-shadow-sm">{confidenceDisplay}</div>
-              <div className="mt-3 h-2 rounded-full bg-slate-800 overflow-hidden">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${confidenceGradient} transition-all duration-500`}
-                  style={{ width: `${confidencePercent}%` }}
-                />
-              </div>
-            </div>
-          </div>
+        <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
           <div className="bg-gradient-to-r from-slate-900 to-slate-900/80 border border-slate-800 border-l-[3px] border-l-emerald-500/50 rounded-xl p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h3 className="text-xs uppercase tracking-wider text-slate-500 font-bold">💡 LLM Reasoning</h3>
