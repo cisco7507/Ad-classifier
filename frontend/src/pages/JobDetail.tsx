@@ -125,6 +125,15 @@ function isValidSignalPill(text: string): boolean {
   return true;
 }
 
+function normalizeSignalPillText(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, ' ');
+  const spacedDomain = trimmed.match(/^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i);
+  if (spacedDomain) {
+    return `${spacedDomain[1].toLowerCase()}.${spacedDomain[2].toLowerCase()}`;
+  }
+  return trimmed;
+}
+
 function reasoningPillClass(type: ReasoningTermType): string {
   if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
   if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
@@ -327,9 +336,23 @@ export function JobDetail() {
       }
       match = regex.exec(reasoningText);
     }
-    return orderedTerms
+    const canonicalMap = new Map<string, string>();
+    orderedTerms
       .filter(isValidSignalPill)
-      .map((term) => classifyReasoningTerm(term, brandText));
+      .forEach((term) => {
+        const normalized = normalizeSignalPillText(term);
+        const key = normalized.toLowerCase();
+        const existing = canonicalMap.get(key);
+        if (!existing) {
+          canonicalMap.set(key, normalized);
+          return;
+        }
+        if (existing === existing.toUpperCase() && normalized !== normalized.toUpperCase()) {
+          canonicalMap.set(key, normalized);
+        }
+      });
+
+    return Array.from(canonicalMap.values()).map((term) => classifyReasoningTerm(term, brandText));
   }, [reasoningText, brandText]);
   const visibleQuotedTerms = showAllReasoningTerms ? quotedTermsAll : quotedTermsAll.slice(0, 6);
   const hiddenQuotedTermsCount = Math.max(0, quotedTermsAll.length - visibleQuotedTerms.length);
