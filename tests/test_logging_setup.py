@@ -1,4 +1,5 @@
 import logging
+import transformers.utils.logging as hf_logging
 
 import pytest
 
@@ -56,6 +57,21 @@ def test_configure_logging_force_reapplies_after_mutation(monkeypatch):
     assert httpcore_logger.propagate is False
 
 
+def test_configure_logging_disables_transformers_progress_bar(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+    called = {"disabled": False}
+
+    def _disable():
+        called["disabled"] = True
+
+    monkeypatch.setattr(hf_logging, "disable_progress_bar", _disable)
+    logging_setup.configure_logging(force=True)
+    assert called["disabled"] is True
+
+
 def test_configure_logging_hard_gates_transformers_problem_loggers(monkeypatch):
     monkeypatch.setattr(logging_setup, "_configured", False)
     monkeypatch.setattr(logging_setup, "_env_loaded", True)
@@ -65,14 +81,19 @@ def test_configure_logging_hard_gates_transformers_problem_loggers(monkeypatch):
 
     attn_logger = logging.getLogger("transformers.modeling_attn_mask_utils")
     model_utils_logger = logging.getLogger("transformers.modeling_utils")
+    tensor_parallel_logger = logging.getLogger("transformers.integrations.tensor_parallel")
     assert attn_logger.level == logging.ERROR
     assert model_utils_logger.level == logging.ERROR
+    assert tensor_parallel_logger.level == logging.ERROR
     assert attn_logger.propagate is False
     assert model_utils_logger.propagate is False
+    assert tensor_parallel_logger.propagate is False
     assert attn_logger.handlers
     assert model_utils_logger.handlers
+    assert tensor_parallel_logger.handlers
     assert attn_logger.handlers[0].level == logging.ERROR
     assert model_utils_logger.handlers[0].level == logging.ERROR
+    assert tensor_parallel_logger.handlers[0].level == logging.ERROR
 
 
 def test_configure_logging_repo_env_overrides_shell_log_level(monkeypatch, tmp_path):

@@ -10,6 +10,7 @@ from transformers.configuration_utils import PretrainedConfig
 from transformers.dynamic_module_utils import get_imports
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from unittest.mock import patch
+import transformers.modeling_utils as hf_modeling_utils
 from video_service.core.utils import logger, device, TORCH_DTYPE
 
 class OCRManager:
@@ -18,6 +19,7 @@ class OCRManager:
         self.current_engine = None
         self.current_name = ""
         self.lock = threading.Lock()
+        self.florence_infer_lock = threading.Lock()
         self.florence_unavailable_reason = None
 
     @staticmethod
@@ -99,11 +101,15 @@ class OCRManager:
             if "flash_attn" in imports:
                 imports.remove("flash_attn")
             return imports
+        
+        def _noop_verify_tp_plan(*args, **kwargs):
+            return None
 
         with (
             self._florence_flash_attn_guard(),
             self._florence_meta_linspace_guard(),
             patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports),
+            patch.object(hf_modeling_utils, "verify_tp_plan", _noop_verify_tp_plan),
         ):
             self._ensure_florence_config_compat()
             self._ensure_florence_tokenizer_compat()
@@ -165,22 +171,25 @@ class OCRManager:
             engine = self.get_engine(engine_name)
 
             if isinstance(engine, dict) and engine.get("type") == "florence2":
-                pil_img = Image.fromarray(image_rgb)
-                inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
-                inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
-                with torch.inference_mode():
-                    generated_ids = engine["model"].generate(
-                        **inputs,
-                        max_new_tokens=1024,
-                        num_beams=1 if "Fast" in mode else 3,
-                        # Florence remote generation expects legacy tuple cache shape.
-                        # On modern transformers, EncoderDecoderCache can break that path.
-                        use_cache=False,
-                    )
-                parsed = engine["processor"].post_process_generation(engine["processor"].batch_decode(generated_ids, skip_special_tokens=False)[0], task="<OCR_WITH_REGION>", image_size=(pil_img.width, pil_img.height))
-                ocr_data = parsed.get("<OCR_WITH_REGION>", {})
-                annotated = [f"{'[HUGE] ' if (b[5]-b[1])/pil_img.height > 0.15 else ''}{l}" for l, b in zip(ocr_data.get("labels", []), ocr_data.get("quad_boxes", []))]
-                return " ".join(annotated)
+                # Florence inference is not reliably thread-safe on MPS across
+                # concurrent pipeline threads; serialize access per process.
+                with self.florence_infer_lock:
+                    pil_img = Image.fromarray(image_rgb)
+                    inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
+                    inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
+                    with torch.inference_mode():
+                        generated_ids = engine["model"].generate(
+                            **inputs,
+                            max_new_tokens=1024,
+                            num_beams=1 if "Fast" in mode else 3,
+                            # Florence remote generation expects legacy tuple cache shape.
+                            # On modern transformers, EncoderDecoderCache can break that path.
+                            use_cache=False,
+                        )
+                    parsed = engine["processor"].post_process_generation(engine["processor"].batch_decode(generated_ids, skip_special_tokens=False)[0], task="<OCR_WITH_REGION>", image_size=(pil_img.width, pil_img.height))
+                    ocr_data = parsed.get("<OCR_WITH_REGION>", {})
+                    annotated = [f"{'[HUGE] ' if (b[5]-b[1])/pil_img.height > 0.15 else ''}{l}" for l, b in zip(ocr_data.get("labels", []), ocr_data.get("quad_boxes", []))]
+                    return " ".join(annotated)
 
             # EasyOCR path (selected explicitly or Florence fallback).
             if engine is None:

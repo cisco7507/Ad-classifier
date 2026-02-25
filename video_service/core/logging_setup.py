@@ -40,6 +40,8 @@ _FORCE_ERROR_LOGGERS = (
     # Florence remote model load report warnings are noisy and not actionable
     # for runtime job observability.
     "transformers.modeling_utils",
+    # Tensor parallel warnings are noisy/non-actionable for single-node local runs.
+    "transformers.integrations.tensor_parallel",
 )
 
 
@@ -108,6 +110,13 @@ def configure_logging(force: bool = False) -> None:
             handler.addFilter(noisy_filter)
 
     if level > logging.DEBUG:
+        try:
+            from transformers.utils import logging as hf_logging
+
+            hf_logging.disable_progress_bar()
+        except Exception:
+            pass
+
         for logger_name in _NOISY_LOGGERS:
             logging.getLogger(logger_name).setLevel(logging.WARNING)
         # Hard-gate especially noisy HTTP/model loggers so DEBUG cannot leak through
