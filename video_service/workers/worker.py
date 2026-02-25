@@ -14,6 +14,7 @@ import json
 import re
 import logging
 import traceback
+import multiprocessing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -450,6 +451,14 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
 
 
 def run_worker() -> None:
+    process_count = _get_worker_process_count()
+    if process_count > 1:
+        _run_worker_supervisor(process_count)
+        return
+    _run_single_worker()
+
+
+def _run_single_worker() -> None:
     logger.info("worker_start: diagnostics=%s", json.dumps(get_diagnostics()))
     init_db()
     while True:
@@ -460,6 +469,77 @@ def run_worker() -> None:
             processed = False
         if not processed:
             time.sleep(1)
+
+
+def _parse_positive_int(value: str | None, default: int, name: str) -> int:
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        parsed = int(str(value).strip())
+    except ValueError:
+        logger.warning("%s=%r is invalid; using %d", name, value, default)
+        return default
+    if parsed < 1:
+        logger.warning("%s=%r must be >= 1; using %d", name, value, default)
+        return default
+    return parsed
+
+
+def _get_worker_process_count() -> int:
+    return _parse_positive_int(os.environ.get("WORKER_PROCESSES"), default=1, name="WORKER_PROCESSES")
+
+
+def _worker_child_main(index: int) -> None:
+    logger.info("worker_child_start: index=%d", index)
+    _run_single_worker()
+
+
+def _spawn_worker_child(index: int) -> multiprocessing.Process:
+    return multiprocessing.Process(
+        target=_worker_child_main,
+        kwargs={"index": index},
+        name=f"worker-{index}",
+        daemon=False,
+    )
+
+
+def _run_worker_supervisor(process_count: int) -> None:
+    logger.info("worker_supervisor_start: processes=%d", process_count)
+    children: list[multiprocessing.Process] = []
+    for index in range(1, process_count + 1):
+        proc = _spawn_worker_child(index)
+        proc.start()
+        logger.info("worker_child_spawned: index=%d pid=%s", index, proc.pid)
+        children.append(proc)
+
+    try:
+        while True:
+            time.sleep(1.0)
+            for idx, proc in enumerate(children, start=1):
+                if proc.is_alive():
+                    continue
+                logger.warning(
+                    "worker_child_exited: index=%d pid=%s exit_code=%s; restarting",
+                    idx,
+                    proc.pid,
+                    proc.exitcode,
+                )
+                replacement = _spawn_worker_child(idx)
+                replacement.start()
+                logger.info("worker_child_spawned: index=%d pid=%s", idx, replacement.pid)
+                children[idx - 1] = replacement
+    except KeyboardInterrupt:
+        logger.info("worker_supervisor_shutdown: terminating children")
+    finally:
+        for proc in children:
+            if proc.is_alive():
+                proc.terminate()
+        for proc in children:
+            proc.join(timeout=5.0)
+            if proc.is_alive():
+                logger.warning("worker_child_force_kill: pid=%s", proc.pid)
+                proc.kill()
+                proc.join(timeout=2.0)
 
 
 if __name__ == "__main__":
