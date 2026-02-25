@@ -159,7 +159,7 @@ def test_florence_extract_text_disables_cache_for_generation(monkeypatch):
     assert text == "demo-line"
     assert captured["use_cache"] is False
     assert captured["num_beams"] == 1
-    assert captured["max_new_tokens"] == 1024
+    assert captured["max_new_tokens"] == 256
 
 
 def test_florence_extract_text_serializes_generate_calls(monkeypatch):
@@ -215,6 +215,19 @@ def test_florence_extract_text_serializes_generate_calls(monkeypatch):
     t2.join()
 
     assert state["max_in_flight"] == 1
+
+
+def test_florence_max_new_tokens_respects_mode_and_env(monkeypatch):
+    mgr = ocr_module.OCRManager()
+    monkeypatch.delenv("FLORENCE_MAX_NEW_TOKENS", raising=False)
+    monkeypatch.delenv("FLORENCE_MAX_NEW_TOKENS_FAST", raising=False)
+    assert mgr._resolve_florence_max_new_tokens("🚀 Fast") == 256
+    assert mgr._resolve_florence_max_new_tokens("Detailed") == 1024
+
+    monkeypatch.setenv("FLORENCE_MAX_NEW_TOKENS_FAST", "128")
+    monkeypatch.setenv("FLORENCE_MAX_NEW_TOKENS", "768")
+    assert mgr._resolve_florence_max_new_tokens("🚀 Fast") == 128
+    assert mgr._resolve_florence_max_new_tokens("Detailed") == 768
 
 
 def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):

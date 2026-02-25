@@ -109,6 +109,19 @@ def configure_logging(force: bool = False) -> None:
         if not any(isinstance(f, NoisyLibraryFilter) for f in handler.filters):
             handler.addFilter(noisy_filter)
 
+    # Always hard-gate known broken/noisy external loggers, even in DEBUG mode.
+    # This avoids Python 3.14 formatting crashes from third-party warning calls.
+    for logger_name in _FORCE_ERROR_LOGGERS:
+        err_logger = logging.getLogger(logger_name)
+        err_logger.setLevel(logging.ERROR)
+        err_logger.propagate = False
+        err_logger.handlers.clear()
+        err_handler = logging.StreamHandler()
+        err_handler.setLevel(logging.ERROR)
+        err_handler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
+        err_handler.addFilter(context_filter)
+        err_logger.addHandler(err_handler)
+
     if level > logging.DEBUG:
         try:
             from transformers.utils import logging as hf_logging
@@ -131,17 +144,6 @@ def configure_logging(force: bool = False) -> None:
             hard_handler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
             hard_handler.addFilter(context_filter)
             noisy_logger.addHandler(hard_handler)
-
-        for logger_name in _FORCE_ERROR_LOGGERS:
-            err_logger = logging.getLogger(logger_name)
-            err_logger.setLevel(logging.ERROR)
-            err_logger.propagate = False
-            err_logger.handlers.clear()
-            err_handler = logging.StreamHandler()
-            err_handler.setLevel(logging.ERROR)
-            err_handler.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
-            err_handler.addFilter(context_filter)
-            err_logger.addHandler(err_handler)
 
     _configured = True
 

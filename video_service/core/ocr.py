@@ -3,6 +3,7 @@ import sys
 import torch
 import easyocr
 import threading
+import time
 from contextlib import contextmanager
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM
@@ -95,6 +96,14 @@ class OCRManager:
         with patch.object(torch, "linspace", _safe_linspace):
             yield
 
+    @staticmethod
+    def _resolve_florence_max_new_tokens(mode: str) -> int:
+        # Keep detailed mode at parity with combined.py defaults.
+        detailed_default = int(os.environ.get("FLORENCE_MAX_NEW_TOKENS", "1024"))
+        # Fast mode should actually be fast on MPS/CPU; allow override via env.
+        fast_default = int(os.environ.get("FLORENCE_MAX_NEW_TOKENS_FAST", "256"))
+        return fast_default if "Fast" in mode else detailed_default
+
     def _build_florence_engine(self):
         def fixed_get_imports(filename):
             imports = get_imports(filename)
@@ -177,15 +186,32 @@ class OCRManager:
                     pil_img = Image.fromarray(image_rgb)
                     inputs = engine["processor"](text="<OCR_WITH_REGION>", images=pil_img, return_tensors="pt")
                     inputs = {k: v.to(device, dtype=TORCH_DTYPE) if torch.is_floating_point(v) and TORCH_DTYPE != torch.float32 else v.to(device) for k, v in inputs.items()}
+                    max_new_tokens = self._resolve_florence_max_new_tokens(mode)
+                    logger.debug(
+                        "Florence OCR start mode=%s max_new_tokens=%d size=%dx%d",
+                        mode,
+                        max_new_tokens,
+                        pil_img.width,
+                        pil_img.height,
+                    )
+                    t0 = time.perf_counter()
                     with torch.inference_mode():
                         generated_ids = engine["model"].generate(
                             **inputs,
-                            max_new_tokens=1024,
+                            max_new_tokens=max_new_tokens,
                             num_beams=1 if "Fast" in mode else 3,
                             # Florence remote generation expects legacy tuple cache shape.
                             # On modern transformers, EncoderDecoderCache can break that path.
                             use_cache=False,
                         )
+                    elapsed = time.perf_counter() - t0
+                    logger.debug(
+                        "Florence OCR done in %.2fs tokens=%d",
+                        elapsed,
+                        int(generated_ids.shape[-1]) if hasattr(generated_ids, "shape") else -1,
+                    )
+                    if elapsed > 30:
+                        logger.warning("Florence OCR slow frame took %.2fs", elapsed)
                     parsed = engine["processor"].post_process_generation(engine["processor"].batch_decode(generated_ids, skip_special_tokens=False)[0], task="<OCR_WITH_REGION>", image_size=(pil_img.width, pil_img.height))
                     ocr_data = parsed.get("<OCR_WITH_REGION>", {})
                     annotated = [f"{'[HUGE] ' if (b[5]-b[1])/pil_img.height > 0.15 else ''}{l}" for l, b in zip(ocr_data.get("labels", []), ocr_data.get("quad_boxes", []))]
