@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getJob, getJobResult, getJobEvents, getJobArtifacts, exportResultsCSV, copyToClipboard } from '../lib/api';
 import type { JobStatus, ResultRow, JobArtifacts } from '../lib/api';
@@ -57,6 +57,27 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 type ArtifactTab = 'vision' | 'ocr' | 'frames';
+
+const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+
+function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: string }): string | null {
+  if (typeof frame.timestamp === 'number' && Number.isFinite(frame.timestamp)) {
+    return frame.timestamp.toFixed(1);
+  }
+  if (typeof frame.label === 'string') {
+    const match = frame.label.match(/([\d.]+)\s*s/i);
+    if (match) {
+      const parsed = Number.parseFloat(match[1]);
+      if (Number.isFinite(parsed)) return parsed.toFixed(1);
+    }
+  }
+  return null;
+}
+
+function formatStageName(stage: string): string {
+  return stage.replace(/_/g, ' ');
+}
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -169,6 +190,20 @@ export function JobDetail() {
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
   const frameCount = frameItems.length;
+  const ocrByTimestamp = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const line of (ocrText || '').split('\n')) {
+      const match = line.match(/^\[([\d.]+)s\]\s*(.*)$/);
+      if (!match) continue;
+      const ts = Number.parseFloat(match[1]);
+      if (!Number.isFinite(ts)) continue;
+      map.set(ts.toFixed(1), match[2] || '');
+    }
+    return map;
+  }, [ocrText]);
+  const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
+  const currentStage = (job.stage || '').trim();
+  const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
   const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
@@ -377,14 +412,26 @@ export function JobDetail() {
           <div className="p-4">
             {frameItems.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {frameItems.map((frame, idx) => (
-                  <div key={idx} className="aspect-video bg-slate-950 rounded border border-slate-800 overflow-hidden relative group">
-                    <img src={toApiUrl(frame.url)} alt={frame.label || `Frame ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
-                      {frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`)}
+                {frameItems.map((frame, idx) => {
+                  const frameLabel = frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`);
+                  const frameTsKey = extractFrameTimestampKey(frame);
+                  const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : '';
+                  return (
+                    <div key={idx} className="aspect-video bg-slate-950 rounded border border-slate-800 overflow-hidden relative group">
+                      <img src={toApiUrl(frame.url)} alt={frameLabel} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
+                        {frameLabel}
+                      </div>
+                      {frameOcrText && (
+                        <div className="absolute inset-0 bg-black/85 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-3 flex items-center justify-center">
+                          <p className="text-[10px] text-cyan-300 font-mono leading-relaxed text-center line-clamp-6">
+                            {frameOcrText}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : <div className="text-xs text-slate-500">No latest frames available.</div>}
           </div>
@@ -404,16 +451,67 @@ export function JobDetail() {
         </div>
       )}
 
-      {events.length > 0 && (
+      {(events.length > 0 || job.stage) && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
+          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
+            <div className="min-w-[680px] flex items-center gap-0 w-full px-1 pb-5">
+              {stages.map((stage, idx) => {
+                const isDone = job.status === 'completed' || currentIdx > idx || (job.status === 'failed' && currentIdx > idx);
+                const isCurrent = job.status === 'processing' && currentIdx === idx;
+                const isFailed = job.status === 'failed' && currentIdx === idx;
+                const stageLabel = formatStageName(stage);
+                const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
+                return (
+                  <Fragment key={stage}>
+                    {idx > 0 && (
+                      <div
+                        className={`flex-1 h-0.5 ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-red-500' : 'bg-slate-800'}`}
+                      />
+                    )}
+                    <div className="relative shrink-0 flex flex-col items-center gap-1">
+                      <div
+                        title={dotTitle}
+                        className={`w-3 h-3 rounded-full border-2 ${
+                          isDone
+                            ? 'bg-emerald-500 border-emerald-400'
+                            : isCurrent
+                              ? 'bg-blue-500 border-blue-400 animate-pulse'
+                              : isFailed
+                                ? 'bg-red-500 border-red-400'
+                                : 'bg-slate-800 border-slate-700'
+                        }`}
+                      />
+                      <span
+                        className={`text-[9px] uppercase tracking-wider absolute -bottom-5 whitespace-nowrap ${
+                          isDone
+                            ? 'text-emerald-500'
+                            : isCurrent
+                              ? 'text-blue-400'
+                              : isFailed
+                                ? 'text-red-400'
+                                : 'text-slate-600'
+                        }`}
+                      >
+                        {stageLabel}
+                      </span>
+                    </div>
+                  </Fragment>
+                );
+              })}
+            </div>
+          </div>
           <div className="bg-slate-900/80 px-4 py-3 border-b border-slate-800 font-semibold text-slate-300 flex items-center gap-2">
             <MagicWandIcon className="text-fuchsia-400" /> Stage / Event History
           </div>
-          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={historyRef}>
-            {events.map((evt, i) => (
-              <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
-            ))}
-          </div>
+          {events.length > 0 ? (
+            <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={historyRef}>
+              {events.map((evt, i) => (
+                <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 text-xs text-slate-500">No events yet.</div>
+          )}
         </div>
       )}
 
