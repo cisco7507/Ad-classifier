@@ -34,6 +34,11 @@ configure_logging()
 
 from video_service.db.database import get_db, init_db
 from video_service.core import run_pipeline_job, run_agent_job
+from video_service.core.concurrency import (
+    get_concurrency_diagnostics,
+    get_pipeline_threads_per_job,
+    get_worker_processes_config,
+)
 from video_service.core.device import get_diagnostics, DEVICE
 
 logger = logging.getLogger(__name__)
@@ -340,6 +345,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
     enable_web_search = _resolve_enable_web_search(settings)
+    pipeline_threads = get_pipeline_threads_per_job()
     generator = run_pipeline_job(
         job_id=job_id,
         src="Web URLs",
@@ -355,7 +361,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         enable_search=enable_web_search,
         enable_vision=settings.get("enable_vision", False),
         ctx=settings.get("context_size", 8192),
-        workers=1,
+        workers=pipeline_threads,
         stage_callback=stage_cb,
     )
     final_df = None
@@ -459,7 +465,11 @@ def run_worker() -> None:
 
 
 def _run_single_worker() -> None:
-    logger.info("worker_start: diagnostics=%s", json.dumps(get_diagnostics()))
+    logger.info(
+        "worker_start: diagnostics=%s concurrency=%s",
+        json.dumps(get_diagnostics()),
+        json.dumps(get_concurrency_diagnostics()),
+    )
     init_db()
     while True:
         try:
@@ -471,22 +481,8 @@ def _run_single_worker() -> None:
             time.sleep(1)
 
 
-def _parse_positive_int(value: str | None, default: int, name: str) -> int:
-    if value is None or str(value).strip() == "":
-        return default
-    try:
-        parsed = int(str(value).strip())
-    except ValueError:
-        logger.warning("%s=%r is invalid; using %d", name, value, default)
-        return default
-    if parsed < 1:
-        logger.warning("%s=%r must be >= 1; using %d", name, value, default)
-        return default
-    return parsed
-
-
 def _get_worker_process_count() -> int:
-    return _parse_positive_int(os.environ.get("WORKER_PROCESSES"), default=1, name="WORKER_PROCESSES")
+    return get_worker_processes_config()
 
 
 def _worker_child_main(index: int) -> None:

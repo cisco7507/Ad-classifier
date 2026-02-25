@@ -1,4 +1,5 @@
 import pytest
+import pandas as pd
 
 from video_service.workers import worker
 
@@ -44,3 +45,18 @@ def test_run_worker_uses_supervisor_path(monkeypatch):
 
     worker.run_worker()
     assert calls == ["supervisor:3"]
+
+
+def test_run_pipeline_uses_pipeline_threads_per_job_env(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("PIPELINE_THREADS_PER_JOB", "3")
+    monkeypatch.setattr(worker, "_stage_callback", lambda _job_id: (lambda _s, _d: None))
+
+    def _fake_run_pipeline_job(**kwargs):
+        captured["workers"] = kwargs["workers"]
+        yield ({}, "", "", [], pd.DataFrame([{"Brand": "BrandX"}]))
+
+    monkeypatch.setattr(worker, "run_pipeline_job", _fake_run_pipeline_job)
+
+    worker._run_pipeline("job-1", "https://example.test/ad.mp4", {})
+    assert captured["workers"] == 3

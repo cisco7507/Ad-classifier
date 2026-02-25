@@ -13,8 +13,7 @@
     "override": false,
     "enable_search": false,
     "enable_vision": false,
-    "context_size": 8192,
-    "workers": 1
+    "context_size": 8192
   },
   "frame_count": 1,
   "frame_meta": [

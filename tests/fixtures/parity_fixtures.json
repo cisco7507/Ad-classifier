@@ -17,8 +17,7 @@
         "override": false,
         "enable_search": false,
         "enable_vision": false,
-        "context_size": 8192,
-        "workers": 1
+        "context_size": 8192
       }
     },
     {
@@ -37,8 +36,7 @@
         "override": false,
         "enable_search": false,
         "enable_vision": false,
-        "context_size": 8192,
-        "workers": 1
+        "context_size": 8192
       }
     },
     {
@@ -57,8 +55,7 @@
         "override": false,
         "enable_search": false,
         "enable_vision": false,
-        "context_size": 8192,
-        "workers": 1
+        "context_size": 8192
       },
       "scan_strategy_check": {
         "tail_only_frame_count_lt_full": true,

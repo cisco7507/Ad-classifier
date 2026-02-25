@@ -54,7 +54,6 @@ def test_job_settings_accept_enable_web_search_alias():
             "enable_web_search": True,
             "enable_vision": True,
             "context_size": 8192,
-            "workers": 1,
         }
     )
     assert settings.enable_search is True

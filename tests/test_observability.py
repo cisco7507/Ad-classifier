@@ -109,7 +109,7 @@ def test_get_jobs_from_db_includes_stage_and_stage_detail(monkeypatch):
                 "2026-02-24 10:01:00",
                 33.3,
                 None,
-                '{"categories":"","provider":"Ollama","model_name":"qwen3-vl:8b-instruct","ocr_engine":"EasyOCR","ocr_mode":"🚀 Fast","scan_mode":"Tail Only","override":false,"enable_search":true,"enable_vision":true,"context_size":8192,"workers":1}',
+                '{"categories":"","provider":"Ollama","model_name":"qwen3-vl:8b-instruct","ocr_engine":"EasyOCR","ocr_mode":"🚀 Fast","scan_mode":"Tail Only","override":false,"enable_search":true,"enable_vision":true,"context_size":8192}',
                 "pipeline",
                 "https://example.test/video.mp4",
                 None,

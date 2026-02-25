@@ -71,7 +71,6 @@ def submit_job(fixture: dict) -> str:
                     "enable_search": "1" if s["enable_search"] else "0",
                     "enable_vision": "1" if s["enable_vision"] else "0",
                     "context_size": str(s["context_size"]),
-                    "workers": str(s["workers"]),
                 },
             )
         resp.raise_for_status()

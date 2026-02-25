@@ -30,7 +30,6 @@ export interface JobSettings {
   enable_agentic_search?: boolean;
   enable_vision: boolean;
   context_size:  number;
-  workers:       number;
 }
 
 export interface JobStatus {

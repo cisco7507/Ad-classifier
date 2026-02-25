@@ -30,7 +30,6 @@ export function Jobs() {
   const [enableVision, setEnableVision] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [contextSize, setContextSize] = useState(8192);
-  const [workers, setWorkers] = useState(1);
 
   // Filtering
   const [search, setSearch] = useState('');
@@ -67,7 +66,6 @@ export function Jobs() {
       enable_web_search: enableWebSearch,
       enable_vision: enableVision,
       context_size: contextSize,
-      workers,
     }),
     [
       categories,
@@ -79,7 +77,6 @@ export function Jobs() {
       enableWebSearch,
       enableVision,
       contextSize,
-      workers,
     ]
   );
 
@@ -230,10 +227,6 @@ export function Jobs() {
             <div className="space-y-1">
               <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Context Limit</label>
               <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300 font-mono" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Workers</label>
-              <input type="number" min={1} max={16} value={workers} onChange={(e) => setWorkers(Number(e.target.value || 1))} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300 font-mono" />
             </div>
             <div className="space-y-1">
               <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Provider</label>

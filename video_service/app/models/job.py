@@ -19,7 +19,6 @@ class JobSettings(BaseModel):
     enable_agentic_search: Optional[bool] = None
     enable_vision: bool = True
     context_size: int = 8192
-    workers: int = 2
 
     @model_validator(mode="before")
     @classmethod

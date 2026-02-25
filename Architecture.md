@@ -4,6 +4,9 @@
 - `video_service.app.main` runs the FastAPI API server.
 - `video_service.workers.worker` runs background job processing against the same SQLite schema.
 - Cluster mode is configured by `cluster_config*.json`; each node owns and serves its local jobs through `/admin/jobs`, while `/cluster/jobs` aggregates across healthy nodes.
+- Concurrency knobs:
+  - `WORKER_PROCESSES`: number of worker processes spawned by a single `python -m video_service.workers.worker` command.
+  - `PIPELINE_THREADS_PER_JOB`: per-job thread fanout used by pipeline execution.
 
 ## Data and Storage
 - Primary persistence is SQLite (`video_service.db.database`).
@@ -51,6 +54,10 @@
   - `GET /cluster/jobs`
   - `GET /diagnostics/device`
 - Added:
+  - `GET /diagnostics/concurrency`
+    - `worker_processes_configured`
+    - `pipeline_threads_per_job`
+    - `effective_mode`
   - `GET /diagnostics/category` (and legacy alias `GET /diagnostics/categories`)
     - `category_mapping_enabled`
     - `category_mapping_count`
