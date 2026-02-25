@@ -257,14 +257,12 @@ class TestScanStrategyParity:
         """Returns (tail_only_count, full_scan_count)."""
         from video_service.core.video_io import (
             extract_frames_for_pipeline,
-            extract_frames_for_agent,
-            get_stream_url,
         )
-        frames_tail, cap = extract_frames_for_pipeline(url)
+        frames_tail, cap = extract_frames_for_pipeline(url, scan_mode="Tail Only")
         if cap and cap.isOpened():
             cap.release()
 
-        frames_full, cap = extract_frames_for_agent(url)
+        frames_full, cap = extract_frames_for_pipeline(url, scan_mode="Full Video")
         if cap and cap.isOpened():
             cap.release()
 

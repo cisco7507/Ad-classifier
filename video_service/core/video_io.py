@@ -10,7 +10,7 @@ def get_stream_url(video_url):
         with yt_dlp.YoutubeDL({'format': 'best', 'quiet': True}) as ydl: return ydl.extract_info(video_url, download=False).get('url', video_url)
     except: return video_url
 
-def extract_frames_for_pipeline(url):
+def extract_frames_for_pipeline(url, scan_mode="Tail Only"):
     cap = cv2.VideoCapture(get_stream_url(url))
     frames = []
     if not cap.isOpened():
@@ -21,11 +21,22 @@ def extract_frames_for_pipeline(url):
     if total <= 0 or fps <= 0:
         return frames, cap
 
-    for t in range(int(max(0, (total/fps)-3)*fps), total, max(1, int(total/6))):
+    mode = (scan_mode or "").strip().lower()
+    full_video_modes = {"full video", "full scan"}
+    if mode in full_video_modes:
+        start = 0
+        step = max(1, int(fps * 2))
+        frame_type = "scene"
+    else:
+        start = int(max(0, (total / fps) - 3) * fps)
+        step = max(1, int(total / 6))
+        frame_type = "tail"
+
+    for t in range(start, total, step):
         cap.set(cv2.CAP_PROP_POS_FRAMES, t)
         ret, fr = cap.read()
         if ret: 
-            frames.append({"image": Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)), "ocr_image": fr, "time": t/fps, "type": "tail"})
+            frames.append({"image": Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)), "ocr_image": fr, "time": t/fps, "type": frame_type})
     
     return frames, cap
 
