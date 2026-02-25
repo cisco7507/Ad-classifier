@@ -210,6 +210,7 @@ def _append_job_event(job_id: str, message: str) -> None:
                     "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (json.dumps(events), job_id),
                 )
+                conn.commit()
             return
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() or attempts >= 8:
@@ -225,7 +226,8 @@ def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 1
     for attempt in range(1, attempts + 1):
         try:
             with closing(get_db()) as conn:
-                conn.execute(sql, params)
+                with conn:
+                    conn.execute(sql, params)
             return
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() or attempt == attempts:

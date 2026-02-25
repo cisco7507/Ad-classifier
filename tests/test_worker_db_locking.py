@@ -23,13 +23,22 @@ def test_execute_job_update_with_retry_retries_on_locked(monkeypatch):
     calls = {"n": 0}
 
     class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def close(self):
+            return None
+
         def execute(self, _sql, _params):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise sqlite3.OperationalError("database is locked")
             return None
 
-    monkeypatch.setattr(worker, "get_db", lambda: _Ctx(_Conn()))
+    monkeypatch.setattr(worker, "get_db", lambda: _Conn())
     monkeypatch.setattr(worker.time, "sleep", lambda _secs: None)
 
     worker._execute_job_update_with_retry("UPDATE jobs SET stage = ? WHERE id = ?", ("ocr", "job-1"))
@@ -38,10 +47,19 @@ def test_execute_job_update_with_retry_retries_on_locked(monkeypatch):
 
 def test_execute_job_update_with_retry_raises_non_lock_error(monkeypatch):
     class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def close(self):
+            return None
+
         def execute(self, _sql, _params):
             raise sqlite3.OperationalError("no such table: jobs")
 
-    monkeypatch.setattr(worker, "get_db", lambda: _Ctx(_Conn()))
+    monkeypatch.setattr(worker, "get_db", lambda: _Conn())
     with pytest.raises(sqlite3.OperationalError):
         worker._execute_job_update_with_retry("UPDATE jobs SET stage = ? WHERE id = ?", ("ocr", "job-1"))
 
@@ -50,6 +68,12 @@ def test_append_job_event_retries_on_locked(monkeypatch):
     state = {"attempt": 0, "updated_payload": None}
 
     class _Conn:
+        def close(self):
+            return None
+
+        def commit(self):
+            return None
+
         def execute(self, sql, params=()):
             if sql.startswith("BEGIN IMMEDIATE"):
                 return None
@@ -63,7 +87,7 @@ def test_append_job_event_retries_on_locked(monkeypatch):
                 return None
             return None
 
-    monkeypatch.setattr(worker, "get_db", lambda: _Ctx(_Conn()))
+    monkeypatch.setattr(worker, "get_db", lambda: _Conn())
     monkeypatch.setattr(worker.time, "sleep", lambda _secs: None)
 
     worker._append_job_event("job-1", "evt")
