@@ -59,6 +59,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 
 type ArtifactTab = 'vision' | 'ocr' | 'frames';
 type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
+type ReasoningTermType = 'brand' | 'url' | 'evidence';
+type ReasoningTerm = { text: string; type: ReasoningTermType };
+type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
@@ -79,6 +82,27 @@ function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: st
 
 function formatStageName(stage: string): string {
   return stage.replace(/_/g, ' ');
+}
+
+function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
+  const cleanTerm = term.trim();
+  const termLower = cleanTerm.toLowerCase();
+  const brandLower = brandText.trim().toLowerCase();
+  if (brandLower && termLower === brandLower) return { text: cleanTerm, type: 'brand' };
+  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: 'url' };
+  return { text: cleanTerm, type: 'evidence' };
+}
+
+function reasoningPillClass(type: ReasoningTermType): string {
+  if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
+  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
+  return 'bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-full text-xs';
+}
+
+function reasoningInlineClass(type: ReasoningTermType): string {
+  if (type === 'brand') return 'bg-slate-700/80 text-white font-semibold px-1 rounded';
+  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 px-1 rounded font-mono';
+  return 'bg-amber-500/15 text-amber-300 px-1 rounded';
 }
 
 function parseToolSegment(line: string): { tool: ScratchTool | null; query: string; finalFields: Record<string, string> } {
@@ -239,9 +263,66 @@ export function JobDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
+  const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
+  const [showFullReasoning, setShowFullReasoning] = useState(false);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const firstRow = result?.[0];
+  const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
+  const reasoningRaw = firstRow
+    ? (firstRow.Reasoning ?? (firstRow as any).reasoning ?? firstRow['Reasoning'])
+    : '';
+  const reasoningText = typeof reasoningRaw === 'string' ? reasoningRaw.trim() : '';
+  const isRecoveredReasoning = reasoningText.toLowerCase().startsWith('(recovered)');
+  const reasoningDisplayText = useMemo(() => {
+    if (!reasoningText) return '';
+    if (showFullReasoning || reasoningText.length <= 500) return reasoningText;
+    return `${reasoningText.slice(0, 220).trimEnd()}...`;
+  }, [reasoningText, showFullReasoning]);
+  const quotedTermsAll = useMemo<ReasoningTerm[]>(() => {
+    if (!reasoningText) return [];
+    const regex = /'([^']+)'/g;
+    const seen = new Set<string>();
+    const orderedTerms: string[] = [];
+    let match = regex.exec(reasoningText);
+    while (match) {
+      const clean = match[1].trim();
+      const key = clean.toLowerCase();
+      if (clean && !seen.has(key)) {
+        seen.add(key);
+        orderedTerms.push(clean);
+      }
+      match = regex.exec(reasoningText);
+    }
+    return orderedTerms.map((term) => classifyReasoningTerm(term, brandText));
+  }, [reasoningText, brandText]);
+  const visibleQuotedTerms = showAllReasoningTerms ? quotedTermsAll : quotedTermsAll.slice(0, 6);
+  const hiddenQuotedTermsCount = Math.max(0, quotedTermsAll.length - visibleQuotedTerms.length);
+  const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
+    if (!reasoningDisplayText) return [];
+    if (quotedTermsAll.length === 0) return [reasoningDisplayText];
+    const termType = new Map<string, ReasoningTermType>();
+    quotedTermsAll.forEach((term) => termType.set(term.text.toLowerCase(), term.type));
+
+    const parts: HighlightedReasoningPart[] = [];
+    const regex = /'([^']+)'/g;
+    let lastIndex = 0;
+    let match = regex.exec(reasoningDisplayText);
+    while (match) {
+      if (match.index > lastIndex) {
+        parts.push(reasoningDisplayText.slice(lastIndex, match.index));
+      }
+      const term = match[1];
+      parts.push({ text: `'${term}'`, type: termType.get(term.toLowerCase()) || 'evidence' });
+      lastIndex = regex.lastIndex;
+      match = regex.exec(reasoningDisplayText);
+    }
+    if (lastIndex < reasoningDisplayText.length) {
+      parts.push(reasoningDisplayText.slice(lastIndex));
+    }
+    return parts;
+  }, [reasoningDisplayText, quotedTermsAll]);
   const ocrText = artifacts?.ocr_text?.text || '';
   const agentScratchboardEvents = useMemo(
     () => events
@@ -264,6 +345,11 @@ export function JobDetail() {
     }
     return map;
   }, [ocrText]);
+
+  useEffect(() => {
+    setShowAllReasoningTerms(false);
+    setShowFullReasoning(false);
+  }, [reasoningText]);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -350,7 +436,6 @@ export function JobDetail() {
   if (!job) return null;
 
   const progressPercent = Math.round(job.progress ?? 0);
-  const firstRow = result?.[0];
 
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
@@ -359,15 +444,9 @@ export function JobDetail() {
   const currentStage = (job.stage || '').trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
 
-  const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
   const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
   const categoryIdText = typeof categoryIdRaw === 'string' ? categoryIdRaw.trim() : String(categoryIdRaw ?? '').trim();
-
-  const reasoningRaw = firstRow
-    ? (firstRow.Reasoning ?? (firstRow as any).reasoning ?? firstRow['Reasoning'])
-    : '';
-  const reasoningText = typeof reasoningRaw === 'string' ? reasoningRaw.trim() : '';
 
   const confidenceValue = toNumber(firstRow?.Confidence);
   const confidenceDisplay = confidenceValue === null ? 'N/A' : confidenceValue.toFixed(2);
@@ -512,14 +591,79 @@ export function JobDetail() {
               </div>
             </div>
           </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <div className="bg-gradient-to-r from-slate-900 to-slate-900/80 border border-slate-800 border-l-[3px] border-l-emerald-500/50 rounded-xl p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-sm font-semibold text-slate-200">💡 LLM Reasoning</h3>
-              <CopyButton text={reasoningText || 'No reasoning available'} label="Copy Reasoning" />
+              <h3 className="text-xs uppercase tracking-wider text-slate-500 font-bold">💡 LLM Reasoning</h3>
+              <CopyButton text={reasoningText || 'No reasoning provided by the LLM.'} label="Copy Reasoning" />
             </div>
-            <div className="text-sm text-slate-300 whitespace-pre-wrap">
-              {reasoningText || 'No reasoning available'}
-            </div>
+
+            {isRecoveredReasoning && (
+              <div className="mb-3 inline-flex items-center gap-1 text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1 text-xs">
+                <span>🔍</span>
+                <span>Web-assisted recovery</span>
+              </div>
+            )}
+
+            {visibleQuotedTerms.length > 0 && (
+              <div className="mb-4">
+                <div className="flex flex-wrap gap-2">
+                  {visibleQuotedTerms.map((term, idx) => (
+                    <span
+                      key={`${term.text}-${idx}`}
+                      role="status"
+                      className={reasoningPillClass(term.type)}
+                    >
+                      {term.text}
+                    </span>
+                  ))}
+                  {hiddenQuotedTermsCount > 0 && !showAllReasoningTerms && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllReasoningTerms(true)}
+                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                    >
+                      +{hiddenQuotedTermsCount} more
+                    </button>
+                  )}
+                  {quotedTermsAll.length > 6 && showAllReasoningTerms && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllReasoningTerms(false)}
+                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                    >
+                      Show less
+                    </button>
+                  )}
+                </div>
+                <div className="border-b border-slate-800 mt-4" />
+              </div>
+            )}
+
+            {reasoningText ? (
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+                {highlightedReasoning.map((part, idx) => (
+                  typeof part === 'string' ? (
+                    <span key={idx}>{part}</span>
+                  ) : (
+                    <span key={idx} className={reasoningInlineClass(part.type)}>
+                      {part.text}
+                    </span>
+                  )
+                ))}
+              </p>
+            ) : (
+              <p className="text-slate-600 italic text-sm">No reasoning provided by the LLM.</p>
+            )}
+
+            {reasoningText.length > 500 && (
+              <button
+                type="button"
+                onClick={() => setShowFullReasoning((current) => !current)}
+                className="mt-3 text-xs text-cyan-300 hover:text-cyan-200 underline underline-offset-2"
+              >
+                {showFullReasoning ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         </div>
       )}
