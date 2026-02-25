@@ -1,5 +1,6 @@
 import os
 import sys
+import torch
 import numpy as np
 import pytest
 from transformers.configuration_utils import PretrainedConfig
@@ -85,6 +86,28 @@ def test_florence_build_uses_eager_attention_and_flash_guard(monkeypatch):
     assert "use_fast" not in captured["processor_kwargs"]
     assert os.environ.get("FLASH_ATTN_DISABLED") is None
     assert "flash_attn" not in sys.modules
+
+
+def test_florence_build_meta_linspace_guard_avoids_item_on_meta(monkeypatch):
+    class _DummyModel:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return self
+
+    def _fake_model_loader(*args, **kwargs):
+        # Simulate Florence remote init behavior that previously crashed under
+        # HF's meta-device context.
+        _ = torch.linspace(0, 1, 3, device="meta")[0].item()
+        return _DummyModel()
+
+    monkeypatch.setattr(ocr_module.AutoModelForCausalLM, "from_pretrained", _fake_model_loader)
+    monkeypatch.setattr(ocr_module.AutoProcessor, "from_pretrained", lambda *a, **k: object())
+
+    mgr = ocr_module.OCRManager()
+    engine = mgr._build_florence_engine()
+    assert engine["type"] == "florence2"
 
 
 def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):

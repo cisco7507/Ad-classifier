@@ -76,6 +76,23 @@ class OCRManager:
             else:
                 os.environ["FLASH_ATTN_DISABLED"] = prev_env
 
+    @staticmethod
+    @contextmanager
+    def _florence_meta_linspace_guard():
+        # Florence remote model init can call `.item()` on values from torch.linspace
+        # while HF is temporarily in a meta-device context. Force CPU linspace in this
+        # scoped block to prevent RuntimeError: Tensor.item() on meta tensors.
+        original_linspace = torch.linspace
+
+        def _safe_linspace(*args, **kwargs):
+            requested_device = kwargs.get("device")
+            if requested_device is None or str(requested_device) == "meta":
+                kwargs["device"] = "cpu"
+            return original_linspace(*args, **kwargs)
+
+        with patch.object(torch, "linspace", _safe_linspace):
+            yield
+
     def _build_florence_engine(self):
         def fixed_get_imports(filename):
             imports = get_imports(filename)
@@ -83,8 +100,10 @@ class OCRManager:
                 imports.remove("flash_attn")
             return imports
 
-        with self._florence_flash_attn_guard(), patch(
-            "transformers.dynamic_module_utils.get_imports", fixed_get_imports
+        with (
+            self._florence_flash_attn_guard(),
+            self._florence_meta_linspace_guard(),
+            patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports),
         ):
             self._ensure_florence_config_compat()
             self._ensure_florence_tokenizer_compat()
