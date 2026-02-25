@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import type { ReactElement } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getJob, getJobResult, getJobEvents, getJobArtifacts, exportResultsCSV, copyToClipboard } from '../lib/api';
 import type { JobStatus, ResultRow, JobArtifacts } from '../lib/api';
@@ -13,6 +14,48 @@ function toApiUrl(url?: string | null): string {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   return `${API_BASE}${url}`;
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatMatchMethod(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const normalized = trimmed.toLowerCase();
+  if (normalized === 'none' || normalized === 'pending') return '';
+  return normalized
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function formatSummaryMatch(method: unknown, score: unknown): string {
+  if (typeof method !== 'string') return '—';
+  const normalized = method.trim().toLowerCase();
+  if (!normalized || normalized === 'none' || normalized === 'pending') return '—';
+
+  const label = normalized === 'semantic'
+    ? 'Semantic'
+    : normalized === 'exact'
+      ? 'Exact'
+      : normalized === 'embeddings'
+        ? 'Embed.'
+        : normalized === 'vision'
+          ? 'Vision'
+          : formatMatchMethod(method) || '—';
+
+  const scoreValue = toNumber(score);
+  if (scoreValue === null) return label;
+  return `${label} (${scoreValue.toFixed(2)})`;
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -35,6 +78,248 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 }
 
 type ArtifactTab = 'vision' | 'ocr' | 'frames';
+type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
+type ReasoningTermType = 'brand' | 'url' | 'evidence';
+type ReasoningTerm = { text: string; type: ReasoningTermType };
+type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
+
+const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
+const COMMON_SIGNAL_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'he', 'her', 'his',
+  'in', 'is', 'it', 'its', 'of', 'on', 'or', 'she', 'so', 'the', 'their', 'them', 'then', 'there',
+  'they', 'this', 'to', 'too', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'who', 'will',
+  'with', 'would', 'but', 'if', 'not', 'no', 'yes', 'that', 'than', 'also', 'been', 'being', 'both',
+  'each', 'had', 'may', 'most', 'must', 'likely', 'likely meant', 'however', 'therefore', 'thus',
+]);
+
+function extractFrameTimestampKey(frame: { timestamp?: number | null; label?: string }): string | null {
+  if (typeof frame.timestamp === 'number' && Number.isFinite(frame.timestamp)) {
+    return frame.timestamp.toFixed(1);
+  }
+  if (typeof frame.label === 'string') {
+    const match = frame.label.match(/([\d.]+)\s*s/i);
+    if (match) {
+      const parsed = Number.parseFloat(match[1]);
+      if (Number.isFinite(parsed)) return parsed.toFixed(1);
+    }
+  }
+  return null;
+}
+
+function formatStageName(stage: string): string {
+  return stage.replace(/_/g, ' ');
+}
+
+function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
+  const cleanTerm = term.trim();
+  const termLower = cleanTerm.toLowerCase();
+  const brandLower = brandText.trim().toLowerCase();
+  if (brandLower && termLower === brandLower) return { text: cleanTerm, type: 'brand' };
+  if (/\.\w{2,4}$/i.test(cleanTerm)) return { text: cleanTerm, type: 'url' };
+  return { text: cleanTerm, type: 'evidence' };
+}
+
+function isValidSignalPill(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > 50) return false;
+  if (trimmed.length < 2) return false;
+  if (/^[—\-,;:)\.\!\?'’]/.test(trimmed)) return false;
+  if (/[,;:\('’]$/.test(trimmed)) return false;
+  if (/[\[\]]/.test(trimmed)) return false;
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount > 10) return false;
+  if (COMMON_SIGNAL_WORDS.has(trimmed.toLowerCase())) return false;
+  return true;
+}
+
+function normalizeSignalPillText(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, ' ');
+  const spacedDomain = trimmed.match(/^([a-z0-9-]+)\s+(com|net|org|co|io|ai|ca|us|uk|edu|gov)$/i);
+  if (spacedDomain) {
+    return `${spacedDomain[1].toLowerCase()}.${spacedDomain[2].toLowerCase()}`;
+  }
+  return trimmed;
+}
+
+function sanitizeInlineReasoningFragment(text: string): string {
+  return text
+    .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeStage(raw: string): string {
+  const lower = raw.toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    frameextract: 'frame_extract',
+    'frame extract': 'frame_extract',
+    complete: 'completed',
+    done: 'completed',
+  };
+  return aliases[lower] || lower;
+}
+
+function reasoningPillClass(type: ReasoningTermType): string {
+  if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
+  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
+  return 'bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-full text-xs';
+}
+
+function reasoningInlineClass(type: ReasoningTermType): string {
+  if (type === 'brand') return 'bg-slate-700/80 text-white font-semibold px-1 rounded';
+  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 px-1 rounded font-mono';
+  return 'bg-amber-500/15 text-amber-300 px-1 rounded';
+}
+
+function parseToolSegment(line: string): { tool: ScratchTool | null; query: string; finalFields: Record<string, string> } {
+  const toolMatch = line.match(/\[TOOL:\s*(OCR|SEARCH|VISION|FINAL|ERROR)\b([^\]]*)\]/i);
+  if (!toolMatch) return { tool: null, query: '', finalFields: {} };
+
+  const tool = toolMatch[1].toUpperCase() as ScratchTool;
+  const segment = toolMatch[0];
+  const queryMatch = segment.match(/query\s*=\s*["']([^"']+)["']/i);
+
+  const finalFields: Record<string, string> = {};
+  if (tool === 'FINAL') {
+    const quoted = /(\w+)\s*=\s*"([^"]*)"/g;
+    let match = quoted.exec(segment);
+    while (match) {
+      finalFields[match[1].toLowerCase()] = match[2].trim();
+      match = quoted.exec(segment);
+    }
+    const unquoted = /(\w+)\s*=\s*([^,\]\|]+)/g;
+    match = unquoted.exec(segment);
+    while (match) {
+      const key = match[1].toLowerCase();
+      if (!(key in finalFields)) finalFields[key] = match[2].trim();
+      match = unquoted.exec(segment);
+    }
+  }
+
+  return { tool, query: queryMatch?.[1]?.trim() || '', finalFields };
+}
+
+function toolTone(tool: ScratchTool | null): { icon: string; badge: string; border: string; text: string } {
+  switch (tool) {
+    case 'OCR':
+      return { icon: '📝', badge: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300', border: 'border-cyan-500/50', text: 'text-cyan-300' };
+    case 'SEARCH':
+      return { icon: '🔍', badge: 'bg-amber-500/10 border-amber-500/30 text-amber-300', border: 'border-amber-500/50', text: 'text-amber-300' };
+    case 'VISION':
+      return { icon: '👁️', badge: 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-300', border: 'border-fuchsia-500/50', text: 'text-fuchsia-300' };
+    case 'FINAL':
+      return { icon: '✅', badge: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300', border: 'border-emerald-500/50', text: 'text-emerald-300' };
+    case 'ERROR':
+      return { icon: '❌', badge: 'bg-red-500/10 border-red-500/30 text-red-300', border: 'border-red-500/50', text: 'text-red-300' };
+    default:
+      return { icon: '•', badge: 'bg-slate-800 border-slate-700 text-slate-300', border: 'border-slate-700', text: 'text-slate-300' };
+  }
+}
+
+function renderScratchboardEvent(event: string, index: number): ReactElement {
+  const lines = event.split('\n');
+  let currentTool: ScratchTool | null = null;
+  const renderedLines: ReactElement[] = [];
+
+  lines.forEach((rawLine, lineIndex) => {
+    const trimmed = rawLine.trim();
+    const key = `${index}-${lineIndex}`;
+
+    if (!trimmed) {
+      renderedLines.push(<div key={key} className="h-1" />);
+      return;
+    }
+
+    if (/^---\s*Step\s+\d+\s*---/i.test(trimmed)) {
+      renderedLines.push(
+        <div key={key} className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-800 pb-1 mb-2 mt-4">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (trimmed.includes('✅ FINAL CONCLUSION')) {
+      renderedLines.push(
+        <div key={key} className="bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-2 text-emerald-300 font-semibold">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^🤔\s*Thought:/i.test(trimmed)) {
+      renderedLines.push(
+        <div key={key} className="italic text-slate-500">
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^Action:/i.test(trimmed)) {
+      const actionText = trimmed.replace(/^Action:\s*/i, '');
+      const parsed = parseToolSegment(actionText);
+      if (parsed.tool) currentTool = parsed.tool;
+      const tone = toolTone(parsed.tool);
+      const trailingText = actionText.replace(/\[TOOL:[^\]]+\]/i, '').trim();
+
+      renderedLines.push(
+        <div key={key} className="text-slate-300 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-200">Action:</span>
+            {parsed.tool ? (
+              <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}>
+                <span>{tone.icon}</span>
+                <span>{parsed.tool}</span>
+              </span>
+            ) : (
+              <span className="text-slate-300">{actionText}</span>
+            )}
+            {trailingText && <span className="text-slate-400">{trailingText}</span>}
+            {parsed.tool === 'SEARCH' && parsed.query && (
+              <span className="bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono">
+                {parsed.query}
+              </span>
+            )}
+          </div>
+          {parsed.tool === 'FINAL' && Object.keys(parsed.finalFields).length > 0 && (
+            <div className="ml-6 grid gap-1 text-[10px] text-emerald-200">
+              {parsed.finalFields.brand && <div><span className="text-slate-500 uppercase mr-1">Brand:</span>{parsed.finalFields.brand}</div>}
+              {parsed.finalFields.category && <div><span className="text-slate-500 uppercase mr-1">Category:</span>{parsed.finalFields.category}</div>}
+              {parsed.finalFields.reason && <div><span className="text-slate-500 uppercase mr-1">Reason:</span>{parsed.finalFields.reason}</div>}
+            </div>
+          )}
+        </div>,
+      );
+      return;
+    }
+
+    if (/^(Result:|Observation:)/i.test(trimmed)) {
+      const parsed = parseToolSegment(trimmed);
+      const tone = toolTone(parsed.tool || currentTool);
+      renderedLines.push(
+        <div key={key} className={`ml-2 pl-3 border-l-2 ${tone.border} text-slate-400 whitespace-pre-wrap`}>
+          {trimmed}
+        </div>,
+      );
+      return;
+    }
+
+    renderedLines.push(
+      <div key={key} className="text-slate-300 whitespace-pre-wrap">
+        {rawLine}
+      </div>,
+    );
+  });
+
+  return (
+    <div className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0">
+      {renderedLines}
+    </div>
+  );
+}
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
@@ -45,9 +330,132 @@ export function JobDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
+  const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
+  const [showFullReasoning, setShowFullReasoning] = useState(false);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const firstRow = result?.[0];
+  const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
+  const reasoningRaw = firstRow
+    ? (firstRow.Reasoning ?? (firstRow as any).reasoning ?? firstRow['Reasoning'])
+    : '';
+  const reasoningText = typeof reasoningRaw === 'string' ? reasoningRaw.trim() : '';
+  const isRecoveredReasoning = reasoningText.toLowerCase().startsWith('(recovered)');
+  const reasoningDisplayText = useMemo(() => {
+    if (!reasoningText) return '';
+    if (showFullReasoning || reasoningText.length <= 500) return reasoningText;
+    return `${reasoningText.slice(0, 220).trimEnd()}...`;
+  }, [reasoningText, showFullReasoning]);
+  const quotedTermsAll = useMemo<ReasoningTerm[]>(() => {
+    if (!reasoningText) return [];
+    const regex = /'([^']+)'/g;
+    const seen = new Set<string>();
+    const orderedTerms: string[] = [];
+    let match = regex.exec(reasoningText);
+    while (match) {
+      const clean = match[1].trim();
+      const key = clean.toLowerCase();
+      if (clean && !seen.has(key)) {
+        seen.add(key);
+        orderedTerms.push(clean);
+      }
+      match = regex.exec(reasoningText);
+    }
+    const canonicalMap = new Map<string, string>();
+    orderedTerms
+      .filter(isValidSignalPill)
+      .forEach((term) => {
+        const normalized = normalizeSignalPillText(term);
+        const key = normalized.toLowerCase();
+        const existing = canonicalMap.get(key);
+        if (!existing) {
+          canonicalMap.set(key, normalized);
+          return;
+        }
+        if (existing === existing.toUpperCase() && normalized !== normalized.toUpperCase()) {
+          canonicalMap.set(key, normalized);
+        }
+      });
+
+    return Array.from(canonicalMap.values()).map((term) => classifyReasoningTerm(term, brandText));
+  }, [reasoningText, brandText]);
+  const visibleQuotedTerms = showAllReasoningTerms ? quotedTermsAll : quotedTermsAll.slice(0, 6);
+  const hiddenQuotedTermsCount = Math.max(0, quotedTermsAll.length - visibleQuotedTerms.length);
+  const highlightedReasoning = useMemo<HighlightedReasoningPart[]>(() => {
+    if (!reasoningDisplayText) return [];
+    if (quotedTermsAll.length === 0) return [reasoningDisplayText];
+    const termType = new Map<string, ReasoningTermType>();
+    quotedTermsAll.forEach((term) => termType.set(term.text.toLowerCase(), term.type));
+
+    const parts: HighlightedReasoningPart[] = [];
+    const regex = /'([^']+)'/g;
+    let lastIndex = 0;
+    let match = regex.exec(reasoningDisplayText);
+    while (match) {
+      if (match.index > lastIndex) {
+        parts.push(reasoningDisplayText.slice(lastIndex, match.index));
+      }
+      const term = match[1];
+      const normalizedTerm = normalizeSignalPillText(term);
+      const termKind = termType.get(normalizedTerm.toLowerCase());
+      if (termKind) {
+        parts.push({ text: normalizedTerm, type: termKind });
+      } else {
+        const sanitized = sanitizeInlineReasoningFragment(term);
+        if (sanitized) parts.push(sanitized);
+      }
+      lastIndex = regex.lastIndex;
+      match = regex.exec(reasoningDisplayText);
+    }
+    if (lastIndex < reasoningDisplayText.length) {
+      parts.push(reasoningDisplayText.slice(lastIndex));
+    }
+    return parts;
+  }, [reasoningDisplayText, quotedTermsAll]);
+  const ocrText = artifacts?.ocr_text?.text || '';
+  const agentScratchboardEvents = useMemo(
+    () => events
+      .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
+      .map((evt) => {
+        if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
+        if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
+        return evt;
+      }),
+    [events],
+  );
+  const ocrByTimestamp = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const line of (ocrText || '').split('\n')) {
+      const match = line.match(/^\[([\d.]+)s\]\s*(.*)$/);
+      if (!match) continue;
+      const ts = Number.parseFloat(match[1]);
+      if (!Number.isFinite(ts)) continue;
+      map.set(ts.toFixed(1), match[2] || '');
+    }
+    return map;
+  }, [ocrText]);
+  const stageSequenceForEvents = job?.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
+  const stageMessages = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const evt of events) {
+      const withoutTimestamp = evt.replace(/^\d{4}-\d{2}-\d{2}T[\d:.+\-]+Z?\s*/, '');
+      const colonIdx = withoutTimestamp.indexOf(':');
+      if (colonIdx <= 0) continue;
+      const stageRaw = withoutTimestamp.slice(0, colonIdx).trim();
+      const stage = normalizeStage(stageRaw);
+      if (!stageSequenceForEvents.includes(stage as (typeof stageSequenceForEvents)[number])) continue;
+      const detail = withoutTimestamp.slice(colonIdx + 1).trim();
+      if (!detail) continue;
+      map.set(stage, detail);
+    }
+    return map;
+  }, [events, stageSequenceForEvents]);
+
+  useEffect(() => {
+    setShowAllReasoningTerms(false);
+    setShowFullReasoning(false);
+  }, [reasoningText]);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -134,18 +542,41 @@ export function JobDetail() {
   if (!job) return null;
 
   const progressPercent = Math.round(job.progress ?? 0);
-  const firstRow = result?.[0];
-  const agentScratchboardEvents = events
-    .filter((evt) => evt.includes(' agent:\n') || evt.includes(' agent: '))
-    .map((evt) => {
-      if (evt.includes(' agent:\n')) return evt.split(' agent:\n')[1] ?? evt;
-      if (evt.includes(' agent: ')) return evt.split(' agent: ')[1] ?? evt;
-      return evt;
-    });
 
-  const ocrText = artifacts?.ocr_text?.text || '';
   const frameItems = artifacts?.latest_frames || [];
   const visionBoard = artifacts?.vision_board;
+  const frameCount = frameItems.length;
+  const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
+  const currentStage = (job.stage || '').trim();
+  const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
+
+  const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
+  const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
+  const categoryIdText = typeof categoryIdRaw === 'string' ? categoryIdRaw.trim() : String(categoryIdRaw ?? '').trim();
+
+  const confidenceValue = toNumber(firstRow?.Confidence);
+  const confidenceSummaryDisplay = confidenceValue === null ? '—' : confidenceValue.toFixed(2);
+  const confidenceSummaryTextColor = confidenceValue === null
+    ? 'text-slate-500'
+    : confidenceValue >= 0.8
+      ? 'text-emerald-400'
+      : confidenceValue >= 0.5
+        ? 'text-amber-400'
+        : 'text-red-400';
+  const confidenceSummaryDotColor = confidenceValue === null
+    ? 'bg-slate-500'
+    : confidenceValue >= 0.8
+      ? 'bg-emerald-400'
+      : confidenceValue >= 0.5
+        ? 'bg-amber-400'
+        : 'bg-red-400';
+
+  const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
+  const summaryMatchDisplay = formatSummaryMatch(
+    matchMethodRaw,
+    firstRow ? (firstRow as any).category_match_score : null,
+  );
+  const summaryFrameDisplay = artifacts ? String(frameCount) : '—';
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
@@ -193,16 +624,18 @@ export function JobDetail() {
 
             <div className="text-sm text-slate-400 break-all max-w-3xl font-mono opacity-80 bg-slate-950/50 p-2 rounded border border-slate-800">{job.url}</div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
-                <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+            {job.status !== 'completed' && job.status !== 'failed' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                  <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
+                  <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+                </div>
+                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
+                  <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
+                  <div className="text-slate-300">{job.stage_detail || '—'}</div>
+                </div>
               </div>
-              <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
-                <div className="text-slate-300">{job.stage_detail || '—'}</div>
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="flex flex-col items-end gap-1 text-sm text-slate-500 shrink-0">
@@ -219,24 +652,125 @@ export function JobDetail() {
         )}
       </div>
 
+      {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
+        <div className="bg-slate-900 border border-emerald-500/20 border-t-2 border-t-emerald-500/50 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <CheckCircledIcon className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span
+              title={brandText || 'Unknown Brand'}
+              className="text-lg md:text-xl font-bold text-white max-w-[14rem] md:max-w-xs truncate"
+            >
+              {brandText || 'Unknown Brand'}
+            </span>
+            <span className="text-slate-600 shrink-0">→</span>
+            <span
+              title={categoryText || 'Unknown Category'}
+              className="text-lg md:text-xl font-bold text-emerald-400 max-w-[14rem] md:max-w-sm truncate"
+            >
+              {categoryText || 'Unknown Category'}
+            </span>
+            {categoryIdText && (
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded shrink-0">
+                ID: {categoryIdText}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-stretch self-stretch md:self-auto shrink-0">
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Confidence</div>
+              <div className={`inline-flex items-center justify-center gap-1 text-sm font-bold ${confidenceSummaryTextColor}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${confidenceSummaryDotColor}`} aria-hidden />
+                <span>{confidenceSummaryDisplay}</span>
+              </div>
+            </div>
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Match</div>
+              <div className="text-sm font-mono text-cyan-400">{summaryMatchDisplay}</div>
+            </div>
+            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Frames</div>
+              <div className="text-sm font-mono text-slate-300">{summaryFrameDisplay}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {firstRow && firstRow.Brand !== 'Err' && (
-        <div className="grid gap-6 animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <CheckCircledIcon className="text-emerald-400" /> Final Classification
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Category</div>
-              <div className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-emerald-200 bg-clip-text text-transparent">{firstRow.Category || 'None'}</div>
+        <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
+          <div className="bg-gradient-to-r from-slate-900 to-slate-900/80 border border-slate-800 border-l-[3px] border-l-emerald-500/50 rounded-xl p-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-xs uppercase tracking-wider text-slate-500 font-bold">💡 LLM Reasoning</h3>
+              <CopyButton text={reasoningText || 'No reasoning provided by the LLM.'} label="Copy Reasoning" />
             </div>
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Brand Detected</div>
-              <div className="text-2xl font-bold text-white drop-shadow-sm">{firstRow.Brand || 'N/A'}</div>
-            </div>
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm">
-              <div className="text-xs uppercase text-slate-500 font-bold tracking-wider mb-2">Confidence Score</div>
-              <div className="text-2xl font-bold text-cyan-400 drop-shadow-sm">{firstRow.Confidence}</div>
-            </div>
+
+            {isRecoveredReasoning && (
+              <div className="mb-3 inline-flex items-center gap-1 text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1 text-xs">
+                <span>🔍</span>
+                <span>Web-assisted recovery</span>
+              </div>
+            )}
+
+            {visibleQuotedTerms.length > 0 && (
+              <div className="mb-4">
+                <div className="flex flex-wrap gap-2">
+                  {visibleQuotedTerms.map((term, idx) => (
+                    <span
+                      key={`${term.text}-${idx}`}
+                      role="status"
+                      className={reasoningPillClass(term.type)}
+                    >
+                      {term.text}
+                    </span>
+                  ))}
+                  {hiddenQuotedTermsCount > 0 && !showAllReasoningTerms && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllReasoningTerms(true)}
+                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                    >
+                      +{hiddenQuotedTermsCount} more
+                    </button>
+                  )}
+                  {quotedTermsAll.length > 6 && showAllReasoningTerms && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllReasoningTerms(false)}
+                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                    >
+                      Show less
+                    </button>
+                  )}
+                </div>
+                <div className="border-b border-slate-800 mt-4" />
+              </div>
+            )}
+
+            {reasoningText ? (
+              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+                {highlightedReasoning.map((part, idx) => (
+                  typeof part === 'string' ? (
+                    <span key={idx}>{part}</span>
+                  ) : (
+                    <span key={idx} className={reasoningInlineClass(part.type)}>
+                      {part.text}
+                    </span>
+                  )
+                ))}
+              </p>
+            ) : (
+              <p className="text-slate-600 italic text-sm">No reasoning provided by the LLM.</p>
+            )}
+
+            {reasoningText.length > 500 && (
+              <button
+                type="button"
+                onClick={() => setShowFullReasoning((current) => !current)}
+                className="mt-3 text-xs text-cyan-300 hover:text-cyan-200 underline underline-offset-2"
+              >
+                {showFullReasoning ? 'Show less' : 'Show more'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -283,14 +817,26 @@ export function JobDetail() {
           <div className="p-4">
             {frameItems.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {frameItems.map((frame, idx) => (
-                  <div key={idx} className="aspect-video bg-slate-950 rounded border border-slate-800 overflow-hidden relative group">
-                    <img src={toApiUrl(frame.url)} alt={frame.label || `Frame ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
-                      {frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`)}
+                {frameItems.map((frame, idx) => {
+                  const frameLabel = frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`);
+                  const frameTsKey = extractFrameTimestampKey(frame);
+                  const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : '';
+                  return (
+                    <div key={idx} className="aspect-video bg-slate-950 rounded border border-slate-800 overflow-hidden relative group">
+                      <img src={toApiUrl(frame.url)} alt={frameLabel} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
+                        {frameLabel}
+                      </div>
+                      {frameOcrText && (
+                        <div className="absolute inset-0 bg-black/85 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-3 flex items-center justify-center">
+                          <p className="text-[10px] text-cyan-300 font-mono leading-relaxed text-center line-clamp-6">
+                            {frameOcrText}
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : <div className="text-xs text-slate-500">No latest frames available.</div>}
           </div>
@@ -304,22 +850,121 @@ export function JobDetail() {
           </div>
           <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-300" ref={scratchboardRef}>
             {agentScratchboardEvents.map((evt, i) => (
-              <div key={i} className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+              <Fragment key={i}>{renderScratchboardEvent(evt, i)}</Fragment>
             ))}
           </div>
         </div>
       )}
 
-      {events.length > 0 && (
+      {(events.length > 0 || job.stage) && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
-          <div className="bg-slate-900/80 px-4 py-3 border-b border-slate-800 font-semibold text-slate-300 flex items-center gap-2">
-            <MagicWandIcon className="text-fuchsia-400" /> Stage / Event History
+          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
+            <div className="min-w-[680px] w-full px-1">
+              <div className="flex items-center w-full mb-2">
+                {stages.map((stage, idx) => {
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  const stageLabel = formatStageName(stage);
+                  const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
+                  return (
+                    <Fragment key={stage}>
+                      {idx > 0 && (
+                        <div
+                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? 'bg-emerald-500' : 'bg-slate-800'}`}
+                        />
+                      )}
+                      <div
+                        title={dotTitle}
+                        className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors duration-500 ${
+                          isDone
+                            ? 'bg-emerald-500 border-emerald-400'
+                            : isCurrent
+                              ? 'bg-blue-500 border-blue-400 animate-pulse'
+                              : isFailed
+                                ? 'bg-red-500 border-red-400'
+                                : 'bg-slate-800 border-slate-700'
+                        }`}
+                      />
+                    </Fragment>
+                  );
+                })}
+              </div>
+
+              <div className="flex w-full mb-3">
+                {stages.map((stage, idx) => {
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  return (
+                    <div
+                      key={stage}
+                      className={`text-[9px] uppercase tracking-wider text-center transition-colors duration-500 px-1 ${
+                        idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'
+                      } ${
+                        isDone
+                          ? 'text-emerald-500'
+                          : isCurrent
+                            ? 'text-blue-400'
+                            : isFailed
+                              ? 'text-red-400'
+                              : 'text-slate-600'
+                      }`}
+                    >
+                      {stage.replace('_', ' ')}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex w-full border-t border-slate-800/50 pt-3">
+                {stages.map((stage, idx) => {
+                  const message = stageMessages.get(stage);
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  return (
+                    <div
+                      key={stage}
+                      className={`text-center px-1 ${idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'}`}
+                    >
+                      {message && (
+                        <div
+                          className={`text-[10px] leading-tight truncate transition-all duration-300 ${
+                            isCurrent
+                              ? 'text-blue-300 font-medium'
+                              : isDone
+                                ? 'text-slate-500'
+                                : 'text-slate-600'
+                          }`}
+                          title={message}
+                        >
+                          {message}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={historyRef}>
-            {events.map((evt, i) => (
-              <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
-            ))}
-          </div>
+          <details
+            className="bg-slate-950 border-t border-slate-800 overflow-hidden shadow-sm group"
+          >
+            <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
+              <MagicWandIcon className="text-fuchsia-400" />
+              <span>Event History</span>
+              <span className="text-xs text-slate-600 font-normal ml-2">({events.length} events)</span>
+            </summary>
+            {events.length > 0 ? (
+              <div className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400 border-t border-slate-800" ref={historyRef}>
+                {events.map((evt, i) => (
+                  <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 text-xs text-slate-500 border-t border-slate-800">No events yet.</div>
+            )}
+          </details>
         </div>
       )}
 
