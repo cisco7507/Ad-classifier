@@ -161,8 +161,18 @@ def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only") -> tuple
         step = max(1, int(fps * 2))
         frame_type = "scene"
     else:
-        start = int(max(0, (total / fps) - 3) * fps)
-        step = max(1, int(total / 6))
+        tail_window_seconds = 3
+        target_tail_frames = _parse_int_env("TAIL_TARGET_FRAMES", 5)
+        start = int(max(0, (total / fps) - tail_window_seconds) * fps)
+        tail_window_frames = total - start
+        step = max(1, int(tail_window_frames / max(1, target_tail_frames)))
+        logger.debug(
+            "tail_sampling: start_frame=%d step=%d expected_frames=%d tail_window=%.1fs",
+            start,
+            step,
+            len(range(start, total, step)),
+            tail_window_seconds,
+        )
         frame_type = "tail"
 
     for t in range(start, total, step):
