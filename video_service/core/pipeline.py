@@ -1,4 +1,6 @@
 import time
+import os
+import re
 import torch
 import cv2
 import pandas as pd
@@ -21,6 +23,34 @@ RESULT_COLUMNS = [
     "category_match_method",
     "category_match_score",
 ]
+
+
+def _normalize_ocr(text: str) -> str:
+    return re.sub(r"[^a-z0-9\s]", "", (text or "").lower()).strip()
+
+
+def _ocr_texts_similar(a: str, b: str, threshold: float = 0.85) -> bool:
+    if not a and not b:
+        return True
+    if not a or not b:
+        return False
+    words_a, words_b = set(a.split()), set(b.split())
+    if not words_a and not words_b:
+        return True
+    union = words_a | words_b
+    if not union:
+        return True
+    return (len(words_a & words_b) / len(union)) >= threshold
+
+
+def _resolve_ocr_dedup_threshold() -> float:
+    raw = os.environ.get("OCR_DEDUP_THRESHOLD", "0.85")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_dedup_threshold value=%r fallback=0.85", raw)
+        return 0.85
+    return max(0.0, min(1.0, value))
 
 
 def process_single_video(
@@ -89,7 +119,37 @@ def process_single_video(
         
         if stage_callback:
             stage_callback("ocr", f"ocr engine={oe.lower()}")
-        ocr_text = "\n".join([f"[{f['time']:.1f}s] {ocr_manager.extract_text(oe, f['ocr_image'], om)}" for f in frames])
+        dedup_threshold = _resolve_ocr_dedup_threshold()
+        ocr_lines: list[str] = []
+        prev_normalized: str | None = None
+        skipped_count = 0
+        last_index = len(frames) - 1
+        for idx, frame in enumerate(frames):
+            raw_text = ocr_manager.extract_text(oe, frame["ocr_image"], om)
+            normalized = _normalize_ocr(raw_text)
+            is_last_frame = idx == last_index
+            if (
+                prev_normalized is not None
+                and not is_last_frame
+                and _ocr_texts_similar(normalized, prev_normalized, dedup_threshold)
+            ):
+                skipped_count += 1
+                logger.debug(
+                    "ocr_dedup_skip: frame at %.1fs similar to previous threshold=%.2f",
+                    frame["time"],
+                    dedup_threshold,
+                )
+                continue
+            ocr_lines.append(f"[{frame['time']:.1f}s] {raw_text}")
+            prev_normalized = normalized
+        ocr_text = "\n".join(ocr_lines)
+        logger.info(
+            "ocr_dedup: processed=%d skipped=%d total_frames=%d threshold=%.2f",
+            len(ocr_lines),
+            skipped_count,
+            len(frames),
+            dedup_threshold,
+        )
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
         res = llm_engine.query_pipeline(p, m, ocr_text, categories, frames[-1]["image"], override, enable_search, enable_vision, ctx)
