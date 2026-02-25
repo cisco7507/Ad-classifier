@@ -5,7 +5,7 @@ import pandas as pd
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
-from video_service.core.video_io import extract_frames_for_agent, resolve_urls
+from video_service.core.video_io import extract_frames_for_agent, resolve_urls, get_pil_image
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine, search_manager
 
@@ -90,7 +90,7 @@ class AdClassifierAgent:
         stage_callback=None,
     ):
         memory_log = "Initial State: I am investigating a chronological storyboard of scenes extracted from an ad.\n"
-        pil_images = [f["image"] for f in frames_data]
+        pil_images = [get_pil_image(f) for f in frames_data]
         yield memory_log, "Unknown", "Unknown", "", "N/A", "Agent is thinking...", "pending", None
         
         for step in range(self.max_iterations):

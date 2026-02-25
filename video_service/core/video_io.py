@@ -35,6 +35,26 @@ def _compute_hs_histogram(frame_bgr: Any) -> Any:
     return cv2.normalize(hist, None).flatten()
 
 
+def get_pil_image(frame: dict[str, Any]) -> Image.Image:
+    cached = frame.get("_pil_cache")
+    if cached is not None:
+        return cached
+
+    existing = frame.get("image")
+    if existing is not None:
+        frame["_pil_cache"] = existing
+        return existing
+
+    frame_bgr = frame.get("ocr_image")
+    if frame_bgr is None:
+        raise ValueError("frame is missing ocr_image for lazy PIL conversion")
+
+    pil = Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    frame["_pil_cache"] = pil
+    frame["image"] = pil
+    return pil
+
+
 def _maybe_extend_tail_frames(
     frames: list[dict[str, Any]],
     cap: Any,
@@ -113,10 +133,11 @@ def _maybe_extend_tail_frames(
 
             candidate_frames.append(
                 {
-                    "image": Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)),
+                    "image": None,
                     "ocr_image": fr,
                     "time": cursor / fps,
                     "type": "backward_ext",
+                    "_pil_cache": None,
                 }
             )
 
@@ -179,7 +200,13 @@ def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only") -> tuple
         cap.set(cv2.CAP_PROP_POS_FRAMES, t)
         ret, fr = cap.read()
         if ret: 
-            frames.append({"image": Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)), "ocr_image": fr, "time": t/fps, "type": frame_type})
+            frames.append({
+                "image": None,
+                "ocr_image": fr,
+                "time": t / fps,
+                "type": frame_type,
+                "_pil_cache": None,
+            })
 
     if frame_type == "tail":
         frames = _maybe_extend_tail_frames(frames, cap, fps, start)
@@ -201,7 +228,13 @@ def extract_frames_for_agent(url: str) -> tuple[list[dict[str, Any]], Any]:
         cap.set(cv2.CAP_PROP_POS_FRAMES, t)
         ret, fr = cap.read()
         if ret: 
-            frames.append({"image": Image.fromarray(cv2.cvtColor(fr, cv2.COLOR_BGR2RGB)), "ocr_image": fr, "time": t/fps, "type": "scene"})
+            frames.append({
+                "image": None,
+                "ocr_image": fr,
+                "time": t / fps,
+                "type": "scene",
+                "_pil_cache": None,
+            })
     
     return frames, cap
 

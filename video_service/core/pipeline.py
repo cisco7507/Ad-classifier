@@ -7,7 +7,7 @@ import pandas as pd
 import concurrent.futures
 from contextvars import copy_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
-from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls
+from video_service.core.video_io import extract_frames_for_pipeline, resolve_urls, get_pil_image
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
 from video_service.core.ocr import ocr_manager
@@ -100,7 +100,7 @@ def process_single_video(
                     stage_callback("vision", "vision enabled; computing visual category scores")
                 start_time = time.time()
                 with torch.no_grad():
-                    pil_images = [f["image"] for f in frames]
+                    pil_images = [get_pil_image(f) for f in frames]
                     image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
                     if TORCH_DTYPE != torch.float32:
                         image_inputs = {
@@ -189,7 +189,8 @@ def process_single_video(
             ocr_text = _do_ocr()
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
-        res = llm_engine.query_pipeline(p, m, ocr_text, categories, frames[-1]["image"], override, enable_search, enable_vision, ctx)
+        tail_image = get_pil_image(frames[-1]) if enable_vision else frames[-1]["image"]
+        res = llm_engine.query_pipeline(p, m, ocr_text, categories, tail_image, override, enable_search, enable_vision, ctx)
         
         category_match = category_mapper.map_category(
             raw_category=res.get("category", "Unknown"),
