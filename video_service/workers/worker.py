@@ -15,6 +15,7 @@ import re
 import logging
 import traceback
 import multiprocessing
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -187,25 +188,48 @@ def _extract_agent_ocr_text(events: list[str]) -> str:
 
 
 def _append_job_event(job_id: str, message: str) -> None:
-    try:
-        with get_db() as conn:
-            row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
-            events = []
-            if row and row["events"]:
-                try:
-                    events = json.loads(row["events"])
-                except Exception:
-                    events = []
+    attempts = 0
+    while attempts < 8:
+        attempts += 1
+        try:
+            with get_db() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                events = []
+                if row and row["events"]:
+                    try:
+                        events = json.loads(row["events"])
+                    except Exception:
+                        events = []
 
-            events.append(message)
-            # Keep event payload bounded.
-            events = events[-400:]
-            conn.execute(
-                "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(events), job_id),
-            )
-    except Exception as exc:
-        logger.warning("event_append_failed: %s", exc)
+                events.append(message)
+                # Keep event payload bounded.
+                events = events[-400:]
+                conn.execute(
+                    "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (json.dumps(events), job_id),
+                )
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempts >= 8:
+                logger.warning("event_append_failed: %s", exc)
+                return
+            time.sleep(0.05 * attempts)
+        except Exception as exc:
+            logger.warning("event_append_failed: %s", exc)
+            return
+
+
+def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 10) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            with get_db() as conn:
+                conn.execute(sql, params)
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == attempts:
+                raise
+            time.sleep(0.05 * attempt)
 
 
 def _set_stage(
@@ -231,8 +255,7 @@ def _set_stage(
     sql += " WHERE id = ?"
     params.append(job_id)
 
-    with get_db() as conn:
-        conn.execute(sql, tuple(params))
+    _execute_job_update_with_retry(sql, tuple(params))
 
     logger.info("%s", detail_msg)
     _append_job_event(
@@ -248,17 +271,18 @@ def _stage_callback(job_id: str):
 
 
 def claim_and_process_job() -> bool:
-    conn = get_db()
     job_token = None
+    claim_conn = None
     try:
-        cur = conn.cursor()
-        conn.execute("BEGIN EXCLUSIVE")
+        claim_conn = get_db()
+        cur = claim_conn.cursor()
+        claim_conn.execute("BEGIN IMMEDIATE")
 
         cur.execute("SELECT * FROM jobs WHERE status = 'queued' LIMIT 1")
         row = cur.fetchone()
 
         if not row:
-            conn.rollback()
+            claim_conn.rollback()
             return False
 
         job_id = row["id"]
@@ -266,7 +290,9 @@ def claim_and_process_job() -> bool:
             "UPDATE jobs SET status = 'processing', stage = 'claim', stage_detail = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             ("worker claimed job", job_id),
         )
-        conn.commit()
+        claim_conn.commit()
+        claim_conn.close()
+        claim_conn = None
 
         job_token = set_job_context(job_id)
         set_stage_context("claim", "worker claimed job")
@@ -298,45 +324,47 @@ def claim_and_process_job() -> bool:
             error_msg = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
 
         # Persist result
-        with get_db() as update_conn:
-            if error_msg:
-                _set_stage(
+        if error_msg:
+            _set_stage(
+                job_id,
+                "failed",
+                f"job failed: {_short(error_msg, 180)}",
+                status="failed",
+                error=error_msg,
+            )
+            logger.error("job_failed: error=%.200s", error_msg)
+        else:
+            _set_stage(job_id, "persist", "persisting result payload")
+            brand, category, category_id = _extract_summary_fields(result_json)
+            _execute_job_update_with_retry(
+                "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (
+                    "result persisted",
+                    result_json,
+                    json.dumps(artifacts_payload),
+                    brand,
+                    category,
+                    category_id,
                     job_id,
-                    "failed",
-                    f"job failed: {_short(error_msg, 180)}",
-                    status="failed",
-                    error=error_msg,
-                )
-                logger.error("job_failed: error=%.200s", error_msg)
-            else:
-                _set_stage(job_id, "persist", "persisting result payload")
-                brand, category, category_id = _extract_summary_fields(result_json)
-                update_conn.execute(
-                    "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (
-                        "result persisted",
-                        result_json,
-                        json.dumps(artifacts_payload),
-                        brand,
-                        category,
-                        category_id,
-                        job_id,
-                    ),
-                )
-                _append_job_event(
-                    job_id,
-                    f"{datetime.now(timezone.utc).isoformat()} completed: result persisted",
-                )
-                set_stage_context("completed", "result persisted")
-                logger.info("job_completed")
+                ),
+            )
+            _append_job_event(
+                job_id,
+                f"{datetime.now(timezone.utc).isoformat()} completed: result persisted",
+            )
+            set_stage_context("completed", "result persisted")
+            logger.info("job_completed")
 
         return True
 
     except Exception as exc:
-        conn.rollback()
+        if claim_conn is not None:
+            claim_conn.rollback()
         logger.error("worker_lock_error: %s", exc)
         return False
     finally:
+        if claim_conn is not None:
+            claim_conn.close()
         reset_stage_context()
         reset_job_context(job_token)
 
