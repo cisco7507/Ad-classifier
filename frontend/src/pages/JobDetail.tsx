@@ -134,6 +134,13 @@ function normalizeSignalPillText(text: string): string {
   return trimmed;
 }
 
+function sanitizeInlineReasoningFragment(text: string): string {
+  return text
+    .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function reasoningPillClass(type: ReasoningTermType): string {
   if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
   if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
@@ -371,11 +378,13 @@ export function JobDetail() {
         parts.push(reasoningDisplayText.slice(lastIndex, match.index));
       }
       const term = match[1];
-      const termKind = termType.get(term.toLowerCase());
+      const normalizedTerm = normalizeSignalPillText(term);
+      const termKind = termType.get(normalizedTerm.toLowerCase());
       if (termKind) {
-        parts.push({ text: `'${term}'`, type: termKind });
+        parts.push({ text: normalizedTerm, type: termKind });
       } else {
-        parts.push(`'${term}'`);
+        const sanitized = sanitizeInlineReasoningFragment(term);
+        if (sanitized) parts.push(sanitized);
       }
       lastIndex = regex.lastIndex;
       match = regex.exec(reasoningDisplayText);
