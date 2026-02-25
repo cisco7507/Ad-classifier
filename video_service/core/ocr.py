@@ -1,10 +1,14 @@
+import os
+import sys
 import torch
 import easyocr
 import threading
+from contextlib import contextmanager
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForCausalLM
 from transformers.configuration_utils import PretrainedConfig
 from transformers.dynamic_module_utils import get_imports
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from unittest.mock import patch
 from video_service.core.utils import logger, device, TORCH_DTYPE
 
@@ -29,6 +33,49 @@ class OCRManager:
         if not hasattr(PretrainedConfig, "forced_bos_token_id"):
             setattr(PretrainedConfig, "forced_bos_token_id", None)
 
+    @staticmethod
+    def _ensure_florence_tokenizer_compat():
+        # Compatibility shim for newer tokenizers where Florence remote code
+        # still expects tokenizer.additional_special_tokens.
+        if hasattr(PreTrainedTokenizerBase, "additional_special_tokens"):
+            return
+
+        def _get_additional_special_tokens(tokenizer):
+            special_tokens = getattr(tokenizer, "special_tokens_map", {}) or {}
+            tokens = special_tokens.get("additional_special_tokens")
+            return list(tokens) if tokens is not None else []
+
+        def _set_additional_special_tokens(tokenizer, tokens):
+            tokenizer.add_special_tokens({"additional_special_tokens": list(tokens or [])})
+
+        setattr(
+            PreTrainedTokenizerBase,
+            "additional_special_tokens",
+            property(_get_additional_special_tokens, _set_additional_special_tokens),
+        )
+
+    @staticmethod
+    @contextmanager
+    def _florence_flash_attn_guard():
+        sentinel = object()
+        prev_module = sys.modules.get("flash_attn", sentinel)
+        prev_env = os.environ.get("FLASH_ATTN_DISABLED")
+        os.environ["FLASH_ATTN_DISABLED"] = "1"
+        # Some Florence remote-code paths attempt to import flash_attn.
+        # On MPS/CPU runtimes this should be treated as unavailable.
+        sys.modules["flash_attn"] = None
+        try:
+            yield
+        finally:
+            if prev_module is sentinel:
+                sys.modules.pop("flash_attn", None)
+            else:
+                sys.modules["flash_attn"] = prev_module
+            if prev_env is None:
+                os.environ.pop("FLASH_ATTN_DISABLED", None)
+            else:
+                os.environ["FLASH_ATTN_DISABLED"] = prev_env
+
     def _build_florence_engine(self):
         def fixed_get_imports(filename):
             imports = get_imports(filename)
@@ -36,22 +83,31 @@ class OCRManager:
                 imports.remove("flash_attn")
             return imports
 
-        with patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports):
+        with self._florence_flash_attn_guard(), patch(
+            "transformers.dynamic_module_utils.get_imports", fixed_get_imports
+        ):
             self._ensure_florence_config_compat()
+            self._ensure_florence_tokenizer_compat()
             model_id = "microsoft/Florence-2-base"
             logger.info(f"Initializing Florence-2 on {device} with dtype {TORCH_DTYPE}")
             model = AutoModelForCausalLM.from_pretrained(
                 model_id,
                 trust_remote_code=True,
                 torch_dtype=TORCH_DTYPE,
+                # Florence remote code on current transformers can trip SDPA checks
+                # before language_model is initialized; eager attention avoids that path.
+                attn_implementation="eager",
             ).to(device).eval()
             try:
-                processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-            except Exception:
                 processor = AutoProcessor.from_pretrained(
                     model_id,
                     trust_remote_code=True,
                     use_fast=False,
+                )
+            except Exception:
+                processor = AutoProcessor.from_pretrained(
+                    model_id,
+                    trust_remote_code=True,
                 )
             return {"type": "florence2", "model": model, "processor": processor}
 
