@@ -113,6 +113,17 @@ function classifyReasoningTerm(term: string, brandText: string): ReasoningTerm {
   return { text: cleanTerm, type: 'evidence' };
 }
 
+function isValidSignalPill(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > 50) return false;
+  if (trimmed.length < 2) return false;
+  if (/^[—\-,;:)\.\!\?]/.test(trimmed)) return false;
+  if (/[,;:\(]$/.test(trimmed)) return false;
+  const wordCount = trimmed.split(/\s+/).length;
+  if (wordCount > 10) return false;
+  return true;
+}
+
 function reasoningPillClass(type: ReasoningTermType): string {
   if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
   if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
@@ -315,7 +326,9 @@ export function JobDetail() {
       }
       match = regex.exec(reasoningText);
     }
-    return orderedTerms.map((term) => classifyReasoningTerm(term, brandText));
+    return orderedTerms
+      .filter(isValidSignalPill)
+      .map((term) => classifyReasoningTerm(term, brandText));
   }, [reasoningText, brandText]);
   const visibleQuotedTerms = showAllReasoningTerms ? quotedTermsAll : quotedTermsAll.slice(0, 6);
   const hiddenQuotedTermsCount = Math.max(0, quotedTermsAll.length - visibleQuotedTerms.length);
@@ -334,7 +347,12 @@ export function JobDetail() {
         parts.push(reasoningDisplayText.slice(lastIndex, match.index));
       }
       const term = match[1];
-      parts.push({ text: `'${term}'`, type: termType.get(term.toLowerCase()) || 'evidence' });
+      const termKind = termType.get(term.toLowerCase());
+      if (termKind) {
+        parts.push({ text: `'${term}'`, type: termKind });
+      } else {
+        parts.push(`'${term}'`);
+      }
       lastIndex = regex.lastIndex;
       match = regex.exec(reasoningDisplayText);
     }
