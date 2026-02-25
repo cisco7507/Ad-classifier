@@ -313,9 +313,12 @@ export function JobDetail() {
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
+  const [flyingMessage, setFlyingMessage] = useState<string | null>(null);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const flyingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevEventCountRef = useRef(0);
   const firstRow = result?.[0];
   const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const reasoningRaw = firstRow
@@ -421,6 +424,42 @@ export function JobDetail() {
     setShowAllReasoningTerms(false);
     setShowFullReasoning(false);
   }, [reasoningText]);
+
+  useEffect(() => {
+    if (job?.status !== 'processing') {
+      if (flyingTimeoutRef.current) {
+        clearTimeout(flyingTimeoutRef.current);
+        flyingTimeoutRef.current = null;
+      }
+      setFlyingMessage(null);
+      prevEventCountRef.current = events.length;
+      return;
+    }
+
+    if (prevEventCountRef.current === 0 && events.length > 0) {
+      prevEventCountRef.current = events.length;
+      return;
+    }
+
+    if (events.length > prevEventCountRef.current) {
+      const latestEvent = events[events.length - 1] || '';
+      const detail = latestEvent
+        .replace(/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?\s*/, '')
+        .trim();
+      const compact = detail.length > 140 ? `${detail.slice(0, 137)}...` : detail;
+      setFlyingMessage(compact || null);
+      if (flyingTimeoutRef.current) clearTimeout(flyingTimeoutRef.current);
+      flyingTimeoutRef.current = setTimeout(() => {
+        setFlyingMessage(null);
+      }, 3000);
+    }
+
+    prevEventCountRef.current = events.length;
+  }, [events, job?.status]);
+
+  useEffect(() => () => {
+    if (flyingTimeoutRef.current) clearTimeout(flyingTimeoutRef.current);
+  }, []);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -876,7 +915,7 @@ export function JobDetail() {
 
       {(events.length > 0 || job.stage) && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
-          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
+          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto relative">
             <div className="min-w-[680px] flex items-center gap-0 w-full px-1 pb-5">
               {stages.map((stage, idx) => {
                 const isDone = job.status === 'completed' || currentIdx > idx || (job.status === 'failed' && currentIdx > idx);
@@ -922,19 +961,39 @@ export function JobDetail() {
                 );
               })}
             </div>
-          </div>
-          <div className="bg-slate-900/80 px-4 py-3 border-b border-slate-800 font-semibold text-slate-300 flex items-center gap-2">
-            <MagicWandIcon className="text-fuchsia-400" /> Stage / Event History
-          </div>
-          {events.length > 0 ? (
-            <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400" ref={historyRef}>
-              {events.map((evt, i) => (
-                <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
-              ))}
+            <div className="relative h-8 mt-2 min-w-[680px]">
+              {flyingMessage && job.status === 'processing' && currentIdx >= 0 && (
+                <div
+                  key={flyingMessage}
+                  className="absolute -translate-x-1/2 animate-in fade-in slide-in-from-bottom-2 duration-300 max-w-xs"
+                  style={{ left: `${((currentIdx + 0.5) / stages.length) * 100}%` }}
+                >
+                  <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-3 py-1.5 text-xs text-blue-300 font-mono whitespace-nowrap truncate shadow-lg shadow-blue-500/5">
+                    {flyingMessage}
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="p-4 text-xs text-slate-500">No events yet.</div>
-          )}
+          </div>
+          <details
+            className="bg-slate-950 border-t border-slate-800 overflow-hidden shadow-sm group"
+            open={job.status === 'processing'}
+          >
+            <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
+              <MagicWandIcon className="text-fuchsia-400" />
+              <span>Stage / Event History</span>
+              <span className="text-xs text-slate-600 font-normal ml-2">({events.length} events)</span>
+            </summary>
+            {events.length > 0 ? (
+              <div className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400 border-t border-slate-800" ref={historyRef}>
+                {events.map((evt, i) => (
+                  <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 text-xs text-slate-500 border-t border-slate-800">No events yet.</div>
+            )}
+          </details>
         </div>
       )}
 
