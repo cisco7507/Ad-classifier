@@ -82,13 +82,6 @@ type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
 type ReasoningTermType = 'brand' | 'url' | 'evidence';
 type ReasoningTerm = { text: string; type: ReasoningTermType };
 type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
-type FlyingTimelineMessage = {
-  id: number;
-  text: string;
-  stageIndex: number;
-  side: 'above' | 'below';
-  row: number;
-};
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
@@ -148,26 +141,15 @@ function sanitizeInlineReasoningFragment(text: string): string {
     .trim();
 }
 
-function extractEventDetail(eventLine: string): string {
-  return eventLine
-    .replace(/^\d{4}-\d{2}-\d{2}T[\d:.+-]+Z?\s*/, '')
-    .trim();
-}
-
-function inferEventStageIndex(detail: string, stages: readonly string[]): number {
-  const lower = detail.toLowerCase();
-  for (let i = 0; i < stages.length; i += 1) {
-    const stage = stages[i].toLowerCase();
-    if (
-      lower.includes(`stage=${stage}`)
-      || lower.startsWith(`${stage}:`)
-      || lower.includes(` ${stage}:`)
-      || lower.startsWith(stage)
-    ) {
-      return i;
-    }
-  }
-  return -1;
+function normalizeStage(raw: string): string {
+  const lower = raw.toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    frameextract: 'frame_extract',
+    'frame extract': 'frame_extract',
+    complete: 'completed',
+    done: 'completed',
+  };
+  return aliases[lower] || lower;
 }
 
 function reasoningPillClass(type: ReasoningTermType): string {
@@ -342,12 +324,9 @@ export function JobDetail() {
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
-  const [flyingMessages, setFlyingMessages] = useState<FlyingTimelineMessage[]>([]);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
-  const prevEventCountRef = useRef(0);
-  const nextFlyingIdRef = useRef(0);
   const firstRow = result?.[0];
   const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const reasoningRaw = firstRow
@@ -448,58 +427,27 @@ export function JobDetail() {
     }
     return map;
   }, [ocrText]);
+  const stageSequenceForEvents = job?.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
+  const stageMessages = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const evt of events) {
+      const withoutTimestamp = evt.replace(/^\d{4}-\d{2}-\d{2}T[\d:.+\-]+Z?\s*/, '');
+      const colonIdx = withoutTimestamp.indexOf(':');
+      if (colonIdx <= 0) continue;
+      const stageRaw = withoutTimestamp.slice(0, colonIdx).trim();
+      const stage = normalizeStage(stageRaw);
+      if (!stageSequenceForEvents.includes(stage as (typeof stageSequenceForEvents)[number])) continue;
+      const detail = withoutTimestamp.slice(colonIdx + 1).trim();
+      if (!detail) continue;
+      map.set(stage, detail);
+    }
+    return map;
+  }, [events, stageSequenceForEvents]);
 
   useEffect(() => {
     setShowAllReasoningTerms(false);
     setShowFullReasoning(false);
   }, [reasoningText]);
-
-  useEffect(() => {
-    prevEventCountRef.current = 0;
-    nextFlyingIdRef.current = 0;
-    setFlyingMessages([]);
-  }, [id]);
-
-  useEffect(() => {
-    const stageSequence = (job?.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES) as readonly string[];
-    const currentStageIndex = stageSequence.indexOf((job?.stage || '').trim() as (typeof stageSequence)[number]);
-
-    if (events.length < prevEventCountRef.current) {
-      prevEventCountRef.current = 0;
-      setFlyingMessages([]);
-    }
-
-    if (events.length > prevEventCountRef.current) {
-      const newEvents = events.slice(prevEventCountRef.current);
-      setFlyingMessages((existing) => {
-        const next = [...existing];
-        newEvents.forEach((eventLine) => {
-          const detail = extractEventDetail(eventLine);
-          if (!detail) return;
-          const compact = detail.length > 120 ? `${detail.slice(0, 117)}...` : detail;
-          const inferredIndex = inferEventStageIndex(detail, stageSequence);
-          const stageIndex = inferredIndex >= 0 ? inferredIndex : Math.max(0, currentStageIndex);
-          const idValue = nextFlyingIdRef.current;
-          const side: 'above' | 'below' = idValue % 2 === 0 ? 'above' : 'below';
-          const row = next.filter((msg) => msg.side === side && msg.stageIndex === stageIndex).length % 3;
-          nextFlyingIdRef.current += 1;
-          next.push({
-            id: idValue,
-            text: compact,
-            stageIndex,
-            side,
-            row,
-          });
-        });
-        if (next.length > 24) {
-          return next.slice(next.length - 24);
-        }
-        return next;
-      });
-    }
-
-    prevEventCountRef.current = events.length;
-  }, [events, job?.mode, job?.stage]);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -593,9 +541,6 @@ export function JobDetail() {
   const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
   const currentStage = (job.stage || '').trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
-  const timelineStageCount = Math.max(1, stages.length);
-  const flyingMessagesAbove = flyingMessages.filter((msg) => msg.side === 'above');
-  const flyingMessagesBelow = flyingMessages.filter((msg) => msg.side === 'below');
 
   const categoryText = typeof firstRow?.Category === 'string' ? firstRow.Category.trim() : '';
   const categoryIdRaw = firstRow?.['Category ID'] ?? (firstRow as any)?.category_id;
@@ -958,29 +903,12 @@ export function JobDetail() {
 
       {(events.length > 0 || job.stage) && (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
-          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto relative">
+          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
             <div className="min-w-[680px] w-full px-1">
-              <div className="relative h-16 mb-1">
-                {flyingMessagesAbove.map((message) => (
-                  <div
-                    key={message.id}
-                    className="absolute -translate-x-1/2 max-w-[220px]"
-                    style={{
-                      left: `${((message.stageIndex + 0.5) / timelineStageCount) * 100}%`,
-                      bottom: `${message.row * 24}px`,
-                    }}
-                  >
-                    <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-2.5 py-1 text-[10px] text-blue-300 font-mono truncate shadow-lg shadow-blue-500/5">
-                      {message.text}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-0 w-full pb-5">
+              <div className="flex items-center w-full mb-2">
                 {stages.map((stage, idx) => {
-                  const isDone = job.status === 'completed' || currentIdx > idx || (job.status === 'failed' && currentIdx > idx);
-                  const isCurrent = job.status === 'processing' && currentIdx === idx;
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
                   const isFailed = job.status === 'failed' && currentIdx === idx;
                   const stageLabel = formatStageName(stage);
                   const dotTitle = isCurrent && job.stage_detail ? `${stageLabel}: ${job.stage_detail}` : stageLabel;
@@ -988,56 +916,79 @@ export function JobDetail() {
                     <Fragment key={stage}>
                       {idx > 0 && (
                         <div
-                          className={`flex-1 h-0.5 ${isDone ? 'bg-emerald-500' : isFailed ? 'bg-red-500' : 'bg-slate-800'}`}
+                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? 'bg-emerald-500' : 'bg-slate-800'}`}
                         />
                       )}
-                      <div className="relative shrink-0 flex flex-col items-center gap-1">
-                        <div
-                          title={dotTitle}
-                          className={`w-3 h-3 rounded-full border-2 ${
-                            isDone
-                              ? 'bg-emerald-500 border-emerald-400'
-                              : isCurrent
-                                ? 'bg-blue-500 border-blue-400 animate-pulse'
-                                : isFailed
-                                  ? 'bg-red-500 border-red-400'
-                                  : 'bg-slate-800 border-slate-700'
-                          }`}
-                        />
-                        <span
-                          className={`text-[9px] uppercase tracking-wider absolute -bottom-5 whitespace-nowrap ${
-                            isDone
-                              ? 'text-emerald-500'
-                              : isCurrent
-                                ? 'text-blue-400'
-                                : isFailed
-                                  ? 'text-red-400'
-                                  : 'text-slate-600'
-                          }`}
-                        >
-                          {stageLabel}
-                        </span>
-                      </div>
+                      <div
+                        title={dotTitle}
+                        className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors duration-500 ${
+                          isDone
+                            ? 'bg-emerald-500 border-emerald-400'
+                            : isCurrent
+                              ? 'bg-blue-500 border-blue-400 animate-pulse'
+                              : isFailed
+                                ? 'bg-red-500 border-red-400'
+                                : 'bg-slate-800 border-slate-700'
+                        }`}
+                      />
                     </Fragment>
                   );
                 })}
               </div>
 
-              <div className="relative h-16 mt-1">
-                {flyingMessagesBelow.map((message) => (
-                  <div
-                    key={message.id}
-                    className="absolute -translate-x-1/2 max-w-[220px]"
-                    style={{
-                      left: `${((message.stageIndex + 0.5) / timelineStageCount) * 100}%`,
-                      top: `${message.row * 24}px`,
-                    }}
-                  >
-                    <div className="bg-slate-800/90 backdrop-blur-sm border border-blue-500/30 rounded-lg px-2.5 py-1 text-[10px] text-blue-300 font-mono truncate shadow-lg shadow-blue-500/5">
-                      {message.text}
+              <div className="flex w-full mb-3">
+                {stages.map((stage, idx) => {
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  const isFailed = job.status === 'failed' && currentIdx === idx;
+                  return (
+                    <div
+                      key={stage}
+                      className={`text-[9px] uppercase tracking-wider text-center transition-colors duration-500 px-1 ${
+                        idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'
+                      } ${
+                        isDone
+                          ? 'text-emerald-500'
+                          : isCurrent
+                            ? 'text-blue-400'
+                            : isFailed
+                              ? 'text-red-400'
+                              : 'text-slate-600'
+                      }`}
+                    >
+                      {stage.replace('_', ' ')}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+              </div>
+
+              <div className="flex w-full border-t border-slate-800/50 pt-3">
+                {stages.map((stage, idx) => {
+                  const message = stageMessages.get(stage);
+                  const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
+                  const isCurrent = currentIdx === idx && job.status === 'processing';
+                  return (
+                    <div
+                      key={stage}
+                      className={`text-center px-1 ${idx === 0 ? 'w-3 shrink-0' : 'flex-1 min-w-0'}`}
+                    >
+                      {message && (
+                        <div
+                          className={`text-[10px] leading-tight truncate transition-all duration-300 ${
+                            isCurrent
+                              ? 'text-blue-300 font-medium'
+                              : isDone
+                                ? 'text-slate-500'
+                                : 'text-slate-600'
+                          }`}
+                          title={message}
+                        >
+                          {message}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1046,7 +997,7 @@ export function JobDetail() {
           >
             <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
               <MagicWandIcon className="text-fuchsia-400" />
-              <span>Event Hisory</span>
+              <span>Event History</span>
               <span className="text-xs text-slate-600 font-normal ml-2">({events.length} events)</span>
             </summary>
             {events.length > 0 ? (
