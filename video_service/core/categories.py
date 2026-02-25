@@ -1,5 +1,7 @@
-import torch
 import threading
+from typing import Any
+
+import torch
 from transformers import AutoProcessor, AutoModel
 import pandas as pd
 import numpy as np
@@ -17,14 +19,108 @@ except Exception as exc:
 
 siglip_model = None
 siglip_processor = None
+siglip_last_error = None
+_siglip_lock = threading.Lock()
+_siglip_error_logged = None
 
 SIGLIP_ID = "google/siglip-so400m-patch14-384"
-try:
-    logger.info(f"Initializing SigLIP on {device} with dtype {TORCH_DTYPE}")
-    siglip_model = AutoModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
-    siglip_processor = AutoProcessor.from_pretrained(SIGLIP_ID)
-except Exception as e:
-    logger.error(f"Failed to load SigLIP: {e}")
+
+
+def _as_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
+    """Return a dense [batch, dim] tensor from SigLIP model outputs."""
+    if torch.is_tensor(features):
+        return features
+
+    # Newer transformers often return BaseModelOutputWithPooling here.
+    pooler_output = getattr(features, "pooler_output", None)
+    if torch.is_tensor(pooler_output):
+        return pooler_output
+
+    # Defensive fallback for alternate output shapes.
+    last_hidden_state = getattr(features, "last_hidden_state", None)
+    if torch.is_tensor(last_hidden_state):
+        if last_hidden_state.dim() == 3:
+            return last_hidden_state[:, 0, :]
+        return last_hidden_state
+
+    if isinstance(features, dict):
+        for key in ("pooler_output", "last_hidden_state", "text_embeds", "image_embeds"):
+            value = features.get(key)
+            if torch.is_tensor(value):
+                if key == "last_hidden_state" and value.dim() == 3:
+                    return value[:, 0, :]
+                return value
+
+    raise TypeError(
+        f"{source} returned unsupported features type: {type(features).__name__}"
+    )
+
+
+def normalize_feature_tensor(features: Any, *, source: str) -> torch.Tensor:
+    tensor = _as_feature_tensor(features, source=source)
+    norms = tensor.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-12)
+    return tensor / norms
+
+
+def _load_siglip_explicit():
+    # Fallback path when Auto* loaders fail in some transformers/hub combinations.
+    from transformers import SiglipModel, SiglipProcessor, SiglipImageProcessor, SiglipTokenizer
+
+    model = SiglipModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
+    try:
+        processor = SiglipProcessor.from_pretrained(SIGLIP_ID)
+    except Exception:
+        image_processor = SiglipImageProcessor.from_pretrained(SIGLIP_ID)
+        tokenizer = SiglipTokenizer.from_pretrained(SIGLIP_ID)
+        processor = SiglipProcessor(image_processor=image_processor, tokenizer=tokenizer)
+    return model, processor
+
+
+def _ensure_siglip_loaded() -> bool:
+    global siglip_model, siglip_processor, siglip_last_error, _siglip_error_logged
+    if siglip_model is not None and siglip_processor is not None:
+        return True
+
+    with _siglip_lock:
+        if siglip_model is not None and siglip_processor is not None:
+            return True
+        try:
+            logger.info(f"Initializing SigLIP on {device} with dtype {TORCH_DTYPE}")
+            try:
+                model = AutoModel.from_pretrained(SIGLIP_ID, torch_dtype=TORCH_DTYPE).to(device)
+                try:
+                    processor = AutoProcessor.from_pretrained(SIGLIP_ID)
+                except Exception as primary_exc:
+                    logger.warning(
+                        "SigLIP processor init failed (default path), retrying with use_fast=False: %s",
+                        primary_exc,
+                    )
+                    processor = AutoProcessor.from_pretrained(SIGLIP_ID, use_fast=False)
+            except Exception as auto_exc:
+                logger.warning(
+                    "SigLIP auto loader failed, retrying explicit SigLIP loader: %s",
+                    auto_exc,
+                )
+                model, processor = _load_siglip_explicit()
+            if processor is None:
+                raise RuntimeError("AutoProcessor returned None")
+            siglip_model = model
+            siglip_processor = processor
+            siglip_last_error = None
+            return True
+        except Exception as exc:
+            siglip_last_error = f"{type(exc).__name__}: {exc}"
+            if _siglip_error_logged != siglip_last_error:
+                logger.exception("SigLIP unavailable: %s", exc)
+                _siglip_error_logged = siglip_last_error
+            else:
+                logger.warning("SigLIP unavailable: %s", exc)
+            siglip_model = None
+            siglip_processor = None
+            return False
+
+
+_ensure_siglip_loaded()
 
 class CategoryMapper:
     def __init__(self, csv_path=None):
@@ -66,19 +162,7 @@ class CategoryMapper:
             )
 
             self.vision_text_features = None
-            if siglip_model is not None and siglip_processor is not None and len(self.categories) > 0:
-                try:
-                    vision_prompts = [f"A video ad for {cat}" for cat in self.categories]
-                    text_inputs = siglip_processor(
-                        text=vision_prompts,
-                        padding="max_length",
-                        return_tensors="pt",
-                    ).to(device)
-                    with torch.no_grad():
-                        text_features = siglip_model.get_text_features(**text_inputs)
-                        self.vision_text_features = text_features / text_features.norm(p=2, dim=-1, keepdim=True)
-                except Exception as siglip_exc:
-                    logger.warning("SigLIP text embedding cache unavailable: %s", siglip_exc)
+            self.ensure_vision_text_features()
 
             if len(self.categories) >= 3:
                 from sklearn.decomposition import PCA
@@ -100,6 +184,34 @@ class CategoryMapper:
             logger.exception("Mapper init failed: %s", e)
             self.last_error = str(e)
             self.active, self.has_nebula, self.vision_text_features = False, False, None
+
+    def ensure_vision_text_features(self) -> tuple[bool, str]:
+        if not self.categories:
+            return False, "no taxonomy categories loaded"
+        if self.vision_text_features is not None:
+            return True, "cached"
+        if not _ensure_siglip_loaded():
+            return False, "siglip model unavailable"
+
+        try:
+            vision_prompts = [f"A video ad for {cat}" for cat in self.categories]
+            text_inputs = siglip_processor(
+                text=vision_prompts,
+                padding="max_length",
+                return_tensors="pt",
+            ).to(device)
+            with torch.no_grad():
+                text_features = siglip_model.get_text_features(**text_inputs)
+                self.vision_text_features = normalize_feature_tensor(
+                    text_features,
+                    source="SigLIP.get_text_features",
+                )
+            logger.info("vision_text_features_ready: categories=%d", len(self.categories))
+            return True, "ready"
+        except Exception as siglip_exc:
+            self.vision_text_features = None
+            logger.warning("SigLIP text embedding cache unavailable: %s", siglip_exc)
+            return False, "text embeddings cache failed"
 
     def _attempt_reactivate(self):
         if self.active:
@@ -194,6 +306,9 @@ class CategoryMapper:
             "category_mapping_count": len(self.cat_to_id),
             "category_csv_path_used": self.csv_path_used,
             "last_error": self.last_error if not self.active else None,
+            "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
+            "vision_text_features_cached": bool(self.vision_text_features is not None),
+            "siglip_last_error": siglip_last_error,
         }
 
     def get_nebula_plot(self, highlight_category=None):

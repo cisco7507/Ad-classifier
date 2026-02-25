@@ -3,10 +3,15 @@ import re
 import torch
 import pandas as pd
 from video_service.core.utils import logger, device, TORCH_DTYPE
-from video_service.core.categories import category_mapper, siglip_model, siglip_processor
+from video_service.core import categories as categories_runtime
+from video_service.core.categories import category_mapper, normalize_feature_tensor
 from video_service.core.video_io import extract_frames_for_agent, resolve_urls
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine, search_manager
+
+# Backward-compatible aliases for tests that monkeypatch these symbols.
+siglip_model = None
+siglip_processor = None
 
 RESULT_COLUMNS = [
     "URL / Path",
@@ -20,14 +25,31 @@ RESULT_COLUMNS = [
 ]
 
 
+def _get_siglip_handles():
+    model = siglip_model if siglip_model is not None else categories_runtime.siglip_model
+    processor = (
+        siglip_processor if siglip_processor is not None else categories_runtime.siglip_processor
+    )
+    return model, processor
+
+
 def _ensure_react_vision_ready() -> bool:
-    if not category_mapper.categories:
+    siglip_model, siglip_processor = _get_siglip_handles()
+    if hasattr(category_mapper, "ensure_vision_text_features"):
+        ready, reason = category_mapper.ensure_vision_text_features()
+        if not ready:
+            logger.info("react_vision_unavailable: %s", reason)
+            return False
+        siglip_model, siglip_processor = _get_siglip_handles()
+        return siglip_model is not None and siglip_processor is not None
+
+    # Backward-compatible fallback for test doubles without helper method.
+    if not getattr(category_mapper, "categories", None):
         return False
     if siglip_model is None or siglip_processor is None:
         return False
     if getattr(category_mapper, "vision_text_features", None) is not None:
         return True
-
     try:
         vision_prompts = [f"A video ad for {cat}" for cat in category_mapper.categories]
         text_inputs = siglip_processor(
@@ -37,18 +59,14 @@ def _ensure_react_vision_ready() -> bool:
         ).to(device)
         with torch.no_grad():
             text_features = siglip_model.get_text_features(**text_inputs)
-            category_mapper.vision_text_features = text_features / text_features.norm(
-                p=2, dim=-1, keepdim=True
+            category_mapper.vision_text_features = normalize_feature_tensor(
+                text_features,
+                source="SigLIP.get_text_features",
             )
-        logger.info(
-            "react_vision_cache_ready: categories=%d",
-            len(category_mapper.categories),
-        )
-    except Exception as exc:
+        return True
+    except Exception:
         category_mapper.vision_text_features = None
-        logger.warning("react_vision_cache_failed: %s", exc)
-
-    return getattr(category_mapper, "vision_text_features", None) is not None
+        return False
 
 
 class AdClassifierAgent:
@@ -147,7 +165,7 @@ Current Memory:
                     category_match = category_mapper.map_category(
                         raw_category=raw_cat,
                         job_id=job_id,
-                        suggested_categories_text=", ".join(categories) if categories else "",
+                        suggested_categories_text="",
                         predicted_brand=brand,
                         ocr_summary=ocr_summary,
                     )
@@ -178,12 +196,16 @@ Current Memory:
                     if not enable_vision:
                         observation = "Observation: Formatting ERROR. The VISION tool is disabled by user settings. Proceed without it."
                     elif _ensure_react_vision_ready():
+                        siglip_model, siglip_processor = _get_siglip_handles()
                         with torch.no_grad():
                             image_inputs = siglip_processor(images=pil_images, return_tensors="pt").to(device)
                             if TORCH_DTYPE != torch.float32:
                                 image_inputs = {k: v.to(dtype=TORCH_DTYPE) if torch.is_floating_point(v) else v for k, v in image_inputs.items()}
                             image_features = siglip_model.get_image_features(**image_inputs)
-                            image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                            image_features = normalize_feature_tensor(
+                                image_features,
+                                source="SigLIP.get_image_features",
+                            )
                             
                             logit_scale = siglip_model.logit_scale.exp()
                             logit_bias = siglip_model.logit_bias
@@ -211,7 +233,7 @@ Current Memory:
         category_match = category_mapper.map_category(
             raw_category="Unknown",
             job_id=job_id,
-            suggested_categories_text=", ".join(categories) if categories else "",
+            suggested_categories_text="",
             predicted_brand="Unknown",
             ocr_summary=ocr_summary,
         )

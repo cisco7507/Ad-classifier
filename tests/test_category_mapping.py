@@ -40,7 +40,7 @@ def test_load_category_mapping_disables_when_required_columns_missing(tmp_path: 
     assert "missing required columns" in mapping_state.last_error
 
 
-def test_select_mapping_input_text_fallback_order():
+def test_select_mapping_input_text_fallback_order_without_suggested_categories_bias():
     assert (
         select_mapping_input_text(
             raw_category="Unknown",
@@ -48,7 +48,7 @@ def test_select_mapping_input_text_fallback_order():
             predicted_brand="BrandX",
             ocr_summary="OCR text",
         )
-        == "A, B, C"
+        == "BrandX"
     )
     assert (
         select_mapping_input_text(

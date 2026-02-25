@@ -111,7 +111,7 @@ def test_cluster_jobs_dedup_preserves_latest_summary_fields(monkeypatch):
                 "updated_at": "2026-02-24 11:12:00",
                 "status": "completed",
                 "brand": "Volvo",
-                "category": "Automotive",
+                "category": "Category Alpha",
                 "category_id": "123",
             }
         ],
@@ -124,5 +124,5 @@ def test_cluster_jobs_dedup_preserves_latest_summary_fields(monkeypatch):
     assert jobs[0]["job_id"] == "node-a-uuid-3"
     assert jobs[0]["status"] == "completed"
     assert jobs[0]["brand"] == "Volvo"
-    assert jobs[0]["category"] == "Automotive"
+    assert jobs[0]["category"] == "Category Alpha"
     assert jobs[0]["category_id"] == "123"

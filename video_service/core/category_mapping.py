@@ -39,10 +39,6 @@ def select_mapping_input_text(
     if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return raw_norm
 
-    suggested_norm = normalize_whitespace(suggested_categories_text)
-    if suggested_norm:
-        return suggested_norm
-
     brand_norm = normalize_whitespace(predicted_brand)
     if brand_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return brand_norm
