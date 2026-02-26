@@ -9,7 +9,7 @@ Run as Administrator:
 
 param(
   [string]$ServiceName = "AdClassifierDashboard",
-  [int]$Port = 5173,
+  [int]$Port = 3030,
   [switch]$RemoveFirewall = $true
 )
 

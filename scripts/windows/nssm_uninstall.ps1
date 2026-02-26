@@ -9,7 +9,7 @@ Run as Administrator:
 
 param(
   [string]$ServiceName = "AdClassifierAPI",
-  [int]$Port = 8000,
+  [int]$Port = 3040,
   [switch]$RemoveFirewall = $true
 )
 

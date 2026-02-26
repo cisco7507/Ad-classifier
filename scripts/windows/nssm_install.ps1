@@ -10,7 +10,7 @@ Run as Administrator:
 param(
   [string]$ServiceName = "AdClassifierAPI",
   [string]$BindHost = "0.0.0.0",
-  [int]$Port = 8000,
+  [int]$Port = 3040,
   [string]$NodeName = "node-a",
   [int]$WorkerProcesses = 2,
   [int]$PipelineThreadsPerJob = 1,

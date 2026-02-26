@@ -11,8 +11,8 @@ Run as Administrator:
 param(
   [string]$ServiceName = "AdClassifierDashboard",
   [string]$DashboardDir = "",
-  [int]$Port = 5173,
-  [string]$ApiBaseUrl = "http://localhost:8000",
+  [int]$Port = 3030,
+  [string]$ApiBaseUrl = "http://localhost:3040",
   [string]$LogDir = "",
   [string]$NssmPath = "",
   [switch]$OpenFirewall = $true,
