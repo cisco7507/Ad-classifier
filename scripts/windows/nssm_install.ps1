@@ -468,6 +468,78 @@ function Set-EnvVarInFile {
   Set-Content -Path $FilePath -Value $lines -Encoding UTF8
 }
 
+function Get-EnvMap {
+  param([string]$FilePath)
+
+  $map = @{}
+  if (-not (Test-Path $FilePath)) {
+    return $map
+  }
+
+  foreach ($rawLine in (Get-Content -Path $FilePath)) {
+    if ($null -eq $rawLine) { continue }
+    $line = $rawLine.Trim()
+    if ([string]::IsNullOrWhiteSpace($line)) { continue }
+    if ($line.StartsWith("#")) { continue }
+
+    $idx = $line.IndexOf("=")
+    if ($idx -lt 1) { continue }
+
+    $key = $line.Substring(0, $idx).Trim()
+    $value = $line.Substring($idx + 1).Trim()
+
+    if ($value.Length -ge 2) {
+      $first = $value.Substring(0, 1)
+      $last = $value.Substring($value.Length - 1, 1)
+      if (($first -eq "'" -and $last -eq "'") -or ($first -eq '"' -and $last -eq '"')) {
+        $value = $value.Substring(1, $value.Length - 2)
+      }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($key)) {
+      $map[$key] = $value
+    }
+  }
+
+  return $map
+}
+
+function Get-EnvIntOrDefault {
+  param(
+    [hashtable]$EnvMap,
+    [string]$Key,
+    [int]$DefaultValue
+  )
+
+  if (-not $EnvMap.ContainsKey($Key)) {
+    return $DefaultValue
+  }
+
+  $parsed = 0
+  if ([int]::TryParse([string]$EnvMap[$Key], [ref]$parsed)) {
+    return $parsed
+  }
+  return $DefaultValue
+}
+
+function Resolve-InstallerPath {
+  param(
+    [string]$PathValue,
+    [string]$BaseDir
+  )
+
+  if ([string]::IsNullOrWhiteSpace($PathValue)) {
+    return $PathValue
+  }
+
+  $expanded = [Environment]::ExpandEnvironmentVariables($PathValue)
+  if ([System.IO.Path]::IsPathRooted($expanded)) {
+    return $expanded
+  }
+
+  return (Join-Path $BaseDir $expanded)
+}
+
 function Ensure-FirewallRule {
   param(
     [string]$RuleName,
@@ -488,25 +560,103 @@ if (-not (Test-IsAdmin)) {
 Ensure-PowerShellVersion
 
 $repoRoot = Resolve-RepoRoot
+$envFile = Join-Path $repoRoot ".env"
+$envExample = Join-Path $repoRoot ".env.example"
+
+Write-Step "Preparing .env"
+if (-not (Test-Path $envFile)) {
+  if (Test-Path $envExample) {
+    Copy-Item -Path $envExample -Destination $envFile -Force
+  } else {
+    New-Item -Path $envFile -ItemType File -Force | Out-Null
+  }
+}
+$envMap = Get-EnvMap -FilePath $envFile
+
+if (-not $PSBoundParameters.ContainsKey("BindHost")) {
+  if ($envMap.ContainsKey("BIND_HOST") -and -not [string]::IsNullOrWhiteSpace($envMap["BIND_HOST"])) {
+    $BindHost = $envMap["BIND_HOST"]
+  }
+}
+
+if (-not $PSBoundParameters.ContainsKey("NodeName")) {
+  if ($envMap.ContainsKey("NODE_NAME") -and -not [string]::IsNullOrWhiteSpace($envMap["NODE_NAME"])) {
+    $NodeName = $envMap["NODE_NAME"]
+  }
+}
+
+if (-not $PSBoundParameters.ContainsKey("Port")) {
+  $Port = Get-EnvIntOrDefault -EnvMap $envMap -Key "PORT" -DefaultValue $Port
+}
+
+if (-not $PSBoundParameters.ContainsKey("WorkerProcesses")) {
+  $WorkerProcesses = Get-EnvIntOrDefault -EnvMap $envMap -Key "WORKER_PROCESSES" -DefaultValue $WorkerProcesses
+}
+
+if (-not $PSBoundParameters.ContainsKey("PipelineThreadsPerJob")) {
+  $PipelineThreadsPerJob = Get-EnvIntOrDefault -EnvMap $envMap -Key "PIPELINE_THREADS_PER_JOB" -DefaultValue $PipelineThreadsPerJob
+}
+
+if (-not $PSBoundParameters.ContainsKey("LogLevel")) {
+  if ($envMap.ContainsKey("LOG_LEVEL") -and -not [string]::IsNullOrWhiteSpace($envMap["LOG_LEVEL"])) {
+    $LogLevel = $envMap["LOG_LEVEL"]
+  }
+}
+
+if (-not $PSBoundParameters.ContainsKey("VenvPath")) {
+  if ($envMap.ContainsKey("VENV_PATH") -and -not [string]::IsNullOrWhiteSpace($envMap["VENV_PATH"])) {
+    $VenvPath = $envMap["VENV_PATH"]
+  }
+}
 
 if ([string]::IsNullOrWhiteSpace($VenvPath)) {
   $VenvPath = Join-Path $repoRoot ".venv"
 }
+
+if (-not $PSBoundParameters.ContainsKey("DatabasePath")) {
+  if ($envMap.ContainsKey("DATABASE_PATH") -and -not [string]::IsNullOrWhiteSpace($envMap["DATABASE_PATH"])) {
+    $DatabasePath = $envMap["DATABASE_PATH"]
+  }
+}
 if ([string]::IsNullOrWhiteSpace($DatabasePath)) {
   $DatabasePath = Join-Path $repoRoot "data\video_service.db"
 }
+
+if (-not $PSBoundParameters.ContainsKey("UploadDir")) {
+  if ($envMap.ContainsKey("UPLOAD_DIR") -and -not [string]::IsNullOrWhiteSpace($envMap["UPLOAD_DIR"])) {
+    $UploadDir = $envMap["UPLOAD_DIR"]
+  }
+}
 if ([string]::IsNullOrWhiteSpace($UploadDir)) {
   $UploadDir = Join-Path $repoRoot "storage\uploads"
+}
+
+if (-not $PSBoundParameters.ContainsKey("ArtifactsDir")) {
+  if ($envMap.ContainsKey("ARTIFACTS_DIR") -and -not [string]::IsNullOrWhiteSpace($envMap["ARTIFACTS_DIR"])) {
+    $ArtifactsDir = $envMap["ARTIFACTS_DIR"]
+  }
 }
 if ([string]::IsNullOrWhiteSpace($ArtifactsDir)) {
   $ArtifactsDir = Join-Path $repoRoot "storage\artifacts"
 }
 
+if (-not $PSBoundParameters.ContainsKey("ClusterConfig")) {
+  if ($envMap.ContainsKey("CLUSTER_CONFIG") -and -not [string]::IsNullOrWhiteSpace($envMap["CLUSTER_CONFIG"])) {
+    $ClusterConfig = $envMap["CLUSTER_CONFIG"]
+  }
+}
+
+$VenvPath = Resolve-InstallerPath -PathValue $VenvPath -BaseDir $repoRoot
+$DatabasePath = Resolve-InstallerPath -PathValue $DatabasePath -BaseDir $repoRoot
+$UploadDir = Resolve-InstallerPath -PathValue $UploadDir -BaseDir $repoRoot
+$ArtifactsDir = Resolve-InstallerPath -PathValue $ArtifactsDir -BaseDir $repoRoot
+if (-not [string]::IsNullOrWhiteSpace($ClusterConfig)) {
+  $ClusterConfig = Resolve-InstallerPath -PathValue $ClusterConfig -BaseDir $repoRoot
+}
+
 $logsDir = Join-Path $repoRoot "logs"
 $stdoutLog = Join-Path $logsDir "service.out.log"
 $stderrLog = Join-Path $logsDir "service.err.log"
-$envFile = Join-Path $repoRoot ".env"
-$envExample = Join-Path $repoRoot ".env.example"
 $categoryCsv = Join-Path $repoRoot "video_service\data\categories.csv"
 
 New-Item -Path (Split-Path $DatabasePath -Parent) -ItemType Directory -Force | Out-Null
@@ -520,15 +670,6 @@ Ensure-FFmpeg
 Ensure-VCRedist
 $nssm = Ensure-Nssm
 Ensure-Ollama -InstallRequested:$InstallOllama -PullModelRequested:$PullDefaultModel -ModelName $DefaultModel
-
-Write-Step "Preparing .env"
-if (-not (Test-Path $envFile)) {
-  if (Test-Path $envExample) {
-    Copy-Item -Path $envExample -Destination $envFile -Force
-  } else {
-    New-Item -Path $envFile -ItemType File -Force | Out-Null
-  }
-}
 
 Set-EnvVarInFile -FilePath $envFile -Key "NODE_NAME" -Value $NodeName
 Set-EnvVarInFile -FilePath $envFile -Key "PORT" -Value "$Port"
