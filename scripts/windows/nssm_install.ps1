@@ -15,6 +15,7 @@ param(
   [int]$WorkerProcesses = 2,
   [int]$PipelineThreadsPerJob = 1,
   [string]$LogLevel = "INFO",
+  [string]$PythonExe = "",
   [string]$VenvPath = "",
   [string]$DatabasePath = "",
   [string]$UploadDir = "",
@@ -197,7 +198,7 @@ function Select-Python311 {
 
   $eligible = @(
     $candidates | Where-Object {
-      ($_.Major -eq 3 -and $_.Minor -eq 11)
+      ($_.Major -eq 3 -and $_.Minor -ge 11)
     }
   )
 
@@ -213,11 +214,41 @@ function Select-Python311 {
     return $null
   }
 
-  return ($eligible | Sort-Object -Property @{Expression = "Micro"; Descending = $true} | Select-Object -First 1)
+  # Prefer 3.11 for stability, but fall back to other >=3.11 versions when needed.
+  return (
+    $eligible |
+      Sort-Object -Property `
+        @{Expression = { if ($_.Minor -eq 11) { 1 } else { 0 } }; Descending = $true}, `
+        @{Expression = "Major"; Descending = $true}, `
+        @{Expression = "Minor"; Descending = $true}, `
+        @{Expression = "Micro"; Descending = $true} |
+      Select-Object -First 1
+  )
 }
 
 function Ensure-Python311 {
+  param([string]$PreferredPythonExe = "")
+
   Write-Step "Checking Python 3.11+"
+  if (-not [string]::IsNullOrWhiteSpace($PreferredPythonExe)) {
+    $candidate = [Environment]::ExpandEnvironmentVariables($PreferredPythonExe)
+    if (-not (Test-Path $candidate)) {
+      throw "Provided -PythonExe does not exist: $candidate"
+    }
+    $selected = Get-PythonMetadata -PythonExe $candidate
+    if (-not $selected) {
+      throw "Unable to read metadata from provided -PythonExe: $candidate"
+    }
+    if (-not ($selected.Major -eq 3 -and $selected.Minor -ge 11)) {
+      throw ("Provided -PythonExe must be Python >=3.11. Found {0}.{1}.{2} at {3}" -f $selected.Major, $selected.Minor, $selected.Micro, $selected.Path)
+    }
+    if (-not ($selected.Bits -eq 64 -and $selected.PlatformTag.ToLowerInvariant() -match "amd64")) {
+      throw ("Provided -PythonExe must be x64/amd64 for wheel compatibility. Found machine={0} bits={1} platform={2}" -f $selected.Machine, $selected.Bits, $selected.PlatformTag)
+    }
+    Write-Host ("Using explicit Python: {0} ({1}, {2}-bit, {3}, {4}.{5}.{6})" -f $selected.Path, $selected.Machine, $selected.Bits, $selected.PlatformTag, $selected.Major, $selected.Minor, $selected.Micro) -ForegroundColor Green
+    return $selected.Path
+  }
+
   $isArmHost = Get-IsArm64Host
   $selected = Select-Python311 -RequireX64 $true
   if ($selected) {
@@ -227,7 +258,7 @@ function Ensure-Python311 {
 
   $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
   if (-not $winget) {
-    throw "Compatible Python 3.11+ x64 not found and winget is unavailable. Install Python 3.11 x64 manually and re-run."
+    throw "Compatible Python >=3.11 x64 not found and winget is unavailable. Install Python x64 manually and re-run, or pass -PythonExe."
   }
 
   if ($isArmHost) {
@@ -258,7 +289,7 @@ function Ensure-Python311 {
     throw ("Found Python {0} ({1}, {2}-bit) but this installer requires x64 Python for torch/opencv wheels. Install Python 3.11 x64 and re-run." -f $fallback.Path, $fallback.Machine, $fallback.Bits)
   }
 
-  throw "Python 3.11 x64 installation did not yield a usable interpreter in PATH."
+  throw "Python x64 installation did not yield a usable interpreter in PATH."
 }
 
 function Ensure-FFmpeg {
@@ -758,7 +789,7 @@ New-Item -Path $ArtifactsDir -ItemType Directory -Force | Out-Null
 New-Item -Path $logsDir -ItemType Directory -Force | Out-Null
 New-Item -Path (Join-Path $repoRoot ".hf_cache") -ItemType Directory -Force | Out-Null
 
-$python = Ensure-Python311
+$python = Ensure-Python311 -PreferredPythonExe $PythonExe
 Ensure-FFmpeg
 Ensure-VCRedist
 $nssm = Ensure-Nssm
