@@ -197,7 +197,7 @@ function Select-Python311 {
 
   $eligible = @(
     $candidates | Where-Object {
-      ($_.Major -gt 3 -or ($_.Major -eq 3 -and $_.Minor -ge 11))
+      ($_.Major -eq 3 -and $_.Minor -eq 11)
     }
   )
 
@@ -213,7 +213,7 @@ function Select-Python311 {
     return $null
   }
 
-  return ($eligible | Sort-Object -Property @{Expression = "Major"; Descending = $true}, @{Expression = "Minor"; Descending = $true}, @{Expression = "Micro"; Descending = $true} | Select-Object -First 1)
+  return ($eligible | Sort-Object -Property @{Expression = "Micro"; Descending = $true} | Select-Object -First 1)
 }
 
 function Ensure-Python311 {
@@ -480,6 +480,29 @@ function Install-TorchRuntime {
   Write-Host "Installing CPU torch wheels..." -ForegroundColor Yellow
   Invoke-Checked -FilePath $PythonExe -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "--upgrade", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels."
   return "cpu"
+}
+
+function Ensure-PythonDepsHealthy {
+  param([string]$PythonExe)
+
+  Write-Step "Validating Python runtime imports"
+  & $PythonExe -c "import annotated_types, pydantic, fastapi, uvicorn; print('deps_ok')" | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "Core API dependencies import cleanly." -ForegroundColor Green
+    return
+  }
+
+  Write-Warning "Dependency import validation failed. Repairing fastapi/pydantic dependency set..."
+  Invoke-Checked -FilePath $PythonExe -ArgumentList @(
+    "-m", "pip", "install", "--upgrade", "--force-reinstall", "--no-cache-dir",
+    "annotated-types", "pydantic", "fastapi", "uvicorn[standard]"
+  ) -FailureMessage "Failed to repair core FastAPI dependencies."
+
+  & $PythonExe -c "import annotated_types, pydantic, fastapi, uvicorn; print('deps_ok')" | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Python dependency validation failed after repair. Check pip output above."
+  }
+  Write-Host "Core API dependencies repaired and validated." -ForegroundColor Green
 }
 
 function Convert-ToEnvPath {
@@ -795,6 +818,7 @@ if (-not $SkipVenvSetup) {
 
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "-r", (Join-Path $repoRoot "requirements.txt")) -FailureMessage "Failed to install requirements.txt dependencies as binary wheels."
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "uvicorn[standard]", "httpx", "pandas", "yt-dlp", "opencv-python", "easyocr") -FailureMessage "Failed to install runtime dependencies as binary wheels."
+  Ensure-PythonDepsHealthy -PythonExe $venvPy
 }
 
 if (-not (Test-Path $venvPy)) {
