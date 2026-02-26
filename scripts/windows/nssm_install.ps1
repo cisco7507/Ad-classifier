@@ -23,6 +23,9 @@ param(
   [bool]$InstallOllama = $true,
   [bool]$PullDefaultModel = $true,
   [string]$DefaultModel = "qwen3-vl:8b-instruct",
+  [string]$TorchCudaIndexUrl = "https://download.pytorch.org/whl/cu121",
+  [switch]$ForceCpuTorch = $false,
+  [switch]$ForceCudaTorch = $false,
   [switch]$SkipVenvSetup = $false,
   [switch]$OpenFirewall = $true,
   [string]$LogonUser = "",
@@ -416,6 +419,69 @@ function Ensure-Ollama {
   }
 }
 
+function Test-HasNvidiaGpu {
+  try {
+    $controllers = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue
+    foreach ($ctrl in $controllers) {
+      $name = [string]$ctrl.Name
+      if ($name -match "NVIDIA") {
+        return $true
+      }
+    }
+  } catch {}
+
+  $smi = Get-Command "nvidia-smi.exe" -ErrorAction SilentlyContinue
+  if (-not $smi) {
+    $smi = Get-Command "nvidia-smi" -ErrorAction SilentlyContinue
+  }
+  if ($smi) {
+    try {
+      & $smi.Source -L | Out-Null
+      if ($LASTEXITCODE -eq 0) {
+        return $true
+      }
+    } catch {}
+  }
+
+  return $false
+}
+
+function Install-TorchRuntime {
+  param(
+    [string]$PythonExe,
+    [bool]$PreferCuda,
+    [string]$CudaIndexUrl
+  )
+
+  if ($PreferCuda) {
+    Write-Host "Installing CUDA torch wheels from $CudaIndexUrl" -ForegroundColor Yellow
+    & $PythonExe -m pip install --only-binary=:all: --upgrade --index-url $CudaIndexUrl torch torchvision
+    if ($LASTEXITCODE -eq 0) {
+      try {
+        $payload = & $PythonExe -c "import json,torch; print(json.dumps({'cuda_available': bool(torch.cuda.is_available()), 'cuda_build': getattr(torch.version, 'cuda', None), 'torch': torch.__version__}))"
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($payload)) {
+          $diag = $payload | ConvertFrom-Json
+          if ($diag.cuda_available) {
+            Write-Host ("CUDA torch ready: torch={0} cuda_build={1}" -f $diag.torch, $diag.cuda_build) -ForegroundColor Green
+            return "cuda"
+          }
+          Write-Warning ("CUDA torch installed but CUDA runtime is unavailable (torch={0}, cuda_build={1}). Falling back to CPU wheels." -f $diag.torch, $diag.cuda_build)
+        } else {
+          Write-Warning "Unable to verify CUDA torch runtime. Falling back to CPU wheels."
+        }
+      } catch {
+        Write-Warning "CUDA torch verification failed. Falling back to CPU wheels."
+      }
+    } else {
+      Write-Warning "CUDA torch installation failed. Falling back to CPU wheels."
+    }
+  }
+
+  Write-Host "Installing CPU torch wheels..." -ForegroundColor Yellow
+  Invoke-Checked -FilePath $PythonExe -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "--upgrade", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels."
+  return "cpu"
+}
+
 function Convert-ToEnvPath {
   param([string]$PathValue)
   return ($PathValue -replace "\\", "/")
@@ -557,6 +623,10 @@ if (-not (Test-IsAdmin)) {
   exit 1
 }
 
+if ($ForceCpuTorch -and $ForceCudaTorch) {
+  throw "Use only one torch override: -ForceCpuTorch or -ForceCudaTorch."
+}
+
 Ensure-PowerShellVersion
 
 $repoRoot = Resolve-RepoRoot
@@ -687,6 +757,7 @@ if (-not [string]::IsNullOrWhiteSpace($ClusterConfig)) {
 
 Write-Step "Setting up Python virtual environment"
 $venvPy = Join-Path $VenvPath "Scripts\python.exe"
+$torchRuntime = "unchanged"
 if (-not $SkipVenvSetup) {
   if (-not (Test-Path $venvPy)) {
     Invoke-Checked -FilePath $python -ArgumentList @("-m", "venv", $VenvPath) -FailureMessage "Failed to create Python virtual environment."
@@ -695,7 +766,33 @@ if (-not $SkipVenvSetup) {
     throw "Virtual environment python not found at: $venvPy"
   }
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel") -FailureMessage "Failed to upgrade pip/setuptools/wheel."
-  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels. Ensure Python is x64 3.11+ on ARM hosts."
+
+  $isArmHost = Get-IsArm64Host
+  $hasNvidia = Test-HasNvidiaGpu
+  $preferCudaTorch = $false
+  if ($ForceCudaTorch) {
+    $preferCudaTorch = $true
+  } elseif ($ForceCpuTorch) {
+    $preferCudaTorch = $false
+  } elseif ((-not $isArmHost) -and $hasNvidia) {
+    $preferCudaTorch = $true
+  }
+
+  if ($isArmHost -and $preferCudaTorch) {
+    throw "CUDA torch was requested on ARM host; install x64 Windows on x86_64/NVIDIA for CUDA support."
+  }
+
+  if ($preferCudaTorch) {
+    Write-Host "NVIDIA GPU detected. Preferring CUDA torch wheels." -ForegroundColor Cyan
+  } else {
+    if ($isArmHost) {
+      Write-Host "ARM host detected. Using CPU torch wheels." -ForegroundColor Cyan
+    } else {
+      Write-Host "No NVIDIA GPU detected. Using CPU torch wheels." -ForegroundColor Cyan
+    }
+  }
+  $torchRuntime = Install-TorchRuntime -PythonExe $venvPy -PreferCuda:$preferCudaTorch -CudaIndexUrl $TorchCudaIndexUrl
+
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "-r", (Join-Path $repoRoot "requirements.txt")) -FailureMessage "Failed to install requirements.txt dependencies as binary wheels."
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "uvicorn[standard]", "httpx", "pandas", "yt-dlp", "opencv-python", "easyocr") -FailureMessage "Failed to install runtime dependencies as binary wheels."
 }
@@ -756,4 +853,5 @@ Write-Host ""
 Write-Host "Notes:" -ForegroundColor Yellow
 Write-Host "  - Uvicorn is configured with --workers 1."
 Write-Host "  - Embedded workers are enabled via EMBED_WORKERS=true in .env."
+Write-Host "  - torch runtime selected by installer: $torchRuntime"
 Write-Host "  - If you use Ollama provider, ensure ollama is running and model '$DefaultModel' is available."
