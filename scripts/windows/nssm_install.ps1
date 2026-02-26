@@ -355,13 +355,31 @@ function Ensure-Ollama {
     [string]$ModelName
   )
 
+  function Resolve-OllamaPath {
+    $ollamaCmd = Get-Command ollama.exe -ErrorAction SilentlyContinue
+    if ($ollamaCmd) {
+      return $ollamaCmd.Source
+    }
+
+    $candidates = @(
+      (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+      "C:\Program Files\Ollama\ollama.exe"
+    )
+    foreach ($candidate in $candidates) {
+      if ($candidate -and (Test-Path $candidate)) {
+        return $candidate
+      }
+    }
+    return $null
+  }
+
   if (-not $InstallRequested) {
     Write-Host "Skipping Ollama installation by request." -ForegroundColor DarkYellow
     return
   }
 
   Write-Step "Checking Ollama"
-  $ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+  $ollama = Resolve-OllamaPath
   if (-not $ollama) {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) {
@@ -369,17 +387,16 @@ function Ensure-Ollama {
       return
     }
     Write-Host "Installing Ollama via winget..." -ForegroundColor Yellow
-    Invoke-Checked -FilePath $winget.Source -ArgumentList @(
-      "install",
-      "--id", "Ollama.Ollama",
-      "--exact",
-      "--source", "winget",
-      "--accept-package-agreements",
-      "--accept-source-agreements",
-      "--disable-interactivity"
-    ) -FailureMessage "Failed to install Ollama."
+    & $winget.Source install --id Ollama.Ollama --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
+    $installExit = $LASTEXITCODE
+    if ($installExit -ne 0) {
+      Write-Warning "winget reported a non-zero exit during Ollama install/upgrade (exit=$installExit). Will verify local installation."
+    }
     Refresh-PathFromRegistry
-    $ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
+    $ollama = Resolve-OllamaPath
+    if (-not $ollama) {
+      throw "Failed to install Ollama and no local ollama.exe was found."
+    }
   }
 
   if (-not $ollama) {
@@ -387,11 +404,11 @@ function Ensure-Ollama {
     return
   }
 
-  Write-Host "Ollama found: $($ollama.Source)" -ForegroundColor Green
+  Write-Host "Ollama found: $ollama" -ForegroundColor Green
   if ($PullModelRequested) {
     Write-Host "Pulling Ollama model '$ModelName' (can take several minutes)..." -ForegroundColor Yellow
     try {
-      & $ollama.Source pull $ModelName
+      & $ollama pull $ModelName
     } catch {
       Write-Warning "Failed to pull model '$ModelName'. You can run manually later: ollama pull $ModelName"
     }
