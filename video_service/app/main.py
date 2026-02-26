@@ -83,9 +83,22 @@ async def lifespan(app: FastAPI):
     logger.info("startup: initialising DB (node=%s)", NODE_NAME)
     init_db()
     start_cleanup_thread()
+
+    # Lazy import avoids pulling worker-side heavy deps during module import.
+    from video_service.workers.embedded import (
+        start as start_embedded_workers,
+        shutdown as shutdown_embedded_workers,
+    )
+    worker_count = start_embedded_workers()
+    if worker_count:
+        logger.info("startup: %d embedded worker(s) active", worker_count)
+
     logger.info("startup: ready (node=%s, cors_origins=%s)", NODE_NAME, CORS_ORIGINS)
-    yield
-    logger.info("shutdown: node=%s", NODE_NAME)
+    try:
+        yield
+    finally:
+        shutdown_embedded_workers()
+        logger.info("shutdown: node=%s", NODE_NAME)
 
 
 app = FastAPI(

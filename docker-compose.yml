@@ -3,10 +3,10 @@
 # ============================================================
 #
 # Single-node:
-#   docker-compose up backend-a worker-a dashboard
+#   docker-compose up backend-a dashboard
 #
 # Two-node cluster:
-#   docker-compose up
+#   docker-compose --profile cluster up
 #
 # Prerequisites:
 #   1. Copy .env.example → .env and fill in values
@@ -59,6 +59,8 @@ services:
       JOB_TTL_DAYS: ${JOB_TTL_DAYS:-30}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+      EMBED_WORKERS: "true"
+      WORKER_PROCESSES: ${WORKER_PROCESSES:-2}
     volumes:
       - data-a:/data
       - ./cluster_config.json:/app/cluster_config.json:ro
@@ -72,23 +74,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  # ── node-a worker ───────────────────────────
-  worker-a:
-    <<: *backend-base
-    container_name: ad-worker-a
-    depends_on:
-      backend-a:
-        condition: service_healthy
-    environment:
-      NODE_NAME: node-a
-      DATABASE_PATH: /data/video_service.db
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - data-a:/data
-      - ./categories.csv:/app/video_service/data/categories.csv:ro
-      - /tmp/video_service_uploads:/tmp/video_service_uploads
-    command: python -m video_service.workers.worker
 
   # ── node-b API (cluster mode only) ──────────
   backend-b:
@@ -106,6 +91,8 @@ services:
       JOB_TTL_DAYS: ${JOB_TTL_DAYS:-30}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-500}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+      EMBED_WORKERS: "true"
+      WORKER_PROCESSES: ${WORKER_PROCESSES:-2}
     volumes:
       - data-b:/data
       - ./cluster_config_b.json:/app/cluster_config_b.json:ro
@@ -119,24 +106,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  # ── node-b worker (cluster mode only) ───────
-  worker-b:
-    <<: *backend-base
-    container_name: ad-worker-b
-    profiles: ["cluster"]
-    depends_on:
-      backend-b:
-        condition: service_healthy
-    environment:
-      NODE_NAME: node-b
-      DATABASE_PATH: /data/video_service.db
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - data-b:/data
-      - ./categories.csv:/app/video_service/data/categories.csv:ro
-      - /tmp/video_service_uploads:/tmp/video_service_uploads
-    command: python -m video_service.workers.worker
 
   # ── dashboard ────────────────────────────────
   dashboard:
