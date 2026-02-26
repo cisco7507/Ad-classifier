@@ -66,6 +66,21 @@ function Refresh-PathFromRegistry {
   $env:Path = "$machine;$user"
 }
 
+function Invoke-Checked {
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [string[]]$ArgumentList = @(),
+    [string]$FailureMessage = ""
+  )
+  & $FilePath @ArgumentList
+  if ($LASTEXITCODE -ne 0) {
+    if ([string]::IsNullOrWhiteSpace($FailureMessage)) {
+      $FailureMessage = "Command failed ($FilePath) with exit code $LASTEXITCODE."
+    }
+    throw $FailureMessage
+  }
+}
+
 function Ensure-PowerShellVersion {
   $major = $PSVersionTable.PSVersion.Major
   $minor = $PSVersionTable.PSVersion.Minor
@@ -80,7 +95,15 @@ function Ensure-PowerShellVersion {
   if (-not $winget) {
     throw "PowerShell is too old and winget is unavailable. Install PowerShell 7 manually, then re-run."
   }
-  & $winget.Source install --id Microsoft.PowerShell --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
+  Invoke-Checked -FilePath $winget.Source -ArgumentList @(
+    "install",
+    "--id", "Microsoft.PowerShell",
+    "--exact",
+    "--source", "winget",
+    "--accept-package-agreements",
+    "--accept-source-agreements",
+    "--disable-interactivity"
+  ) -FailureMessage "Failed to install PowerShell 7."
   Refresh-PathFromRegistry
   $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
   if ($pwsh) {
@@ -93,57 +116,145 @@ function Resolve-RepoRoot {
   return (Resolve-Path (Join-Path $script:InstallerScriptDir "..\..")).Path
 }
 
-function Get-Python311Path {
+function Get-IsArm64Host {
+  if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
+    return $true
+  }
+  try {
+    $archCodes = @(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Architecture)
+    if ($archCodes -contains 12) {
+      return $true
+    }
+  } catch {}
+  return $false
+}
+
+function Get-PythonCandidatePaths {
+  $paths = [System.Collections.Generic.List[string]]::new()
+
   $pyLauncher = Get-Command py.exe -ErrorAction SilentlyContinue
   if ($pyLauncher) {
     try {
-      $path = (& py -3.11 -c "import sys;print(sys.executable)" 2>$null)
-      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($path)) {
-        return $path.Trim()
+      $lines = & $pyLauncher.Source -0p 2>$null
+      foreach ($line in $lines) {
+        if ($line -match "([A-Za-z]:\\.*?python(?:3)?\.exe)") {
+          $candidate = $Matches[1]
+          if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $paths.Add($candidate)
+          }
+        }
       }
     } catch {}
   }
 
   $pythonCmd = Get-Command python.exe -ErrorAction SilentlyContinue
   if ($pythonCmd) {
-    try {
-      $version = (& $pythonCmd.Source -c "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null).Trim()
-      if ($LASTEXITCODE -eq 0) {
-        $parts = $version.Split(".")
-        $maj = [int]$parts[0]
-        $min = [int]$parts[1]
-        if ($maj -gt 3 -or ($maj -eq 3 -and $min -ge 11)) {
-          return $pythonCmd.Source
-        }
-      }
-    } catch {}
+    $paths.Add($pythonCmd.Source)
   }
-  return $null
+
+  $paths.Add("C:\Program Files\Python311\python.exe")
+  $paths.Add((Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\python.exe"))
+
+  return @($paths | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+}
+
+function Get-PythonMetadata {
+  param([string]$PythonExe)
+
+  try {
+    $payload = & $PythonExe -c "import json,platform,struct,sys;print(json.dumps({'major':sys.version_info.major,'minor':sys.version_info.minor,'micro':sys.version_info.micro,'machine':platform.machine(),'bits':struct.calcsize('P')*8,'exe':sys.executable}))" 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($payload)) {
+      return $null
+    }
+    $obj = $payload | ConvertFrom-Json
+    return [PSCustomObject]@{
+      Path = [string]$obj.exe
+      Major = [int]$obj.major
+      Minor = [int]$obj.minor
+      Micro = [int]$obj.micro
+      Machine = [string]$obj.machine
+      Bits = [int]$obj.bits
+    }
+  } catch {
+    return $null
+  }
+}
+
+function Select-Python311 {
+  param([bool]$RequireX64 = $true)
+
+  $candidates = [System.Collections.Generic.List[object]]::new()
+  foreach ($candidatePath in (Get-PythonCandidatePaths)) {
+    $meta = Get-PythonMetadata -PythonExe $candidatePath
+    if ($meta) {
+      $candidates.Add($meta)
+    }
+  }
+
+  $eligible = @(
+    $candidates | Where-Object {
+      ($_.Major -gt 3 -or ($_.Major -eq 3 -and $_.Minor -ge 11))
+    }
+  )
+
+  if ($RequireX64) {
+    $eligible = @(
+      $eligible | Where-Object {
+        $_.Bits -eq 64 -and $_.Machine.ToUpperInvariant() -notmatch "ARM"
+      }
+    )
+  }
+
+  if (-not $eligible -or $eligible.Count -eq 0) {
+    return $null
+  }
+
+  return ($eligible | Sort-Object -Property @{Expression = "Major"; Descending = $true}, @{Expression = "Minor"; Descending = $true}, @{Expression = "Micro"; Descending = $true} | Select-Object -First 1)
 }
 
 function Ensure-Python311 {
   Write-Step "Checking Python 3.11+"
-  $python = Get-Python311Path
-  if ($python) {
-    Write-Host "Using Python: $python" -ForegroundColor Green
-    return $python
+  $isArmHost = Get-IsArm64Host
+  $selected = Select-Python311 -RequireX64 $true
+  if ($selected) {
+    Write-Host ("Using Python: {0} ({1}, {2}-bit, {3}.{4}.{5})" -f $selected.Path, $selected.Machine, $selected.Bits, $selected.Major, $selected.Minor, $selected.Micro) -ForegroundColor Green
+    return $selected.Path
   }
 
   $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
   if (-not $winget) {
-    throw "Python 3.11+ not found and winget is unavailable. Install Python 3.11 manually and re-run."
+    throw "Compatible Python 3.11+ x64 not found and winget is unavailable. Install Python 3.11 x64 manually and re-run."
   }
 
-  Write-Host "Installing Python 3.11 via winget..." -ForegroundColor Yellow
-  & $winget.Source install --id Python.Python.3.11 --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
+  if ($isArmHost) {
+    Write-Host "ARM64 host detected. Installing Python 3.11 x64 for wheel compatibility..." -ForegroundColor Yellow
+  } else {
+    Write-Host "Installing Python 3.11 x64 via winget..." -ForegroundColor Yellow
+  }
+  Invoke-Checked -FilePath $winget.Source -ArgumentList @(
+    "install",
+    "--id", "Python.Python.3.11",
+    "--exact",
+    "--source", "winget",
+    "--architecture", "x64",
+    "--accept-package-agreements",
+    "--accept-source-agreements",
+    "--disable-interactivity"
+  ) -FailureMessage "Failed to install Python 3.11 x64."
   Refresh-PathFromRegistry
 
-  $python = Get-Python311Path
-  if (-not $python) {
-    throw "Python 3.11 installation did not yield a usable interpreter in PATH."
+  $selected = Select-Python311 -RequireX64 $true
+  if ($selected) {
+    Write-Host ("Python installed: {0} ({1}, {2}-bit)" -f $selected.Path, $selected.Machine, $selected.Bits) -ForegroundColor Green
+    return $selected.Path
   }
-  Write-Host "Python installed: $python" -ForegroundColor Green
-  return $python
+
+  $fallback = Select-Python311 -RequireX64 $false
+  if ($fallback) {
+    throw ("Found Python {0} ({1}, {2}-bit) but this installer requires x64 Python for torch/opencv wheels. Install Python 3.11 x64 and re-run." -f $fallback.Path, $fallback.Machine, $fallback.Bits)
+  }
+
+  throw "Python 3.11 x64 installation did not yield a usable interpreter in PATH."
 }
 
 function Ensure-FFmpeg {
@@ -258,7 +369,15 @@ function Ensure-Ollama {
       return
     }
     Write-Host "Installing Ollama via winget..." -ForegroundColor Yellow
-    & $winget.Source install --id Ollama.Ollama --exact --source winget --accept-package-agreements --accept-source-agreements --disable-interactivity
+    Invoke-Checked -FilePath $winget.Source -ArgumentList @(
+      "install",
+      "--id", "Ollama.Ollama",
+      "--exact",
+      "--source", "winget",
+      "--accept-package-agreements",
+      "--accept-source-agreements",
+      "--disable-interactivity"
+    ) -FailureMessage "Failed to install Ollama."
     Refresh-PathFromRegistry
     $ollama = Get-Command ollama.exe -ErrorAction SilentlyContinue
   }
@@ -411,14 +530,15 @@ Write-Step "Setting up Python virtual environment"
 $venvPy = Join-Path $VenvPath "Scripts\python.exe"
 if (-not $SkipVenvSetup) {
   if (-not (Test-Path $venvPy)) {
-    & $python -m venv $VenvPath
+    Invoke-Checked -FilePath $python -ArgumentList @("-m", "venv", $VenvPath) -FailureMessage "Failed to create Python virtual environment."
   }
   if (-not (Test-Path $venvPy)) {
     throw "Virtual environment python not found at: $venvPy"
   }
-  & $venvPy -m pip install --upgrade pip setuptools wheel
-  & $venvPy -m pip install -r (Join-Path $repoRoot "requirements.txt")
-  & $venvPy -m pip install "uvicorn[standard]" httpx pandas yt-dlp opencv-python easyocr
+  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel") -FailureMessage "Failed to upgrade pip/setuptools/wheel."
+  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels. Ensure Python is x64 3.11+."
+  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "-r", (Join-Path $repoRoot "requirements.txt")) -FailureMessage "Failed to install requirements.txt dependencies as binary wheels."
+  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "uvicorn[standard]", "httpx", "pandas", "yt-dlp", "opencv-python", "easyocr") -FailureMessage "Failed to install runtime dependencies as binary wheels."
 }
 
 if (-not (Test-Path $venvPy)) {
@@ -432,18 +552,18 @@ try {
 } catch {}
 
 $args = "-m uvicorn video_service.app.main:app --host $BindHost --port $Port --workers 1"
-& $nssm install $ServiceName $venvPy $args
-& $nssm set $ServiceName AppDirectory $repoRoot
-& $nssm set $ServiceName DisplayName $ServiceName
-& $nssm set $ServiceName Description "Video Ad Classifier API (FastAPI + embedded workers)"
-& $nssm set $ServiceName Start SERVICE_AUTO_START
-& $nssm set $ServiceName AppStdout $stdoutLog
-& $nssm set $ServiceName AppStderr $stderrLog
-& $nssm set $ServiceName AppRotateFiles 1
-& $nssm set $ServiceName AppRotateOnline 1
-& $nssm set $ServiceName AppRotateBytes 10485760
-& $nssm set $ServiceName AppExit Default Restart
-& $nssm set $ServiceName AppThrottle 5000
+Invoke-Checked -FilePath $nssm -ArgumentList @("install", $ServiceName, $venvPy, $args) -FailureMessage "Failed to install NSSM service."
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppDirectory", $repoRoot)
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "DisplayName", $ServiceName)
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Description", "Video Ad Classifier API (FastAPI + embedded workers)")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Start", "SERVICE_AUTO_START")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStdout", $stdoutLog)
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStderr", $stderrLog)
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppRotateFiles", "1")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppRotateOnline", "1")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppRotateBytes", "10485760")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppExit", "Default", "Restart")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppThrottle", "5000")
 
 $hfHome = Convert-ToEnvPath (Join-Path $repoRoot ".hf_cache")
 $envExtra = @(
@@ -451,10 +571,10 @@ $envExtra = @(
   "HF_HOME=$hfHome",
   "TOKENIZERS_PARALLELISM=false"
 )
-& $nssm set $ServiceName AppEnvironmentExtra ($envExtra -join "`n")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppEnvironmentExtra", ($envExtra -join "`n"))
 
 if (-not [string]::IsNullOrWhiteSpace($LogonUser)) {
-  & $nssm set $ServiceName ObjectName $LogonUser $LogonPass
+  Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "ObjectName", $LogonUser, $LogonPass)
 }
 
 if ($OpenFirewall) {
