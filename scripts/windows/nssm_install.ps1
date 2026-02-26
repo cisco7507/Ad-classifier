@@ -162,7 +162,7 @@ function Get-PythonMetadata {
   param([string]$PythonExe)
 
   try {
-    $payload = & $PythonExe -c "import json,platform,struct,sys;print(json.dumps({'major':sys.version_info.major,'minor':sys.version_info.minor,'micro':sys.version_info.micro,'machine':platform.machine(),'bits':struct.calcsize('P')*8,'exe':sys.executable}))" 2>$null
+    $payload = & $PythonExe -c "import json,platform,struct,sys,sysconfig;print(json.dumps({'major':sys.version_info.major,'minor':sys.version_info.minor,'micro':sys.version_info.micro,'machine':platform.machine(),'bits':struct.calcsize('P')*8,'exe':sys.executable,'platform_tag':sysconfig.get_platform()}))" 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($payload)) {
       return $null
     }
@@ -174,6 +174,7 @@ function Get-PythonMetadata {
       Micro = [int]$obj.micro
       Machine = [string]$obj.machine
       Bits = [int]$obj.bits
+      PlatformTag = [string]$obj.platform_tag
     }
   } catch {
     return $null
@@ -200,7 +201,7 @@ function Select-Python311 {
   if ($RequireX64) {
     $eligible = @(
       $eligible | Where-Object {
-        $_.Bits -eq 64 -and $_.Machine.ToUpperInvariant() -notmatch "ARM"
+        $_.Bits -eq 64 -and $_.PlatformTag.ToLowerInvariant() -match "amd64"
       }
     )
   }
@@ -217,7 +218,7 @@ function Ensure-Python311 {
   $isArmHost = Get-IsArm64Host
   $selected = Select-Python311 -RequireX64 $true
   if ($selected) {
-    Write-Host ("Using Python: {0} ({1}, {2}-bit, {3}.{4}.{5})" -f $selected.Path, $selected.Machine, $selected.Bits, $selected.Major, $selected.Minor, $selected.Micro) -ForegroundColor Green
+    Write-Host ("Using Python: {0} ({1}, {2}-bit, {3}, {4}.{5}.{6})" -f $selected.Path, $selected.Machine, $selected.Bits, $selected.PlatformTag, $selected.Major, $selected.Minor, $selected.Micro) -ForegroundColor Green
     return $selected.Path
   }
 
@@ -245,7 +246,7 @@ function Ensure-Python311 {
 
   $selected = Select-Python311 -RequireX64 $true
   if ($selected) {
-    Write-Host ("Python installed: {0} ({1}, {2}-bit)" -f $selected.Path, $selected.Machine, $selected.Bits) -ForegroundColor Green
+    Write-Host ("Python installed: {0} ({1}, {2}-bit, {3})" -f $selected.Path, $selected.Machine, $selected.Bits, $selected.PlatformTag) -ForegroundColor Green
     return $selected.Path
   }
 
@@ -553,7 +554,7 @@ if (-not $SkipVenvSetup) {
     throw "Virtual environment python not found at: $venvPy"
   }
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel") -FailureMessage "Failed to upgrade pip/setuptools/wheel."
-  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels. Ensure Python is x64 3.11+."
+  Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu") -FailureMessage "Failed to install torch CPU wheels. Ensure Python is x64 3.11+ on ARM hosts."
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "-r", (Join-Path $repoRoot "requirements.txt")) -FailureMessage "Failed to install requirements.txt dependencies as binary wheels."
   Invoke-Checked -FilePath $venvPy -ArgumentList @("-m", "pip", "install", "--only-binary=:all:", "uvicorn[standard]", "httpx", "pandas", "yt-dlp", "opencv-python", "easyocr") -FailureMessage "Failed to install runtime dependencies as binary wheels."
 }
