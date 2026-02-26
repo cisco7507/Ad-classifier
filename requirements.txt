@@ -7,3 +7,5 @@ python-dotenv
 protobuf
 einops
 timm
+requests
+ddgs
