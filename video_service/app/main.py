@@ -84,6 +84,9 @@ async def lifespan(app: FastAPI):
     init_db()
     start_cleanup_thread()
 
+    from video_service.core.watcher import start_watcher, stop_watcher
+    watcher_observer = start_watcher()
+
     # Lazy import avoids pulling worker-side heavy deps during module import.
     from video_service.workers.embedded import (
         start as start_embedded_workers,
@@ -97,6 +100,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        stop_watcher(watcher_observer)
         shutdown_embedded_workers()
         logger.info("shutdown: node=%s", NODE_NAME)
 
@@ -210,6 +214,13 @@ def device_diagnostics():
 @app.get("/diagnostics/concurrency", tags=["ops"])
 def concurrency_diagnostics():
     return get_concurrency_diagnostics()
+
+
+@app.get("/diagnostics/watcher", tags=["ops"])
+def watcher_diagnostics():
+    from video_service.core.watcher import get_watcher_diagnostics
+
+    return get_watcher_diagnostics()
 
 
 def _get_category_mapping_diagnostics():

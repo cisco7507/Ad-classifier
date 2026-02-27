@@ -46,6 +46,13 @@ from video_service.core.device import get_diagnostics, DEVICE
 logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts"))
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+WATCH_OUTPUT_DIR = (os.environ.get("WATCH_OUTPUT_DIR") or "").strip()
+_WATCH_FOLDERS_RAW = (os.environ.get("WATCH_FOLDERS") or "").strip()
+WATCH_ROOTS = [
+    os.path.realpath(folder.strip())
+    for folder in _WATCH_FOLDERS_RAW.split(",")
+    if folder.strip()
+]
 
 
 def _short(text: str | None, max_len: int = 220) -> str:
@@ -186,6 +193,71 @@ def _extract_agent_ocr_text(events: list[str]) -> str:
         if idx >= 0:
             return evt[idx + len("Observation:") :].strip()
     return ""
+
+
+def _is_path_within_roots(path_value: str, roots: list[str]) -> bool:
+    if not roots:
+        return False
+    try:
+        real_path = os.path.realpath(path_value)
+    except (OSError, ValueError):
+        return False
+    for root in roots:
+        try:
+            if os.path.commonpath([real_path, root]) == root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _maybe_export_result_json(
+    job_id: str,
+    source_url: str | None,
+    result_json: str | None,
+    *,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    """Write JSON result for watch-folder ingested local files when configured."""
+    if not WATCH_OUTPUT_DIR:
+        return
+    if not source_url:
+        return
+    if source_url.startswith(("http://", "https://")):
+        return
+    if not _is_path_within_roots(source_url, WATCH_ROOTS):
+        return
+
+    try:
+        os.makedirs(WATCH_OUTPUT_DIR, exist_ok=True)
+        source_name = os.path.splitext(os.path.basename(source_url))[0] or job_id
+        safe_name = re.sub(r"[^A-Za-z0-9_.\-]", "_", source_name)
+        output_path = os.path.join(WATCH_OUTPUT_DIR, f"{safe_name}.json")
+
+        parsed_result = None
+        if result_json:
+            try:
+                parsed_result = json.loads(result_json)
+            except Exception:
+                parsed_result = result_json
+
+        payload = {
+            "job_id": job_id,
+            "source_file": source_url,
+            "status": status,
+            "error": _short(error_message, 1000) if error_message else None,
+            "result": parsed_result,
+        }
+
+        tmp_path = f"{output_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, output_path)
+
+        logger.info("result_exported: %s", output_path)
+    except Exception as exc:
+        logger.error("result_export_failed: job=%s error=%s", job_id, exc)
 
 
 def _append_job_event(job_id: str, message: str) -> None:
@@ -341,6 +413,13 @@ def claim_and_process_job() -> bool:
                 "UPDATE jobs SET duration_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (duration_seconds, job_id),
             )
+            _maybe_export_result_json(
+                job_id,
+                url,
+                result_json,
+                status="failed",
+                error_message=error_msg,
+            )
             logger.error("job_failed: error=%.200s", error_msg)
         else:
             _set_stage(job_id, "persist", "persisting result payload")
@@ -361,6 +440,12 @@ def claim_and_process_job() -> bool:
             _append_job_event(
                 job_id,
                 f"{datetime.now(timezone.utc).isoformat()} completed: result persisted",
+            )
+            _maybe_export_result_json(
+                job_id,
+                url,
+                result_json,
+                status="completed",
             )
             set_stage_context("completed", "result persisted")
             logger.info("job_completed")
