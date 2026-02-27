@@ -107,6 +107,21 @@ export interface Metrics {
   node:                      string;
 }
 
+export interface AnalyticsData {
+  top_brands: { brand: string; count: number }[];
+  categories: { category: string; count: number }[];
+  avg_duration_by_mode: { mode: string; avg_duration: number | null; count: number }[];
+  avg_duration_by_scan: { scan_mode: string; avg_duration: number | null; count: number }[];
+  daily_outcomes: { day: string; status: string; count: number }[];
+  providers: { provider: string; count: number }[];
+  totals: {
+    total: number;
+    completed: number;
+    failed: number;
+    avg_duration: number | null;
+  };
+}
+
 // ── API helpers with typed errors ─────────────────────────────────────────────
 
 function parseError(err: unknown): string {
@@ -131,6 +146,7 @@ async function safe<T>(fn: () => Promise<T>): Promise<T> {
 export const getClusterNodes  = () => safe(() => api.get<ClusterNode>('/cluster/nodes').then(r => r.data));
 export const getClusterJobs   = () => safe(() => api.get<JobStatus[]>('/cluster/jobs').then(r => r.data));
 export const getMetrics       = () => safe(() => api.get<Metrics>('/metrics').then(r => r.data));
+export const getAnalytics     = () => safe(() => api.get<AnalyticsData>('/analytics').then(r => r.data));
 export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/jobs/${id}`).then(r => r.data));
 export const getJobResult     = (id: string) => safe(() => api.get<{ result: ResultRow[] | null }>(`/jobs/${id}/result`).then(r => r.data));
 export const getJobArtifacts  = (id: string) => safe(() => api.get<{ artifacts: JobArtifacts }>(`/jobs/${id}/artifacts`).then(r => r.data));

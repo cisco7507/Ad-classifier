@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayersIcon, ComponentInstanceIcon } from '@radix-ui/react-icons';
+import { LayersIcon, BarChartIcon, ComponentInstanceIcon } from '@radix-ui/react-icons';
 import { cn } from '../lib/utils';
 
 export function Layout() {
@@ -7,6 +7,7 @@ export function Layout() {
 
   const navItems = [
     { name: 'Overview', path: '/', icon: LayersIcon },
+    { name: 'Analytics', path: '/analytics', icon: BarChartIcon },
     { name: 'Jobs', path: '/jobs', icon: ComponentInstanceIcon },
   ];
 

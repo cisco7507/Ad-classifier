@@ -258,6 +258,123 @@ def get_metrics():
     }
 
 
+@app.get("/analytics", tags=["analytics"])
+def get_analytics():
+    with closing(get_db()) as conn:
+        top_brands = conn.execute(
+            """
+            SELECT brand, COUNT(*) as count
+            FROM job_stats
+            WHERE status = 'completed'
+              AND TRIM(COALESCE(brand, '')) != ''
+              AND LOWER(TRIM(brand)) NOT IN ('unknown', 'none', 'n/a')
+            GROUP BY brand
+            ORDER BY count DESC
+            LIMIT 20
+            """
+        ).fetchall()
+
+        categories = conn.execute(
+            """
+            SELECT category, COUNT(*) as count
+            FROM job_stats
+            WHERE status = 'completed'
+              AND TRIM(COALESCE(category, '')) != ''
+              AND LOWER(TRIM(category)) NOT IN ('unknown', 'none', 'n/a')
+            GROUP BY category
+            ORDER BY count DESC
+            LIMIT 25
+            """
+        ).fetchall()
+
+        avg_duration_by_mode = conn.execute(
+            """
+            SELECT mode, AVG(duration_seconds) as avg_dur, COUNT(*) as count
+            FROM job_stats
+            WHERE status = 'completed'
+              AND duration_seconds IS NOT NULL
+            GROUP BY mode
+            ORDER BY count DESC
+            """
+        ).fetchall()
+
+        avg_duration_by_scan = conn.execute(
+            """
+            SELECT scan_mode, AVG(duration_seconds) as avg_dur, COUNT(*) as count
+            FROM job_stats
+            WHERE status = 'completed'
+              AND duration_seconds IS NOT NULL
+            GROUP BY scan_mode
+            ORDER BY count DESC
+            """
+        ).fetchall()
+
+        daily_outcomes = conn.execute(
+            """
+            SELECT DATE(completed_at) as day, status, COUNT(*) as count
+            FROM job_stats
+            GROUP BY day, status
+            ORDER BY day
+            """
+        ).fetchall()
+
+        providers = conn.execute(
+            """
+            SELECT provider, COUNT(*) as count
+            FROM job_stats
+            WHERE status = 'completed'
+              AND TRIM(COALESCE(provider, '')) != ''
+            GROUP BY provider
+            ORDER BY count DESC
+            """
+        ).fetchall()
+
+        totals = conn.execute(
+            """
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) as completed,
+                   SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed,
+                   AVG(CASE WHEN status='completed' THEN duration_seconds END) as avg_duration
+            FROM job_stats
+            """
+        ).fetchone()
+
+    def _round_or_none(value):
+        return round(value, 1) if value is not None else None
+
+    return {
+        "top_brands": [{"brand": r["brand"], "count": r["count"]} for r in top_brands],
+        "categories": [{"category": r["category"], "count": r["count"]} for r in categories],
+        "avg_duration_by_mode": [
+            {
+                "mode": r["mode"] or "unknown",
+                "avg_duration": _round_or_none(r["avg_dur"]),
+                "count": r["count"],
+            }
+            for r in avg_duration_by_mode
+        ],
+        "avg_duration_by_scan": [
+            {
+                "scan_mode": r["scan_mode"] or "unknown",
+                "avg_duration": _round_or_none(r["avg_dur"]),
+                "count": r["count"],
+            }
+            for r in avg_duration_by_scan
+        ],
+        "daily_outcomes": [
+            {"day": r["day"], "status": r["status"], "count": r["count"]}
+            for r in daily_outcomes
+        ],
+        "providers": [{"provider": r["provider"], "count": r["count"]} for r in providers],
+        "totals": {
+            "total": totals["total"] if totals else 0,
+            "completed": totals["completed"] if totals and totals["completed"] is not None else 0,
+            "failed": totals["failed"] if totals and totals["failed"] is not None else 0,
+            "avg_duration": _round_or_none(totals["avg_duration"] if totals else None),
+        },
+    }
+
+
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:

@@ -183,6 +183,48 @@ def _extract_summary_fields(result_json: str | None) -> tuple[str, str, str]:
     return brand, category, category_id
 
 
+def _record_job_stats(
+    job_id: str,
+    status: str,
+    source_url: str | None,
+    mode: str | None,
+    settings: dict,
+    brand: str,
+    category: str,
+    category_id: str,
+    duration_seconds: float | None,
+) -> None:
+    source = (source_url or "").strip()
+    source_type = "url" if source.startswith(("http://", "https://")) else "local"
+    try:
+        with closing(get_db()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO job_stats
+                    (id, status, mode, brand, category, category_id, duration_seconds,
+                     scan_mode, provider, model_name, ocr_engine, source_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        job_id,
+                        status,
+                        mode or "",
+                        brand or "",
+                        category or "",
+                        category_id or "",
+                        duration_seconds,
+                        settings.get("scan_mode", ""),
+                        settings.get("provider", ""),
+                        settings.get("model_name", ""),
+                        settings.get("ocr_engine", ""),
+                        source_type,
+                    ),
+                )
+    except Exception as exc:
+        logger.warning("job_stats_write_failed: %s", exc)
+
+
 def _extract_agent_ocr_text(events: list[str]) -> str:
     for evt in events:
         if not evt or "[Scene" not in evt:
@@ -420,6 +462,17 @@ def claim_and_process_job() -> bool:
                 status="failed",
                 error_message=error_msg,
             )
+            _record_job_stats(
+                job_id=job_id,
+                status="failed",
+                source_url=url,
+                mode=mode,
+                settings=settings,
+                brand="",
+                category="",
+                category_id="",
+                duration_seconds=duration_seconds,
+            )
             logger.error("job_failed: error=%.200s", error_msg)
         else:
             _set_stage(job_id, "persist", "persisting result payload")
@@ -446,6 +499,17 @@ def claim_and_process_job() -> bool:
                 url,
                 result_json,
                 status="completed",
+            )
+            _record_job_stats(
+                job_id=job_id,
+                status="completed",
+                source_url=url,
+                mode=mode,
+                settings=settings,
+                brand=brand,
+                category=category,
+                category_id=category_id,
+                duration_seconds=duration_seconds,
             )
             set_stage_context("completed", "result persisted")
             logger.info("job_completed")

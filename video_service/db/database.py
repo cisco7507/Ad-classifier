@@ -61,6 +61,24 @@ def init_db():
                 )
             """)
 
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS job_stats (
+                    id TEXT PRIMARY KEY,
+                    completed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                    status TEXT NOT NULL,
+                    mode TEXT,
+                    brand TEXT,
+                    category TEXT,
+                    category_id TEXT,
+                    duration_seconds REAL,
+                    scan_mode TEXT,
+                    provider TEXT,
+                    model_name TEXT,
+                    ocr_engine TEXT,
+                    source_type TEXT
+                )
+            """)
+
             existing_cols = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
