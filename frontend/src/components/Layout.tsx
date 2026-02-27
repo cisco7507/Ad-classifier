@@ -7,8 +7,8 @@ export function Layout() {
 
   const navItems = [
     { name: 'Overview', path: '/', icon: LayersIcon },
-    { name: 'Analytics', path: '/analytics', icon: BarChartIcon },
     { name: 'Jobs', path: '/jobs', icon: ComponentInstanceIcon },
+    { name: 'Analytics', path: '/analytics', icon: BarChartIcon },
   ];
 
   return (

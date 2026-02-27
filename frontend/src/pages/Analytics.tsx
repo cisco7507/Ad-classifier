@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { BarChartIcon, ExclamationTriangleIcon, UpdateIcon } from '@radix-ui/react-icons';
-import { getAnalytics } from '../lib/api';
+import { getClusterAnalytics } from '../lib/api';
 import type { AnalyticsData } from '../lib/api';
 
 const PALETTE = ['#4f46e5', '#6366f1', '#818cf8', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#14b8a6', '#ec4899', '#8b5cf6'];
@@ -34,7 +34,7 @@ export function Analytics() {
 
     const poll = async () => {
       try {
-        const payload = await getAnalytics();
+        const payload = await getClusterAnalytics();
         if (cancelled) return;
         setData(payload);
         setError('');
