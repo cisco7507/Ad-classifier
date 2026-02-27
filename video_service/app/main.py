@@ -26,6 +26,7 @@ import shutil
 import logging
 import mimetypes
 import time as _time
+from datetime import datetime, timezone
 from collections import defaultdict
 from contextlib import asynccontextmanager, closing
 from typing import List, Optional
@@ -84,6 +85,12 @@ async def lifespan(app: FastAPI):
     cluster.start_health_checks()
     logger.info("startup: initialising DB (node=%s)", NODE_NAME)
     init_db()
+    _recover_stale_jobs_on_startup()
+    from video_service.core.stale_recovery import (
+        start_stale_recovery_thread,
+        stop_stale_recovery,
+    )
+    start_stale_recovery_thread()
     start_cleanup_thread()
 
     from video_service.core.watcher import start_watcher, stop_watcher
@@ -103,6 +110,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         stop_watcher(watcher_observer)
+        stop_stale_recovery()
         shutdown_embedded_workers()
         logger.info("shutdown: node=%s", NODE_NAME)
 
@@ -450,6 +458,57 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         if key not in payload:
             payload[key] = value
     return payload
+
+
+def _append_recovery_event(conn, job_id: str, message: str) -> None:
+    row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    events: list[str] = []
+    if row and row["events"]:
+        try:
+            parsed = json.loads(row["events"])
+            if isinstance(parsed, list):
+                events = [str(item) for item in parsed]
+        except Exception:
+            events = []
+    events.append(f"{datetime.now(timezone.utc).isoformat()} recovery: {message}")
+    events = events[-400:]
+    conn.execute(
+        "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (json.dumps(events), job_id),
+    )
+
+
+def _recover_stale_jobs_on_startup() -> int:
+    """Reset any jobs left in processing state from a previous crash/restart."""
+    with closing(get_db()) as conn:
+        candidates = conn.execute(
+            "SELECT id FROM jobs WHERE status = 'processing'"
+        ).fetchall()
+        job_ids = [row["id"] for row in candidates]
+        if not job_ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in job_ids)
+        with conn:
+            conn.execute(
+                f"""
+                UPDATE jobs
+                SET status = 'queued',
+                    stage = 'queued',
+                    stage_detail = 'recovered after restart',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                tuple(job_ids),
+            )
+            for job_id in job_ids:
+                _append_recovery_event(conn, job_id, "recovered after process restart")
+
+    logger.info(
+        "startup_recovery: reset %d orphaned processing jobs to queued",
+        len(job_ids),
+    )
+    return len(job_ids)
 
 
 def _resolve_enable_web_search(
