@@ -375,14 +375,15 @@ export function Jobs() {
                 <th className="px-6 py-4">Mode</th>
                 <th className="px-6 py-4">Stage</th>
                 <th className="px-6 py-4 text-right">Progress</th>
+                <th className="px-6 py-4">Duration</th>
                 <th className="px-6 py-4">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {loading && jobs.length === 0 ? (
-                <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
+                <tr><td colSpan={10} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
               ) : filteredJobs.length === 0 ? (
-                <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-500">No jobs found.</td></tr>
+                <tr><td colSpan={10} className="px-6 py-12 text-center text-slate-500">No jobs found.</td></tr>
               ) : filteredJobs.map((job) => (
                 <tr key={job.job_id} className={`hover:bg-slate-800/20 transition-colors group ${selectedJobs.has(job.job_id) ? 'bg-primary-500/5' : ''}`}>
                   <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
@@ -415,6 +416,13 @@ export function Jobs() {
                   <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-slate-400">{job.stage || '—'}</td>
                   <td className="px-6 py-4 font-mono text-xs text-right text-slate-300">
                     {job.status === 'processing' ? `${job.progress.toFixed(1)}%` : job.status === 'completed' ? '100%' : '—'}
+                  </td>
+                  <td className="px-6 py-4 font-mono text-xs text-slate-400">
+                    {job.duration_seconds != null
+                      ? job.duration_seconds < 60
+                        ? `${job.duration_seconds.toFixed(1)}s`
+                        : `${Math.floor(job.duration_seconds / 60)}m ${Math.round(job.duration_seconds % 60)}s`
+                      : '—'}
                   </td>
                   <td className="px-6 py-4 font-mono text-[10px] text-slate-500">{job.created_at}</td>
                 </tr>

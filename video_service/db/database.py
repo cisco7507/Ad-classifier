@@ -75,6 +75,8 @@ def init_db():
                 conn.execute("ALTER TABLE jobs ADD COLUMN category TEXT")
             if "category_id" not in existing_cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN category_id TEXT")
+            if "duration_seconds" not in existing_cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN duration_seconds REAL")
 
             conn.execute("UPDATE jobs SET stage = COALESCE(stage, status, 'queued') WHERE stage IS NULL")
             conn.execute("UPDATE jobs SET stage_detail = COALESCE(stage_detail, '') WHERE stage_detail IS NULL")

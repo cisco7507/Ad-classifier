@@ -492,6 +492,7 @@ def _get_jobs_from_db(limit: int = 100) -> list:
         JobStatus(
             job_id=r["id"], status=r["status"],
             stage=row_value(r, "stage"), stage_detail=row_value(r, "stage_detail"),
+            duration_seconds=row_value(r, "duration_seconds"),
             created_at=r["created_at"], updated_at=r["updated_at"],
             progress=r["progress"], error=row_value(r, "error"),
             settings=JobSettings.model_validate_json(r["settings"]) if r["settings"] else None,
@@ -536,6 +537,7 @@ async def get_job(req: Request, job_id: str):
     return JobStatus(
         job_id=row["id"], status=row["status"],
         stage=row_value(row, "stage"), stage_detail=row_value(row, "stage_detail"),
+        duration_seconds=row_value(row, "duration_seconds"),
         created_at=row["created_at"], updated_at=row["updated_at"],
         progress=row["progress"], error=row_value(row, "error"),
         settings=JobSettings.model_validate_json(row["settings"]) if row["settings"] else None,
