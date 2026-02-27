@@ -146,6 +146,31 @@ async def cluster_nodes():
     }
 
 
+@app.get("/ollama/models", tags=["ops"])
+async def list_ollama_models():
+    """Return locally available Ollama models; [] when Ollama is unreachable."""
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{ollama_host}/api/tags", timeout=5.0)
+            if res.status_code == 200:
+                payload = res.json()
+                models = payload.get("models", [])
+                return [
+                    {
+                        "name": model.get("name", ""),
+                        "size": model.get("size"),
+                        "modified_at": model.get("modified_at"),
+                    }
+                    for model in models
+                    if isinstance(model, dict) and model.get("name")
+                ]
+    except Exception as exc:
+        logger.warning("ollama_models: unreachable: %s", exc)
+    return []
+
+
 @app.get("/cluster/jobs", tags=["ops"])
 async def cluster_jobs():
     """Fan out /admin/jobs to all healthy nodes and merge."""
