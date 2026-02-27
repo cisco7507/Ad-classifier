@@ -497,6 +497,75 @@ export function JobDetail() {
     return map;
   }, [events, stageSequenceForEvents]);
 
+  const updateVideoSource = useCallback((currentJob: JobStatus) => {
+    const rawUrl = (currentJob.url || '').trim();
+    if (!rawUrl) {
+      setVideoSource(null);
+      setVideoAvailable(false);
+      return;
+    }
+
+    const youtubeMatch = rawUrl.match(
+      /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/i,
+    );
+    if (youtubeMatch?.[1]) {
+      setVideoSource({
+        type: 'youtube',
+        url: `https://www.youtube.com/embed/${youtubeMatch[1]}`,
+      });
+      setVideoAvailable(true);
+      return;
+    }
+
+    if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      setVideoSource({ type: 'remote', url: rawUrl });
+      setVideoAvailable(true);
+      return;
+    }
+
+    setVideoSource({ type: 'local', url: getJobVideoUrl(currentJob.job_id) });
+    setVideoAvailable(true);
+  }, []);
+
+  const refreshJobSnapshot = useCallback(async (forceTerminalFetch = false) => {
+    if (!id) return null;
+
+    const currentJob = await getJob(id);
+    setJob(currentJob);
+    setError('');
+    setVideoError('');
+    updateVideoSource(currentJob);
+
+    const isTerminal = currentJob.status === 'completed' || currentJob.status === 'failed';
+
+    if (isTerminal || forceTerminalFetch) {
+      try {
+        const resultPayload = await getJobResult(id);
+        setResult(resultPayload.result || null);
+      } catch {
+        // no-op
+      }
+    }
+
+    try {
+      const artifactsPayload = await getJobArtifacts(id);
+      setArtifacts(artifactsPayload.artifacts || null);
+    } catch {
+      // no-op
+    }
+
+    if (currentJob.status === 'processing' || isTerminal || forceTerminalFetch) {
+      try {
+        const eventsPayload = await getJobEvents(id);
+        setEvents(eventsPayload.events || []);
+      } catch {
+        // no-op
+      }
+    }
+
+    return currentJob;
+  }, [id, updateVideoSource]);
+
   useEffect(() => {
     setShowAllReasoningTerms(false);
     setShowFullReasoning(false);
@@ -524,80 +593,82 @@ export function JobDetail() {
   }, [events]);
 
   useEffect(() => {
-    let unmounted = false;
+    let cancelled = false;
     if (!id) return;
 
-    const poll = async () => {
-      try {
-        const j = await getJob(id);
-        if (unmounted) return;
-        setJob(j);
-        setError('');
-        setVideoError('');
+    setLoading(true);
+    setJob(null);
+    setResult(null);
+    setEvents([]);
+    setArtifacts(null);
+    setVideoSource(null);
+    setVideoAvailable(false);
 
-        const rawUrl = (j.url || '').trim();
-        if (!rawUrl) {
-          setVideoSource(null);
-          setVideoAvailable(false);
-        } else {
-          const youtubeMatch = rawUrl.match(
-            /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/i,
-          );
-          if (youtubeMatch?.[1]) {
-            setVideoSource({
-              type: 'youtube',
-              url: `https://www.youtube.com/embed/${youtubeMatch[1]}`,
-            });
-            setVideoAvailable(true);
-          } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-            setVideoSource({ type: 'remote', url: rawUrl });
-            setVideoAvailable(true);
-          } else {
-            setVideoSource({ type: 'local', url: getJobVideoUrl(j.job_id) });
-            setVideoAvailable(true);
-          }
-        }
+    refreshJobSnapshot(true)
+      .catch((err: any) => {
+        if (cancelled) return;
+        setError(err.message || 'Failed to load job');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
-        if (j.status === 'completed' || j.status === 'failed') {
-          try {
-            const r = await getJobResult(id);
-            if (r.result && !unmounted) setResult(r.result);
-          } catch {
-            // no-op
-          }
-        }
-
-        try {
-          const a = await getJobArtifacts(id);
-          if (!unmounted) setArtifacts(a.artifacts || null);
-        } catch {
-          // no-op
-        }
-
-        if (j.status === 'processing' || j.status === 'completed' || j.status === 'failed') {
-          try {
-            const e = await getJobEvents(id);
-            if (e.events && !unmounted) setEvents(e.events);
-          } catch {
-            // no-op
-          }
-        }
-
-        if (!unmounted && j.status !== 'completed' && j.status !== 'failed') {
-          setTimeout(poll, 1500);
-        }
-      } catch (err: any) {
-        if (!unmounted) {
-          setError(err.message || 'Failed to load job');
-          setLoading(false);
-        }
-      } finally {
-        if (!unmounted) setLoading(false);
-      }
+    return () => {
+      cancelled = true;
     };
-    poll();
-    return () => { unmounted = true; };
-  }, [id]);
+  }, [id, refreshJobSnapshot]);
+
+  useEffect(() => {
+    if (!id || !job) return;
+    if (job.status === 'completed' || job.status === 'failed') return;
+
+    const streamUrl = `${API_BASE}/jobs/${id}/stream`;
+    const eventSource = new EventSource(streamUrl);
+    let closed = false;
+
+    eventSource.addEventListener('update', (evt) => {
+      try {
+        const parsed = JSON.parse((evt as MessageEvent).data);
+        setJob((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            status: parsed.status ?? prev.status,
+            stage: parsed.stage ?? prev.stage,
+            stage_detail: parsed.stage_detail ?? prev.stage_detail,
+            progress: typeof parsed.progress === 'number' ? parsed.progress : prev.progress,
+            error: parsed.error ?? prev.error,
+            updated_at: parsed.updated_at ?? prev.updated_at,
+          };
+        });
+        if (Array.isArray(parsed.events)) {
+          setEvents(parsed.events);
+        }
+      } catch {
+        // no-op
+      }
+    });
+
+    eventSource.addEventListener('complete', () => {
+      if (closed) return;
+      closed = true;
+      eventSource.close();
+      refreshJobSnapshot(true).catch(() => {
+        // no-op
+      });
+    });
+
+    eventSource.onerror = () => {
+      if (closed) return;
+      closed = true;
+      eventSource.close();
+    };
+
+    return () => {
+      closed = true;
+      eventSource.close();
+    };
+  }, [id, job?.status, refreshJobSnapshot]);
 
   const handleExportCSV = useCallback(() => {
     if (result) exportResultsCSV(result, `job-${id}-results.csv`);

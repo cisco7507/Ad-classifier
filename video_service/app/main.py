@@ -25,18 +25,20 @@ import json
 import shutil
 import logging
 import mimetypes
+import asyncio
 import time as _time
 from datetime import datetime, timezone
 from collections import defaultdict
 from contextlib import asynccontextmanager, closing
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sse_starlette.sse import EventSourceResponse
 
 from video_service.core.logging_setup import configure_logging
 configure_logging()
@@ -835,6 +837,75 @@ async def get_job_events(req: Request, job_id: str):
     if not row or not row["events"]:
         return {"events": []}
     return {"events": json.loads(row["events"])}
+
+
+@app.get("/jobs/{job_id}/stream", tags=["jobs"], response_model=None)
+async def stream_job_events(req: Request, job_id: str):
+    """SSE stream with low-latency job updates backed by DB polling."""
+    if not req.query_params.get("internal"):
+        target = None
+        for node in cluster.nodes:
+            if job_id.startswith(f"{node}-"):
+                target = node
+                break
+        if target and target != cluster.self_name:
+            target_url = cluster.get_node_url(target)
+            if target_url:
+                return RedirectResponse(url=f"{target_url}/jobs/{job_id}/stream", status_code=307)
+
+    async def event_generator() -> AsyncGenerator[dict[str, str], None]:
+        last_updated = None
+
+        while True:
+            if await req.is_disconnected():
+                logger.debug("job_stream_disconnected: job_id=%s", job_id)
+                break
+
+            with closing(get_db()) as conn:
+                row = conn.execute(
+                    """
+                    SELECT status, stage, stage_detail, progress, error, updated_at, events
+                    FROM jobs
+                    WHERE id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
+
+            if not row:
+                yield {"event": "error", "data": json.dumps({"detail": "Job not found"})}
+                break
+
+            status = row["status"] or "unknown"
+            current_updated = row["updated_at"]
+            is_terminal = status in {"completed", "failed"}
+
+            if current_updated != last_updated:
+                last_updated = current_updated
+                try:
+                    events = json.loads(row["events"]) if row["events"] else []
+                    if not isinstance(events, list):
+                        events = []
+                except Exception:
+                    events = []
+
+                payload = {
+                    "status": status,
+                    "stage": row["stage"],
+                    "stage_detail": row["stage_detail"],
+                    "progress": row["progress"],
+                    "error": row["error"],
+                    "updated_at": current_updated,
+                    "events": events,
+                }
+                yield {"event": "update", "data": json.dumps(payload)}
+
+            if is_terminal:
+                yield {"event": "complete", "data": json.dumps({"status": status, "updated_at": current_updated})}
+                break
+
+            await asyncio.sleep(0.5)
+
+    return EventSourceResponse(event_generator())
 
 
 @app.delete("/jobs/{job_id}", tags=["jobs"])
