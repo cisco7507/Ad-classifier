@@ -146,6 +146,7 @@ export const deleteJobsBulk   = async (jobIds: string[]) => {
 export const submitUrls       = (data: unknown) => safe(() => api.post('/jobs/by-urls', data).then(r => r.data));
 export const submitFilePath   = (data: unknown) => safe(() => api.post('/jobs/by-filepath', data).then(r => r.data));
 export const submitFolderPath = (data: unknown) => safe(() => api.post('/jobs/by-folder', data).then(r => r.data));
+export const getJobVideoUrl   = (jobId: string): string => `${baseURL}/jobs/${jobId}/video`;
 
 // ── CSV export ───────────────────────────────────────────────────────────────
 
