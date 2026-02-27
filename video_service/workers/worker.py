@@ -78,6 +78,7 @@ def _build_default_artifacts(job_id: str) -> dict:
     return {
         "latest_frames": [],
         "ocr_text": {"text": "", "lines": [], "url": None},
+        "per_frame_vision": [],
         "vision_board": {"image_url": None, "plot_url": None, "top_matches": [], "metadata": {}},
         "extras": {"events_url": f"/jobs/{job_id}/events"},
     }
@@ -553,10 +554,18 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     )
     final_df = None
     latest_scores: dict = {}
+    latest_per_frame_vision: list[dict] = []
     latest_ocr_text = ""
     latest_gallery = []
     for content in generator:
-        if len(content) == 5:
+        if len(content) == 6:
+            latest_scores = content[0] if isinstance(content[0], dict) else {}
+            latest_per_frame_vision = content[1] if isinstance(content[1], list) else []
+            latest_ocr_text = content[2] if isinstance(content[2], str) else ""
+            latest_gallery = content[4] if isinstance(content[4], list) else []
+            final_df = content[5]
+        elif len(content) == 5:
+            # Backward compatibility for older payload shapes.
             latest_scores = content[0] if isinstance(content[0], dict) else {}
             latest_ocr_text = content[1] if isinstance(content[1], str) else ""
             latest_gallery = content[3] if isinstance(content[3], list) else []
@@ -571,6 +580,7 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     artifacts_payload["ocr_text"]["url"] = _write_text_artifact(
         job_id, "ocr/ocr_output.txt", latest_ocr_text
     )
+    artifacts_payload["per_frame_vision"] = latest_per_frame_vision
     artifacts_payload["vision_board"] = _vision_board_from_scores(latest_scores)
 
     if final_df is not None and not final_df.empty:

@@ -84,7 +84,7 @@ def process_single_video(
             extracted_mode = "full video" if frames[0].get("type") == "scene" else "tail only"
             stage_callback("frame_extract", f"extracted {len(frames)} frames ({extracted_mode})")
         
-        def _do_vision() -> dict[str, float]:
+        def _do_vision() -> tuple[dict[str, float], list[dict[str, object]]]:
             logger.debug("[%s] parallel_task_start: vision", url)
             try:
                 ready, reason = category_mapper.ensure_vision_text_features()
@@ -94,7 +94,7 @@ def process_single_video(
                     if stage_callback:
                         stage_callback("vision", f"vision skipped; {reason}")
                     logger.info("[%s] vision skipped: %s", url, reason)
-                    return {}
+                    return {}, []
 
                 if stage_callback:
                     stage_callback("vision", "vision enabled; computing visual category scores")
@@ -118,6 +118,18 @@ def process_single_video(
                     logits_per_image = (image_features @ category_mapper.vision_text_features.t()) * logit_scale + logit_bias
                     probs = torch.sigmoid(logits_per_image)
 
+                per_frame_vision_local: list[dict[str, object]] = []
+                for frame_idx in range(probs.shape[0]):
+                    frame_probs = probs[frame_idx]
+                    top_score, top_idx = torch.max(frame_probs, dim=0)
+                    per_frame_vision_local.append(
+                        {
+                            "frame_index": int(frame_idx),
+                            "top_category": category_mapper.categories[int(top_idx.item())],
+                            "top_score": round(float(top_score.item()), 4),
+                        }
+                    )
+
                 scores = probs.mean(dim=0).cpu().numpy()
                 sorted_vision_local = dict(
                     sorted(
@@ -130,7 +142,7 @@ def process_single_video(
                     )[:5]
                 )
                 logger.debug("[%s] vision_task_done in %.2fs", url, time.time() - start_time)
-                return sorted_vision_local
+                return sorted_vision_local, per_frame_vision_local
             except Exception as exc:
                 logger.error("[%s] vision task failed: %s", url, exc, exc_info=True)
                 raise
@@ -177,13 +189,14 @@ def process_single_video(
                 raise
 
         sorted_vision: dict[str, float] = {}
+        per_frame_vision: list[dict[str, object]] = []
         if enable_vision:
             parallel_t0 = time.time()
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 vision_future = pool.submit(_do_vision)
                 ocr_future = pool.submit(_do_ocr)
                 ocr_text = ocr_future.result()
-                sorted_vision = vision_future.result()
+                sorted_vision, per_frame_vision = vision_future.result()
             logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)
         else:
             ocr_text = _do_ocr()
@@ -212,11 +225,11 @@ def process_single_video(
             category_match["category_match_score"],
         ]
         
-        return sorted_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row
+        return sorted_vision, per_frame_vision, ocr_text, f"Category: {cat_out}", [(f["ocr_image"], f"{f['time']}s") for f in frames], row
         
     except Exception as e: 
         logger.error(f"[{url}] Pipeline Worker Crash: {str(e)}", exc_info=True)
-        return {}, "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None]
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None]
 
 def run_pipeline_job(
     src,
@@ -265,6 +278,6 @@ def run_pipeline_job(
             for u in urls_list
         }
         for fut in concurrent.futures.as_completed(futures):
-            v, t, d, g, row = fut.result()
+            v, pfv, t, d, g, row = fut.result()
             master.append(row)
-            yield v, t, d, g, pd.DataFrame(master, columns=RESULT_COLUMNS)
+            yield v, pfv, t, d, g, pd.DataFrame(master, columns=RESULT_COLUMNS)

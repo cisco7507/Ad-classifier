@@ -83,6 +83,11 @@ type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
 type ReasoningTermType = 'brand' | 'url' | 'evidence';
 type ReasoningTerm = { text: string; type: ReasoningTermType };
 type HighlightedReasoningPart = string | { text: string; type: ReasoningTermType };
+type FrameConfidenceTone = {
+  stripClass: string;
+  badgeClass: string;
+  textLabel: string;
+};
 
 const PIPELINE_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
 const AGENT_STAGES = ['claim', 'ingest', 'frame_extract', 'ocr', 'vision', 'llm', 'persist', 'completed'] as const;
@@ -148,6 +153,41 @@ function sanitizeInlineReasoningFragment(text: string): string {
     .replace(/\[[A-Z][A-Z0-9 _-]{1,30}\]/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+}
+
+function getFrameConfidenceTone(score: number | null): FrameConfidenceTone {
+  if (score == null) {
+    return {
+      stripClass: 'bg-gray-300',
+      badgeClass: 'bg-gray-100 text-gray-700 border border-gray-300',
+      textLabel: 'Unknown',
+    };
+  }
+  if (score >= 0.7) {
+    return {
+      stripClass: 'bg-emerald-500',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-300',
+      textLabel: 'High',
+    };
+  }
+  if (score >= 0.4) {
+    return {
+      stripClass: 'bg-amber-500',
+      badgeClass: 'bg-amber-100 text-amber-800 border border-amber-300',
+      textLabel: 'Medium',
+    };
+  }
+  return {
+    stripClass: 'bg-red-400',
+    badgeClass: 'bg-red-100 text-red-800 border border-red-300',
+    textLabel: 'Low',
+  };
+}
+
+function truncateCategory(value: string, max = 20): string {
+  const normalized = (value || '').trim();
+  if (normalized.length <= max) return normalized;
+  return `${normalized.slice(0, max - 1)}…`;
 }
 
 function normalizeStage(raw: string): string {
@@ -585,8 +625,29 @@ export function JobDetail() {
   const progressPercent = Math.round(job.progress ?? 0);
 
   const frameItems = artifacts?.latest_frames || [];
+  const perFrameVision = Array.isArray(artifacts?.per_frame_vision) ? artifacts.per_frame_vision : [];
   const visionBoard = artifacts?.vision_board;
   const frameCount = frameItems.length;
+  const frameVisionByIndex = new Map<number, { frame_index: number; top_category: string; top_score: number }>();
+  for (const item of perFrameVision) {
+    const index = Number(item?.frame_index);
+    const score = toNumber(item?.top_score);
+    if (!Number.isFinite(index) || score == null) continue;
+    if (!item?.top_category || typeof item.top_category !== 'string') continue;
+    frameVisionByIndex.set(index, {
+      frame_index: index,
+      top_category: item.top_category,
+      top_score: score,
+    });
+  }
+  let bestFrameIndex: number | null = null;
+  let bestScore = -1;
+  frameVisionByIndex.forEach((value, index) => {
+    if (value.top_score > bestScore) {
+      bestScore = value.top_score;
+      bestFrameIndex = index;
+    }
+  });
   const stages = job.mode === 'agent' ? AGENT_STAGES : PIPELINE_STAGES;
   const currentStage = (job.stage || '').trim();
   const currentIdx = stages.indexOf(currentStage as (typeof stages)[number]);
@@ -910,12 +971,36 @@ export function JobDetail() {
                   const frameLabel = frame.label || (typeof frame.timestamp === 'number' ? `${frame.timestamp.toFixed(1)}s` : `Frame ${idx + 1}`);
                   const frameTsKey = extractFrameTimestampKey(frame);
                   const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : '';
+                  const frameVision = frameVisionByIndex.get(idx);
+                  const frameScore = frameVision ? toNumber(frameVision.top_score) : null;
+                  const frameTone = getFrameConfidenceTone(frameScore);
+                  const frameCategory = frameVision?.top_category || '';
+                  const isBestFrame = bestFrameIndex === idx && frameVision != null;
+                  const frameTooltip = frameVision
+                    ? `Frame ${idx + 1}: ${frameCategory} (${(frameScore ?? 0).toFixed(2)})`
+                    : undefined;
                   return (
                     <div key={idx} className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group">
                       <img src={toApiUrl(frame.url)} alt={frameLabel} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                      {frameVision && (
+                        <div className={`absolute inset-y-0 left-0 w-1 ${frameTone.stripClass}`} aria-hidden />
+                      )}
                       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
                         {frameLabel}
                       </div>
+                      {frameVision && (
+                        <div
+                          className={`absolute bottom-1 left-2 px-1.5 py-0.5 rounded text-[10px] font-mono ${frameTone.badgeClass}`}
+                          title={frameTooltip}
+                        >
+                          {(frameScore ?? 0).toFixed(2)} · {truncateCategory(frameCategory)} · {frameTone.textLabel}
+                        </div>
+                      )}
+                      {isBestFrame && (
+                        <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-semibold">
+                          ★ Best
+                        </div>
+                      )}
                       {frameOcrText && (
                         <div className="absolute inset-0 bg-black/85 opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-3 flex items-center justify-center">
                           <p className="text-[10px] text-cyan-300 font-mono leading-relaxed text-center line-clamp-6">
