@@ -96,34 +96,50 @@ export function Analytics() {
   const categoriesOption: EChartsOption = useMemo(() => {
     const rows = (data?.categories || []).slice(0, 25);
     return {
-      tooltip: { trigger: 'item', formatter: '{b}<br/>{c} jobs ({d}%)' },
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => `${params?.name || 'unknown'}<br/>${params?.value || 0} jobs`,
+      },
       color: PALETTE,
-      graphic: rows.length
-        ? [
-            {
-              type: 'text',
-              left: 'center',
-              top: 'center',
-              style: {
-                text: `${rows.length}\nCategories`,
-                textAlign: 'center',
-                fill: '#374151',
-                fontSize: 14,
-                fontWeight: 600,
-              },
-            },
-          ]
-        : undefined,
       series: [
         {
           name: 'Categories',
-          type: 'pie',
-          roseType: 'area',
-          radius: [30, 120],
-          center: ['50%', '52%'],
-          itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 1 },
-          label: { color: '#374151', formatter: '{b}\n{c}' },
-          data: rows.map((row) => ({ name: row.category, value: row.count })),
+          type: 'treemap',
+          roam: false,
+          breadcrumb: { show: false },
+          nodeClick: false,
+          upperLabel: { show: false },
+          leafDepth: 1,
+          itemStyle: {
+            borderColor: '#fff',
+            borderWidth: 1,
+            gapWidth: 2,
+          },
+          label: {
+            show: true,
+            formatter: (params: any) => {
+              const name = String(params?.name || '');
+              const value = Number(params?.value || 0);
+              return name.length > 26 ? `${name.slice(0, 25)}…\n${value}` : `${name}\n${value}`;
+            },
+            color: '#1f2937',
+            fontSize: 11,
+            overflow: 'truncate',
+          },
+          emphasis: {
+            label: {
+              show: true,
+              color: '#111827',
+            },
+            itemStyle: {
+              borderColor: '#111827',
+              borderWidth: 1,
+            },
+          },
+          data: rows.map((row) => ({
+            name: row.category,
+            value: row.count,
+          })),
         },
       ],
     };

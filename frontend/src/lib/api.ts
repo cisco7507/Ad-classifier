@@ -74,8 +74,15 @@ export interface ArtifactVisionBoard {
   metadata?: Record<string, unknown>;
 }
 
+export interface PerFrameVision {
+  frame_index: number;
+  top_category: string;
+  top_score: number;
+}
+
 export interface JobArtifacts {
   latest_frames: ArtifactFrame[];
+  per_frame_vision: PerFrameVision[];
   ocr_text: ArtifactOCR;
   vision_board: ArtifactVisionBoard;
   extras?: Record<string, unknown>;

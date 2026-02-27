@@ -410,6 +410,7 @@ def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
 def _default_job_artifacts(job_id: str) -> dict:
     return {
         "latest_frames": [],
+        "per_frame_vision": [],
         "ocr_text": {
             "text": "",
             "lines": [],
@@ -433,6 +434,8 @@ def _normalize_job_artifacts(job_id: str, artifacts: Optional[dict]) -> dict:
         return payload
 
     payload["latest_frames"] = artifacts.get("latest_frames") or []
+    per_frame_vision = artifacts.get("per_frame_vision")
+    payload["per_frame_vision"] = per_frame_vision if isinstance(per_frame_vision, list) else []
 
     ocr_payload = artifacts.get("ocr_text")
     if isinstance(ocr_payload, dict):
