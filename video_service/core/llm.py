@@ -14,6 +14,8 @@ from PIL import Image
 from ddgs import DDGS
 from video_service.core.utils import logger
 
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+
 class SearchManager:
     def __init__(self):
         self.queue = queue.Queue()
@@ -113,7 +115,7 @@ class HybridLLM:
                 elif provider == "Ollama":
                     payload = {"model": backend_model, "prompt": f"{sys}\n\n{usr}", "stream": False, "format": "json", "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                     if img: payload["images"] = [img]
-                    return self._clean_and_parse_json(requests.post("http://localhost:11434/api/generate", json=payload).json().get("response", ""))
+                    return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/generate", json=payload).json().get("response", ""))
                 elif provider == "LM Studio":
                     msgs = [{"role": "system", "content": sys}, {"role": "user", "content": usr}]
                     if img: msgs[1]["content"] = [{"type": "text", "text": usr}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}]
@@ -182,7 +184,7 @@ class HybridLLM:
             elif provider == "Ollama":
                 payload = {"model": backend_model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                 if b64_imgs: payload["images"] = b64_imgs
-                res = requests.post("http://localhost:11434/api/generate", json=payload, timeout=120)
+                res = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=120)
                 if res.status_code != 200:
                     return f'[TOOL: ERROR | reason="Ollama HTTP {res.status_code}: {res.text}"]'
                 return res.json().get("response", "").strip()

@@ -82,6 +82,12 @@ export interface JobArtifacts {
   [key: string]: unknown;
 }
 
+export interface OllamaModel {
+  name: string;
+  size?: number;
+  modified_at?: string;
+}
+
 export interface ResultRow {
   Brand:       string;
   Category:    string;
@@ -129,6 +135,7 @@ export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/
 export const getJobResult     = (id: string) => safe(() => api.get<{ result: ResultRow[] | null }>(`/jobs/${id}/result`).then(r => r.data));
 export const getJobArtifacts  = (id: string) => safe(() => api.get<{ artifacts: JobArtifacts }>(`/jobs/${id}/artifacts`).then(r => r.data));
 export const getJobEvents     = (id: string) => safe(() => api.get<{ events: string[] }>(`/jobs/${id}/events`).then(r => r.data));
+export const getOllamaModels  = () => safe(() => api.get<OllamaModel[]>('/ollama/models').then(r => r.data));
 export const deleteJob        = (id: string) => safe(() => api.delete(`/jobs/${id}`).then(r => r.data));
 export const deleteJobsBulk   = async (jobIds: string[]) => {
   const results = await Promise.allSettled(jobIds.map((id) => deleteJob(id)));

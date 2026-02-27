@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteJobsBulk, getClusterJobs, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
+import { deleteJobsBulk, getClusterJobs, getOllamaModels, submitFilePath, submitFolderPath, submitUrls } from '../lib/api';
 import type { JobStatus, JobSettings } from '../lib/api';
 import { PlayIcon, UpdateIcon, MagnifyingGlassIcon, ClockIcon, TrashIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
@@ -24,6 +24,8 @@ export function Jobs() {
   const [categories, setCategories] = useState('');
   const [provider, setProvider] = useState('Ollama');
   const [modelName, setModelName] = useState('qwen3-vl:8b-instruct');
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [ollamaModelsLoading, setOllamaModelsLoading] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
   const [ocrMode, setOcrMode] = useState('🚀 Fast');
   const [scanMode, setScanMode] = useState('Tail Only');
@@ -54,6 +56,34 @@ export function Jobs() {
     const interval = setInterval(fetchJobs, 4000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setOllamaModelsLoading(true);
+    getOllamaModels()
+      .then((models) => {
+        if (!active) return;
+        const names = models.map((m) => m.name).filter(Boolean);
+        setOllamaModels(names);
+        if (names.length > 0) {
+          setModelName((current) => (names.includes(current) ? current : names[0]));
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        setOllamaModels([]);
+      })
+      .finally(() => {
+        if (!active) return;
+        setOllamaModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const showOllamaModelPicker = provider.trim().toLowerCase() === 'ollama' && ollamaModels.length > 0;
+  const modelInOllamaList = showOllamaModelPicker && ollamaModels.includes(modelName);
 
   const settingsPayload: JobSettings = useMemo(
     () => ({
@@ -291,7 +321,39 @@ export function Jobs() {
             </div>
             <div className="space-y-1 md:col-span-2">
               <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Model</label>
-              <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300" />
+              {showOllamaModelPicker ? (
+                <div className="space-y-2">
+                  <select
+                    value={modelInOllamaList ? modelName : '__custom__'}
+                    onChange={(e) => {
+                      if (e.target.value === '__custom__') {
+                        if (modelInOllamaList) setModelName('');
+                        return;
+                      }
+                      setModelName(e.target.value);
+                    }}
+                    className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300"
+                  >
+                    {ollamaModels.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                    <option value="__custom__">Custom model...</option>
+                  </select>
+                  {!modelInOllamaList && (
+                    <input
+                      value={modelName}
+                      onChange={(e) => setModelName(e.target.value)}
+                      placeholder="Type custom model name..."
+                      className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300"
+                    />
+                  )}
+                </div>
+              ) : (
+                <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300" />
+              )}
+              {provider.trim().toLowerCase() === 'ollama' && ollamaModelsLoading && (
+                <div className="text-[10px] text-slate-500">Loading available Ollama models...</div>
+              )}
             </div>
             <div className="space-y-1 md:col-span-4">
               <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Target Categories (Comma Separated)</label>
