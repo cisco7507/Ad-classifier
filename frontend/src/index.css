@@ -1,25 +1,27 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss";
 
 @theme {
-  --color-primary-50: #f0fdf4;
-  --color-primary-100: #dcfce7;
-  --color-primary-200: #bbf7d0;
-  --color-primary-300: #86efac;
-  --color-primary-400: #4ade80;
-  --color-primary-500: #22c55e;
-  --color-primary-600: #16a34a;
-  --color-primary-700: #15803d;
-  --color-primary-800: #166534;
-  --color-primary-900: #14532d;
-  --color-primary-950: #052e16;
+  --color-primary-50: #eef2ff;
+  --color-primary-100: #e0e7ff;
+  --color-primary-200: #c7d2fe;
+  --color-primary-300: #a5b4fc;
+  --color-primary-400: #818cf8;
+  --color-primary-500: #6366f1;
+  --color-primary-600: #4f46e5;
+  --color-primary-700: #4338ca;
+  --color-primary-800: #3730a3;
+  --color-primary-900: #312e81;
+  --color-primary-950: #1e1b4b;
 }
 
 body {
-  @apply bg-slate-900 text-slate-100 antialiased selection:bg-primary-500 selection:text-white;
+  @apply bg-gray-50 text-gray-900 antialiased selection:bg-primary-100 selection:text-primary-900;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
 }
 
 input,
 select,
 textarea {
-  @apply bg-slate-800 border-slate-700 text-slate-100 focus:border-primary-500 focus:ring-primary-500 rounded-md shadow-sm;
+  @apply bg-white border-gray-300 text-gray-900 focus:border-primary-500 focus:ring-primary-500/30 rounded-md shadow-sm;
 }

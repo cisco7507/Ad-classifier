@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getJob, getJobResult, getJobEvents, getJobArtifacts, exportResultsCSV, copyToClipboard } from '../lib/api';
+import { getJob, getJobResult, getJobEvents, getJobArtifacts, getJobVideoUrl, exportResultsCSV, copyToClipboard } from '../lib/api';
 import type { JobStatus, ResultRow, JobArtifacts } from '../lib/api';
 import {
   ArrowLeftIcon, FileTextIcon, MagicWandIcon, DownloadIcon,
@@ -69,7 +69,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <button
       onClick={handleCopy}
       title={`Copy ${label}`}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white active:scale-95"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200 hover:text-gray-900 active:scale-95"
     >
       <CopyIcon className="w-3 h-3" />
       {copied ? 'Copied!' : label}
@@ -77,7 +77,8 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-type ArtifactTab = 'vision' | 'ocr' | 'frames';
+type ArtifactTab = 'video' | 'vision' | 'ocr' | 'frames';
+type VideoSource = { type: 'local' | 'youtube' | 'remote'; url: string };
 type ScratchTool = 'OCR' | 'SEARCH' | 'VISION' | 'FINAL' | 'ERROR';
 type ReasoningTermType = 'brand' | 'url' | 'evidence';
 type ReasoningTerm = { text: string; type: ReasoningTermType };
@@ -161,15 +162,15 @@ function normalizeStage(raw: string): string {
 }
 
 function reasoningPillClass(type: ReasoningTermType): string {
-  if (type === 'brand') return 'bg-slate-700 text-white font-semibold px-2.5 py-1 rounded-full text-xs';
-  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-1 rounded-full text-xs font-mono';
-  return 'bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-full text-xs';
+  if (type === 'brand') return 'bg-gray-200 text-gray-900 font-semibold px-2.5 py-1 rounded-full text-xs';
+  if (type === 'url') return 'bg-cyan-50 text-cyan-700 border border-cyan-200 px-2.5 py-1 rounded-full text-xs font-mono';
+  return 'bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-xs';
 }
 
 function reasoningInlineClass(type: ReasoningTermType): string {
-  if (type === 'brand') return 'bg-slate-700/80 text-white font-semibold px-1 rounded';
-  if (type === 'url') return 'bg-cyan-500/15 text-cyan-300 px-1 rounded font-mono';
-  return 'bg-amber-500/15 text-amber-300 px-1 rounded';
+  if (type === 'brand') return 'bg-gray-200 text-gray-900 font-semibold px-1 rounded';
+  if (type === 'url') return 'bg-cyan-50 text-cyan-700 px-1 rounded font-mono';
+  return 'bg-amber-50 text-amber-700 px-1 rounded';
 }
 
 function parseToolSegment(line: string): { tool: ScratchTool | null; query: string; finalFields: Record<string, string> } {
@@ -203,17 +204,17 @@ function parseToolSegment(line: string): { tool: ScratchTool | null; query: stri
 function toolTone(tool: ScratchTool | null): { icon: string; badge: string; border: string; text: string } {
   switch (tool) {
     case 'OCR':
-      return { icon: '📝', badge: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300', border: 'border-cyan-500/50', text: 'text-cyan-300' };
+      return { icon: '📝', badge: 'bg-cyan-50 border-cyan-200 text-cyan-700', border: 'border-cyan-300', text: 'text-cyan-700' };
     case 'SEARCH':
-      return { icon: '🔍', badge: 'bg-amber-500/10 border-amber-500/30 text-amber-300', border: 'border-amber-500/50', text: 'text-amber-300' };
+      return { icon: '🔍', badge: 'bg-amber-50 border-amber-200 text-amber-700', border: 'border-amber-300', text: 'text-amber-700' };
     case 'VISION':
-      return { icon: '👁️', badge: 'bg-fuchsia-500/10 border-fuchsia-500/30 text-fuchsia-300', border: 'border-fuchsia-500/50', text: 'text-fuchsia-300' };
+      return { icon: '👁️', badge: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700', border: 'border-fuchsia-300', text: 'text-fuchsia-700' };
     case 'FINAL':
-      return { icon: '✅', badge: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300', border: 'border-emerald-500/50', text: 'text-emerald-300' };
+      return { icon: '✅', badge: 'bg-emerald-50 border-emerald-200 text-emerald-700', border: 'border-emerald-300', text: 'text-emerald-700' };
     case 'ERROR':
-      return { icon: '❌', badge: 'bg-red-500/10 border-red-500/30 text-red-300', border: 'border-red-500/50', text: 'text-red-300' };
+      return { icon: '❌', badge: 'bg-red-50 border-red-200 text-red-700', border: 'border-red-300', text: 'text-red-700' };
     default:
-      return { icon: '•', badge: 'bg-slate-800 border-slate-700 text-slate-300', border: 'border-slate-700', text: 'text-slate-300' };
+      return { icon: '•', badge: 'bg-gray-100 border-gray-300 text-gray-700', border: 'border-gray-300', text: 'text-gray-700' };
   }
 }
 
@@ -233,7 +234,7 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
 
     if (/^---\s*Step\s+\d+\s*---/i.test(trimmed)) {
       renderedLines.push(
-        <div key={key} className="text-slate-500 uppercase tracking-wider text-[10px] border-b border-slate-800 pb-1 mb-2 mt-4">
+        <div key={key} className="text-gray-400 uppercase tracking-wider text-[10px] border-b border-gray-200 pb-1 mb-2 mt-4">
           {trimmed}
         </div>,
       );
@@ -242,7 +243,7 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
 
     if (trimmed.includes('✅ FINAL CONCLUSION')) {
       renderedLines.push(
-        <div key={key} className="bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-2 text-emerald-300 font-semibold">
+        <div key={key} className="bg-emerald-50 border border-emerald-200 rounded px-3 py-2 text-emerald-700 font-semibold">
           {trimmed}
         </div>,
       );
@@ -251,7 +252,7 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
 
     if (/^🤔\s*Thought:/i.test(trimmed)) {
       renderedLines.push(
-        <div key={key} className="italic text-slate-500">
+        <div key={key} className="italic text-gray-400">
           {trimmed}
         </div>,
       );
@@ -266,29 +267,29 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
       const trailingText = actionText.replace(/\[TOOL:[^\]]+\]/i, '').trim();
 
       renderedLines.push(
-        <div key={key} className="text-slate-300 space-y-2">
+        <div key={key} className="text-gray-700 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-slate-200">Action:</span>
+            <span className="font-semibold text-gray-800">Action:</span>
             {parsed.tool ? (
               <span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}>
                 <span>{tone.icon}</span>
                 <span>{parsed.tool}</span>
               </span>
             ) : (
-              <span className="text-slate-300">{actionText}</span>
+              <span className="text-gray-700">{actionText}</span>
             )}
-            {trailingText && <span className="text-slate-400">{trailingText}</span>}
+            {trailingText && <span className="text-gray-500">{trailingText}</span>}
             {parsed.tool === 'SEARCH' && parsed.query && (
-              <span className="bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono">
+              <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-mono">
                 {parsed.query}
               </span>
             )}
           </div>
           {parsed.tool === 'FINAL' && Object.keys(parsed.finalFields).length > 0 && (
-            <div className="ml-6 grid gap-1 text-[10px] text-emerald-200">
-              {parsed.finalFields.brand && <div><span className="text-slate-500 uppercase mr-1">Brand:</span>{parsed.finalFields.brand}</div>}
-              {parsed.finalFields.category && <div><span className="text-slate-500 uppercase mr-1">Category:</span>{parsed.finalFields.category}</div>}
-              {parsed.finalFields.reason && <div><span className="text-slate-500 uppercase mr-1">Reason:</span>{parsed.finalFields.reason}</div>}
+            <div className="ml-6 grid gap-1 text-[10px] text-emerald-700">
+              {parsed.finalFields.brand && <div><span className="text-gray-400 uppercase mr-1">Brand:</span>{parsed.finalFields.brand}</div>}
+              {parsed.finalFields.category && <div><span className="text-gray-400 uppercase mr-1">Category:</span>{parsed.finalFields.category}</div>}
+              {parsed.finalFields.reason && <div><span className="text-gray-400 uppercase mr-1">Reason:</span>{parsed.finalFields.reason}</div>}
             </div>
           )}
         </div>,
@@ -300,7 +301,7 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
       const parsed = parseToolSegment(trimmed);
       const tone = toolTone(parsed.tool || currentTool);
       renderedLines.push(
-        <div key={key} className={`ml-2 pl-3 border-l-2 ${tone.border} text-slate-400 whitespace-pre-wrap`}>
+        <div key={key} className={`ml-2 pl-3 border-l-2 ${tone.border} text-gray-500 whitespace-pre-wrap`}>
           {trimmed}
         </div>,
       );
@@ -308,14 +309,14 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
     }
 
     renderedLines.push(
-      <div key={key} className="text-slate-300 whitespace-pre-wrap">
+      <div key={key} className="text-gray-700 whitespace-pre-wrap">
         {rawLine}
       </div>,
     );
   });
 
   return (
-    <div className="border-b border-fuchsia-900/20 pb-2 mb-2 last:border-0">
+    <div className="border-b border-gray-200 pb-2 mb-2 last:border-0">
       {renderedLines}
     </div>
   );
@@ -330,11 +331,15 @@ export function JobDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [artifactTab, setArtifactTab] = useState<ArtifactTab>('vision');
+  const [videoSource, setVideoSource] = useState<VideoSource | null>(null);
+  const [videoAvailable, setVideoAvailable] = useState(false);
+  const [videoError, setVideoError] = useState('');
   const [showAllReasoningTerms, setShowAllReasoningTerms] = useState(false);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
 
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
+  const autoSelectVideoRef = useRef(false);
   const firstRow = result?.[0];
   const brandText = typeof firstRow?.Brand === 'string' ? firstRow.Brand.trim() : '';
   const reasoningRaw = firstRow
@@ -458,6 +463,18 @@ export function JobDetail() {
   }, [reasoningText]);
 
   useEffect(() => {
+    if (videoAvailable && !autoSelectVideoRef.current) {
+      setArtifactTab('video');
+      autoSelectVideoRef.current = true;
+    }
+  }, [videoAvailable]);
+
+  useEffect(() => {
+    autoSelectVideoRef.current = false;
+    setArtifactTab('vision');
+  }, [id]);
+
+  useEffect(() => {
     if (scratchboardRef.current) {
       scratchboardRef.current.scrollTop = scratchboardRef.current.scrollHeight;
     }
@@ -476,6 +493,30 @@ export function JobDetail() {
         if (unmounted) return;
         setJob(j);
         setError('');
+        setVideoError('');
+
+        const rawUrl = (j.url || '').trim();
+        if (!rawUrl) {
+          setVideoSource(null);
+          setVideoAvailable(false);
+        } else {
+          const youtubeMatch = rawUrl.match(
+            /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/i,
+          );
+          if (youtubeMatch?.[1]) {
+            setVideoSource({
+              type: 'youtube',
+              url: `https://www.youtube.com/embed/${youtubeMatch[1]}`,
+            });
+            setVideoAvailable(true);
+          } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+            setVideoSource({ type: 'remote', url: rawUrl });
+            setVideoAvailable(true);
+          } else {
+            setVideoSource({ type: 'local', url: getJobVideoUrl(j.job_id) });
+            setVideoAvailable(true);
+          }
+        }
 
         if (j.status === 'completed' || j.status === 'failed') {
           try {
@@ -523,16 +564,16 @@ export function JobDetail() {
   }, [result, id]);
 
   if (loading && !job) {
-    return <div className="p-8 text-slate-400 flex items-center gap-2 animate-pulse">Loading job…</div>;
+    return <div className="p-8 text-gray-500 flex items-center gap-2 animate-pulse">Loading job…</div>;
   }
 
   if (error && !job) {
     return (
-      <div className="p-8 text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg max-w-xl mx-auto flex flex-col items-center py-12">
+      <div className="p-8 text-red-700 bg-red-50 border border-red-200 rounded-lg max-w-xl mx-auto flex flex-col items-center py-12">
         <ExclamationTriangleIcon className="w-12 h-12 mb-4" />
         <h2 className="text-xl font-bold mb-2">Could Not Load Job</h2>
-        <p className="text-red-300 mb-6 text-sm text-center">{error}</p>
-        <Link to="/jobs" className="text-sm text-slate-300 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded transition-colors flex items-center gap-2">
+        <p className="text-red-600 mb-6 text-sm text-center">{error}</p>
+        <Link to="/jobs" className="text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded transition-colors flex items-center gap-2">
           <ArrowLeftIcon /> Back to Jobs
         </Link>
       </div>
@@ -557,19 +598,19 @@ export function JobDetail() {
   const confidenceValue = toNumber(firstRow?.Confidence);
   const confidenceSummaryDisplay = confidenceValue === null ? '—' : confidenceValue.toFixed(2);
   const confidenceSummaryTextColor = confidenceValue === null
-    ? 'text-slate-500'
+    ? 'text-gray-500'
     : confidenceValue >= 0.8
-      ? 'text-emerald-400'
+      ? 'text-emerald-700'
       : confidenceValue >= 0.5
-        ? 'text-amber-400'
-        : 'text-red-400';
+        ? 'text-amber-700'
+        : 'text-red-700';
   const confidenceSummaryDotColor = confidenceValue === null
-    ? 'bg-slate-500'
+    ? 'bg-gray-400'
     : confidenceValue >= 0.8
-      ? 'bg-emerald-400'
+      ? 'bg-emerald-500'
       : confidenceValue >= 0.5
-        ? 'bg-amber-400'
-        : 'bg-red-400';
+        ? 'bg-amber-500'
+        : 'bg-red-500';
 
   const matchMethodRaw = firstRow ? (firstRow as any).category_match_method : '';
   const summaryMatchDisplay = formatSummaryMatch(
@@ -580,31 +621,31 @@ export function JobDetail() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4 text-sm text-slate-400 mb-2">
-        <Link to="/jobs" className="hover:text-primary-400 flex items-center gap-1 transition-colors">
+      <div className="flex items-center gap-4 text-sm text-gray-500 mb-2">
+        <Link to="/jobs" className="hover:text-primary-600 flex items-center gap-1 transition-colors">
           <ArrowLeftIcon /> Jobs
         </Link>
         <span>/</span>
-        <span className="font-mono text-slate-300 truncate max-w-sm">{job.job_id}</span>
+        <span className="font-mono text-gray-700 truncate max-w-sm">{job.job_id}</span>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-sm flex flex-col gap-6 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1 bg-slate-800">
-          <div className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 transition-all duration-1000 ease-in-out" style={{ width: `${progressPercent}%` }} />
+      <div className="bg-white border border-gray-200 rounded-xl p-8 shadow-sm flex flex-col gap-6 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
+          <div className="h-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-1000 ease-in-out" style={{ width: `${progressPercent}%` }} />
         </div>
 
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-                {job.mode === 'agent' ? <MagicWandIcon className="text-fuchsia-400" /> : <FileTextIcon className="text-cyan-400" />}
+              <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
+                {job.mode === 'agent' ? <MagicWandIcon className="text-primary-500" /> : <FileTextIcon className="text-primary-500" />}
                 {job.mode.charAt(0).toUpperCase() + job.mode.slice(1)} Job
               </h1>
               <span className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border backdrop-blur-md ${
-                job.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                job.status === 'failed' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                job.status === 'processing' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                job.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                job.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
+                'bg-amber-50 text-amber-700 border-amber-200'
               }`}>
                 {job.status} {job.status === 'processing' && `${progressPercent}%`}
               </span>
@@ -615,37 +656,37 @@ export function JobDetail() {
               {result && (
                 <>
                   <CopyButton text={JSON.stringify(result, null, 2)} label="Copy JSON" />
-                  <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-emerald-900/40 border-emerald-700/50 text-emerald-300 hover:bg-emerald-800/60 active:scale-95">
+                  <button onClick={handleExportCSV} className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 active:scale-95">
                     <DownloadIcon className="w-3 h-3" /> Export CSV
                   </button>
                 </>
               )}
             </div>
 
-            <div className="text-sm text-slate-400 break-all max-w-3xl font-mono opacity-80 bg-slate-950/50 p-2 rounded border border-slate-800">{job.url}</div>
+            <div className="text-sm text-gray-500 break-all max-w-3xl font-mono opacity-80 bg-gray-50/80 p-2 rounded border border-gray-200">{job.url}</div>
 
             {job.status !== 'completed' && job.status !== 'failed' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                  <div className="uppercase tracking-wider text-slate-500 mb-1">Current Stage</div>
-                  <div className="text-slate-200 font-mono">{job.stage || 'unknown'}</div>
+                <div className="bg-gray-100 border border-gray-200 rounded p-3">
+                  <div className="uppercase tracking-wider text-gray-400 mb-1">Current Stage</div>
+                  <div className="text-gray-800 font-mono">{job.stage || 'unknown'}</div>
                 </div>
-                <div className="bg-slate-950/70 border border-slate-800 rounded p-3">
-                  <div className="uppercase tracking-wider text-slate-500 mb-1">Stage Detail</div>
-                  <div className="text-slate-300">{job.stage_detail || '—'}</div>
+                <div className="bg-gray-100 border border-gray-200 rounded p-3">
+                  <div className="uppercase tracking-wider text-gray-400 mb-1">Stage Detail</div>
+                  <div className="text-gray-700">{job.stage_detail || '—'}</div>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="flex flex-col items-end gap-1 text-sm text-slate-500 shrink-0">
-            <span className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-md border border-slate-800 shadow-sm">Created: <span className="text-slate-300 font-mono text-xs">{job.created_at}</span></span>
-            <span className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-md border border-slate-800 shadow-sm">Updated: <span className="text-slate-300 font-mono text-xs">{job.updated_at}</span></span>
+          <div className="flex flex-col items-end gap-1 text-sm text-gray-400 shrink-0">
+            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">Created: <span className="text-gray-700 font-mono text-xs">{job.created_at}</span></span>
+            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">Updated: <span className="text-gray-700 font-mono text-xs">{job.updated_at}</span></span>
           </div>
         </div>
 
         {job.error && (
-          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-lg text-sm shadow-inner flex flex-col gap-2">
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm shadow-inner flex flex-col gap-2">
             <div className="flex items-center gap-2 font-bold"><ExclamationTriangleIcon /> Execution Failure</div>
             <pre className="font-mono text-xs whitespace-pre-wrap px-2 opacity-80">{job.error}</pre>
           </div>
@@ -653,44 +694,44 @@ export function JobDetail() {
       </div>
 
       {job.status === 'completed' && firstRow && firstRow.Brand !== 'Err' && (
-        <div className="bg-slate-900 border border-emerald-500/20 border-t-2 border-t-emerald-500/50 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
+        <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
           <div className="flex items-center gap-3 min-w-0">
-            <CheckCircledIcon className="w-5 h-5 text-emerald-400 shrink-0" />
+            <CheckCircledIcon className="w-5 h-5 text-emerald-600 shrink-0" />
             <span
               title={brandText || 'Unknown Brand'}
-              className="text-lg md:text-xl font-bold text-white max-w-[14rem] md:max-w-xs truncate"
+              className="text-lg md:text-xl font-bold text-gray-900 max-w-[14rem] md:max-w-xs truncate"
             >
               {brandText || 'Unknown Brand'}
             </span>
-            <span className="text-slate-600 shrink-0">→</span>
+            <span className="text-gray-400 shrink-0">→</span>
             <span
               title={categoryText || 'Unknown Category'}
-              className="text-lg md:text-xl font-bold text-emerald-400 max-w-[14rem] md:max-w-sm truncate"
+              className="text-lg md:text-xl font-bold text-emerald-700 max-w-[14rem] md:max-w-sm truncate"
             >
               {categoryText || 'Unknown Category'}
             </span>
             {categoryIdText && (
-              <span className="text-[10px] font-mono text-slate-500 bg-slate-800 px-2 py-0.5 rounded shrink-0">
+              <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-2 py-0.5 rounded shrink-0">
                 ID: {categoryIdText}
               </span>
             )}
           </div>
 
           <div className="flex items-stretch self-stretch md:self-auto shrink-0">
-            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Confidence</div>
+            <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Confidence</div>
               <div className={`inline-flex items-center justify-center gap-1 text-sm font-bold ${confidenceSummaryTextColor}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${confidenceSummaryDotColor}`} aria-hidden />
                 <span>{confidenceSummaryDisplay}</span>
               </div>
             </div>
-            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Match</div>
-              <div className="text-sm font-mono text-cyan-400">{summaryMatchDisplay}</div>
+            <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Match</div>
+              <div className="text-sm font-mono text-cyan-700">{summaryMatchDisplay}</div>
             </div>
-            <div className="px-3 md:px-4 border-l border-slate-700/50 text-center">
-              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-0.5">Frames</div>
-              <div className="text-sm font-mono text-slate-300">{summaryFrameDisplay}</div>
+            <div className="px-3 md:px-4 border-l border-gray-300/70 text-center">
+              <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">Frames</div>
+              <div className="text-sm font-mono text-gray-700">{summaryFrameDisplay}</div>
             </div>
           </div>
         </div>
@@ -698,14 +739,14 @@ export function JobDetail() {
 
       {firstRow && firstRow.Brand !== 'Err' && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <div className="bg-gradient-to-r from-slate-900 to-slate-900/80 border border-slate-800 border-l-[3px] border-l-emerald-500/50 rounded-xl p-6">
+          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-xs uppercase tracking-wider text-slate-500 font-bold">💡 LLM Reasoning</h3>
+              <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">💡 LLM Reasoning</h3>
               <CopyButton text={reasoningText || 'No reasoning provided by the LLM.'} label="Copy Reasoning" />
             </div>
 
             {isRecoveredReasoning && (
-              <div className="mb-3 inline-flex items-center gap-1 text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded px-2 py-1 text-xs">
+              <div className="mb-3 inline-flex items-center gap-1 text-amber-700 border border-amber-200 bg-amber-50 rounded px-2 py-1 text-xs">
                 <span>🔍</span>
                 <span>Web-assisted recovery</span>
               </div>
@@ -727,7 +768,7 @@ export function JobDetail() {
                     <button
                       type="button"
                       onClick={() => setShowAllReasoningTerms(true)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
                     >
                       +{hiddenQuotedTermsCount} more
                     </button>
@@ -736,18 +777,18 @@ export function JobDetail() {
                     <button
                       type="button"
                       onClick={() => setShowAllReasoningTerms(false)}
-                      className="px-2.5 py-1 rounded-full text-xs border border-slate-700 text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
+                      className="px-2.5 py-1 rounded-full text-xs border border-gray-300 text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
                     >
                       Show less
                     </button>
                   )}
                 </div>
-                <div className="border-b border-slate-800 mt-4" />
+                <div className="border-b border-gray-200 mt-4" />
               </div>
             )}
 
             {reasoningText ? (
-              <p className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
                 {highlightedReasoning.map((part, idx) => (
                   typeof part === 'string' ? (
                     <span key={idx}>{part}</span>
@@ -759,14 +800,14 @@ export function JobDetail() {
                 ))}
               </p>
             ) : (
-              <p className="text-slate-600 italic text-sm">No reasoning provided by the LLM.</p>
+              <p className="text-gray-400 italic text-sm">No reasoning provided by the LLM.</p>
             )}
 
             {reasoningText.length > 500 && (
               <button
                 type="button"
                 onClick={() => setShowFullReasoning((current) => !current)}
-                className="mt-3 text-xs text-cyan-300 hover:text-cyan-200 underline underline-offset-2"
+                className="mt-3 text-xs text-cyan-700 hover:text-cyan-800 underline underline-offset-2"
               >
                 {showFullReasoning ? 'Show less' : 'Show more'}
               </button>
@@ -775,39 +816,87 @@ export function JobDetail() {
         </div>
       )}
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-sm overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800 bg-slate-900/70">
-          <button type="button" onClick={() => setArtifactTab('vision')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'vision' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>Vision Board</button>
-          <button type="button" onClick={() => setArtifactTab('ocr')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'ocr' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>OCR Output</button>
-          <button type="button" onClick={() => setArtifactTab('frames')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'frames' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>Latest Frames</button>
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
+          {videoAvailable && videoSource && (
+            <button type="button" onClick={() => setArtifactTab('video')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'video' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-white border-gray-300 text-gray-700'}`}>▶ Video</button>
+          )}
+          <button type="button" onClick={() => setArtifactTab('vision')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'vision' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>Vision Board</button>
+          <button type="button" onClick={() => setArtifactTab('ocr')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'ocr' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>OCR Output</button>
+          <button type="button" onClick={() => setArtifactTab('frames')} className={`px-3 py-1.5 text-xs rounded border ${artifactTab === 'frames' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>Latest Frames</button>
         </div>
+
+        {artifactTab === 'video' && videoSource && (
+          <div className="p-4">
+            {videoSource.type === 'local' && (
+              <div className="space-y-3">
+                <video
+                  controls
+                  preload="metadata"
+                  className="w-full max-h-[500px] rounded-lg border border-gray-300 bg-black"
+                  onError={() => setVideoError('Source video could not be streamed (missing file or unavailable).')}
+                >
+                  <source src={videoSource.url} />
+                  Your browser does not support the video element.
+                </video>
+                {videoError && (
+                  <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    {videoError}
+                  </div>
+                )}
+              </div>
+            )}
+            {videoSource.type === 'youtube' && (
+              <iframe
+                src={videoSource.url}
+                className="w-full aspect-video rounded-lg border border-gray-300"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                title="Source video"
+              />
+            )}
+            {videoSource.type === 'remote' && (
+              <div className="text-center py-12 text-gray-500">
+                <p className="mb-3">Video is hosted externally.</p>
+                <a
+                  href={videoSource.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary-600 hover:text-primary-700 underline text-sm"
+                >
+                  Open in new tab →
+                </a>
+              </div>
+            )}
+          </div>
+        )}
 
         {artifactTab === 'vision' && (
           <div className="p-4 space-y-4">
-            {visionBoard?.image_url && <img src={toApiUrl(visionBoard.image_url)} alt="Vision board" className="max-h-96 rounded border border-slate-700" />}
+            {visionBoard?.image_url && <img src={toApiUrl(visionBoard.image_url)} alt="Vision board" className="max-h-96 rounded border border-gray-300" />}
             {visionBoard?.plot_url && (
-              <a href={toApiUrl(visionBoard.plot_url)} target="_blank" rel="noreferrer" className="text-xs text-primary-300 underline">Open vision board metadata</a>
+              <a href={toApiUrl(visionBoard.plot_url)} target="_blank" rel="noreferrer" className="text-xs text-primary-600 underline">Open vision board metadata</a>
             )}
             {(visionBoard?.top_matches || []).length > 0 ? (
               <div className="grid gap-2">
                 {(visionBoard?.top_matches || []).map((m, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs bg-slate-950 border border-slate-800 rounded px-3 py-2">
-                    <span className="text-slate-200">{m.label}</span>
-                    <span className="font-mono text-cyan-300">{Number(m.score).toFixed(4)}</span>
+                  <div key={idx} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-3 py-2">
+                    <span className="text-gray-800">{m.label}</span>
+                    <span className="font-mono text-cyan-700">{Number(m.score).toFixed(4)}</span>
                   </div>
                 ))}
               </div>
-            ) : <div className="text-xs text-slate-500">No vision board matches available.</div>}
+            ) : <div className="text-xs text-gray-500">No vision board matches available.</div>}
           </div>
         )}
 
         {artifactTab === 'ocr' && (
           <div className="p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-xs text-slate-500">OCR output</div>
+              <div className="text-xs text-gray-500">OCR output</div>
               <CopyButton text={ocrText} label="Copy OCR" />
             </div>
-            <div className="max-h-80 overflow-auto text-xs font-mono whitespace-pre-wrap text-slate-300 bg-slate-950 border border-slate-800 rounded p-3">
+            <div className="max-h-80 overflow-auto text-xs font-mono whitespace-pre-wrap text-gray-700 bg-gray-50 border border-gray-200 rounded p-3">
               {ocrText || 'No OCR text available.'}
             </div>
           </div>
@@ -822,7 +911,7 @@ export function JobDetail() {
                   const frameTsKey = extractFrameTimestampKey(frame);
                   const frameOcrText = frameTsKey ? ocrByTimestamp.get(frameTsKey) : '';
                   return (
-                    <div key={idx} className="aspect-video bg-slate-950 rounded border border-slate-800 overflow-hidden relative group">
+                    <div key={idx} className="aspect-video bg-gray-50 rounded border border-gray-200 overflow-hidden relative group">
                       <img src={toApiUrl(frame.url)} alt={frameLabel} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
                       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 text-[10px] font-mono text-emerald-400">
                         {frameLabel}
@@ -838,17 +927,17 @@ export function JobDetail() {
                   );
                 })}
               </div>
-            ) : <div className="text-xs text-slate-500">No latest frames available.</div>}
+            ) : <div className="text-xs text-gray-500">No latest frames available.</div>}
           </div>
         )}
       </div>
 
       {job.mode === 'agent' && agentScratchboardEvents.length > 0 && (
-        <div className="bg-slate-950 border border-fuchsia-900/40 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
-          <div className="bg-slate-900/80 px-4 py-3 border-b border-fuchsia-900/40 font-semibold text-fuchsia-200 flex items-center gap-2">
-            <MagicWandIcon className="text-fuchsia-400" /> Agent Scratchboard
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
+          <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 font-semibold text-fuchsia-700 flex items-center gap-2">
+            <MagicWandIcon className="text-fuchsia-600" /> Agent Scratchboard
           </div>
-          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-300" ref={scratchboardRef}>
+          <div className="p-4 h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-700" ref={scratchboardRef}>
             {agentScratchboardEvents.map((evt, i) => (
               <Fragment key={i}>{renderScratchboardEvent(evt, i)}</Fragment>
             ))}
@@ -857,8 +946,8 @@ export function JobDetail() {
       )}
 
       {(events.length > 0 || job.stage) && (
-        <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
-          <div className="px-4 py-4 border-b border-slate-800 bg-slate-900/60 overflow-x-auto">
+        <div className="bg-gray-50 border border-gray-200 rounded-xl overflow-hidden shadow-inner flex flex-col animate-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-forwards">
+          <div className="px-4 py-4 border-b border-gray-200 bg-gray-50 overflow-x-auto">
             <div className="min-w-[680px] w-full px-1">
               <div className="flex items-center w-full mb-2">
                 {stages.map((stage, idx) => {
@@ -871,7 +960,7 @@ export function JobDetail() {
                     <Fragment key={stage}>
                       {idx > 0 && (
                         <div
-                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? 'bg-emerald-500' : 'bg-slate-800'}`}
+                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? 'bg-emerald-500' : 'bg-gray-100'}`}
                         />
                       )}
                       <div
@@ -883,7 +972,7 @@ export function JobDetail() {
                               ? 'bg-blue-500 border-blue-400 animate-pulse'
                               : isFailed
                                 ? 'bg-red-500 border-red-400'
-                                : 'bg-slate-800 border-slate-700'
+                                : 'bg-gray-100 border-gray-300'
                         }`}
                       />
                     </Fragment>
@@ -908,7 +997,7 @@ export function JobDetail() {
                             ? 'text-blue-400'
                             : isFailed
                               ? 'text-red-400'
-                              : 'text-slate-600'
+                              : 'text-gray-400'
                       }`}
                     >
                       {stage.replace('_', ' ')}
@@ -917,7 +1006,7 @@ export function JobDetail() {
                 })}
               </div>
 
-              <div className="flex w-full border-t border-slate-800/50 pt-3">
+              <div className="flex w-full border-t border-gray-200 pt-3">
                 {stages.map((stage, idx) => {
                   const message = stageMessages.get(stage);
                   const isDone = currentIdx > idx || job.status === 'completed' || (job.status === 'failed' && currentIdx > idx);
@@ -931,10 +1020,10 @@ export function JobDetail() {
                         <div
                           className={`text-[10px] leading-tight truncate transition-all duration-300 ${
                             isCurrent
-                              ? 'text-blue-300 font-medium'
+                              ? 'text-blue-700 font-medium'
                               : isDone
-                                ? 'text-slate-500'
-                                : 'text-slate-600'
+                                ? 'text-gray-400'
+                                : 'text-gray-400'
                           }`}
                           title={message}
                         >
@@ -948,31 +1037,31 @@ export function JobDetail() {
             </div>
           </div>
           <details
-            className="bg-slate-950 border-t border-slate-800 overflow-hidden shadow-sm group"
+            className="bg-gray-50 border-t border-gray-200 overflow-hidden shadow-sm group"
           >
-            <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
+            <summary className="px-6 py-4 font-semibold text-gray-500 group-hover:bg-gray-100/50 transition-colors list-none flex items-center gap-2 cursor-pointer">
               <MagicWandIcon className="text-fuchsia-400" />
               <span>Event History</span>
-              <span className="text-xs text-slate-600 font-normal ml-2">({events.length} events)</span>
+              <span className="text-xs text-gray-400 font-normal ml-2">({events.length} events)</span>
             </summary>
             {events.length > 0 ? (
-              <div className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-slate-400 border-t border-slate-800" ref={historyRef}>
+              <div className="p-4 max-h-96 overflow-y-auto space-y-2 font-mono text-xs text-gray-500 border-t border-gray-200" ref={historyRef}>
                 {events.map((evt, i) => (
-                  <div key={i} className="border-b border-slate-800/50 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
+                  <div key={i} className="border-b border-gray-200 pb-2 mb-2 last:border-0 whitespace-pre-wrap">{evt}</div>
                 ))}
               </div>
             ) : (
-              <div className="p-4 text-xs text-slate-500 border-t border-slate-800">No events yet.</div>
+              <div className="p-4 text-xs text-gray-400 border-t border-gray-200">No events yet.</div>
             )}
           </details>
         </div>
       )}
 
-      <details className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden cursor-pointer shadow-sm group">
-        <summary className="px-6 py-4 font-semibold text-slate-400 group-hover:bg-slate-800/50 transition-colors list-none flex items-center gap-2">
+      <details className="bg-white border border-gray-200 rounded-xl overflow-hidden cursor-pointer shadow-sm group">
+        <summary className="px-6 py-4 font-semibold text-gray-500 group-hover:bg-gray-100/50 transition-colors list-none flex items-center gap-2">
           <DownloadIcon /> Raw JSON Context
         </summary>
-        <div className="p-6 bg-slate-950 border-t border-slate-800 font-mono text-xs text-emerald-400/70 overflow-x-auto">
+        <div className="p-6 bg-gray-50 border-t border-gray-200 font-mono text-xs text-emerald-400/70 overflow-x-auto">
           <pre>{JSON.stringify({ settings: job.settings, result, artifacts }, null, 2)}</pre>
         </div>
       </details>

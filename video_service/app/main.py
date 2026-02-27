@@ -24,14 +24,16 @@ import uuid
 import json
 import shutil
 import logging
+import mimetypes
 import time as _time
 from collections import defaultdict
 from contextlib import asynccontextmanager, closing
 from typing import List, Optional
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File, Form, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -592,6 +594,38 @@ async def get_job_result(req: Request, job_id: str):
     if not row or not row["result_json"]:
         return {"result": None}
     return {"result": json.loads(row["result_json"])}
+
+
+@app.get("/jobs/{job_id}/video", tags=["jobs"])
+async def stream_job_video(req: Request, job_id: str):
+    """Stream source video for a job. Serves local files only."""
+    proxy = await _maybe_proxy(req, job_id)
+    if proxy:
+        return proxy
+
+    with closing(get_db()) as conn:
+        row = conn.execute("SELECT url FROM jobs WHERE id = ?", (job_id,)).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    source_url = (row["url"] or "").strip()
+    if not source_url:
+        raise HTTPException(status_code=404, detail="Source video not configured")
+
+    if source_url.startswith(("http://", "https://")):
+        return JSONResponse({"type": "remote", "url": source_url})
+
+    try:
+        video_path = Path(source_url).expanduser().resolve()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid video path: {exc}") from exc
+
+    if not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Source video file not found on server")
+
+    media_type = mimetypes.guess_type(str(video_path))[0] or "video/mp4"
+    return FileResponse(path=str(video_path), media_type=media_type, filename=video_path.name)
 
 
 @app.get("/jobs/{job_id}/artifacts", tags=["jobs"])

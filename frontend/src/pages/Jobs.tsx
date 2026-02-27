@@ -214,15 +214,15 @@ export function Jobs() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
           <PlayIcon className="w-5 h-5 text-primary-400" /> Start Analysis Job
         </h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setInputMode('urls')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'urls' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>URLs</button>
-            <button type="button" onClick={() => setInputMode('filepath')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'filepath' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>File Path</button>
-            <button type="button" onClick={() => setInputMode('dirpath')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'dirpath' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}`}>Directory Path</button>
+            <button type="button" onClick={() => setInputMode('urls')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'urls' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>URLs</button>
+            <button type="button" onClick={() => setInputMode('filepath')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'filepath' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>File Path</button>
+            <button type="button" onClick={() => setInputMode('dirpath')} className={`px-3 py-1.5 text-xs rounded border ${inputMode === 'dirpath' ? 'bg-primary-600 border-primary-500 text-white' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>Directory Path</button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -232,7 +232,7 @@ export function Jobs() {
                   value={urls}
                   onChange={(e) => setUrls(e.target.value)}
                   placeholder="Enter URLs (one per line)..."
-                  className="w-full h-32 p-3 text-sm bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner resize-none"
+                  className="w-full h-32 p-3 text-sm bg-gray-50 border border-gray-200 rounded-lg text-gray-700 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner resize-none"
                 />
               )}
               {inputMode === 'filepath' && (
@@ -240,7 +240,7 @@ export function Jobs() {
                   value={filePath}
                   onChange={(e) => setFilePath(e.target.value)}
                   placeholder={'C:\\videos\\ad.mp4 or \\\\server\\share\\ads\\spot.mp4'}
-                  className="w-full h-12 px-3 text-sm bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner"
+                  className="w-full h-12 px-3 text-sm bg-gray-50 border border-gray-200 rounded-lg text-gray-700 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner"
                 />
               )}
               {inputMode === 'dirpath' && (
@@ -248,7 +248,7 @@ export function Jobs() {
                   value={folderPath}
                   onChange={(e) => setFolderPath(e.target.value)}
                   placeholder={'C:\\videos\\ads or \\\\server\\share\\ads or /mnt/media/ads'}
-                  className="w-full h-12 px-3 text-sm bg-slate-950 border border-slate-800 rounded-lg text-slate-300 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner"
+                  className="w-full h-12 px-3 text-sm bg-gray-50 border border-gray-200 rounded-lg text-gray-700 focus:ring-1 focus:ring-primary-500 font-mono shadow-inner"
                 />
               )}
             </div>
@@ -264,63 +264,63 @@ export function Jobs() {
             </div>
           </div>
 
-          <div className="text-xs text-amber-300 bg-amber-950/30 border border-amber-700/40 rounded px-3 py-2">
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
             File/Directory paths must be accessible to the backend server (not your browser). UNC paths require server access/permissions.
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/50 p-4 rounded-lg border border-slate-800/50">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-gray-50/80 p-4 rounded-lg border border-gray-200">
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Mode</label>
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="pipeline">Standard Pipeline</option>
                 <option value="agent">ReACT Agent</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Web Search</label>
-              <select value={enableWebSearch ? 'true' : 'false'} onChange={(e) => setEnableWebSearch(e.target.value === 'true')} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Web Search</label>
+              <select value={enableWebSearch ? 'true' : 'false'} onChange={(e) => setEnableWebSearch(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="true">Enabled</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Scan Strategy</label>
-              <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Scan Strategy</label>
+              <select value={scanMode} onChange={(e) => setScanMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="Tail Only">Tail Only</option>
                 <option value="Full Video">Full Video</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Vision</label>
-              <select value={enableVision ? 'true' : 'false'} onChange={(e) => setEnableVision(e.target.value === 'true')} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Vision</label>
+              <select value={enableVision ? 'true' : 'false'} onChange={(e) => setEnableVision(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="true">Enabled</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">OCR Engine</label>
-              <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">OCR Engine</label>
+              <select value={ocrEngine} onChange={(e) => setOcrEngine(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="EasyOCR">EasyOCR</option>
                 <option value="Florence-2 (Microsoft)">Florence-2</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">OCR Mode</label>
-              <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">OCR Mode</label>
+              <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
                 <option value="🚀 Fast">Fast</option>
                 <option value="Detailed">Detailed</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Context Limit</label>
-              <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300 font-mono" />
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Context Limit</label>
+              <input type="number" min={512} step={512} value={contextSize} onChange={(e) => setContextSize(Number(e.target.value || 8192))} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700 font-mono" />
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Provider</label>
-              <input value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300" />
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Provider</label>
+              <input value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700" />
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Model</label>
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Model</label>
               {showOllamaModelPicker ? (
                 <div className="space-y-2">
                   <select
@@ -332,7 +332,7 @@ export function Jobs() {
                       }
                       setModelName(e.target.value);
                     }}
-                    className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300"
+                    className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700"
                   >
                     {ollamaModels.map((name) => (
                       <option key={name} value={name}>{name}</option>
@@ -344,60 +344,60 @@ export function Jobs() {
                       value={modelName}
                       onChange={(e) => setModelName(e.target.value)}
                       placeholder="Type custom model name..."
-                      className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300"
+                      className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700"
                     />
                   )}
                 </div>
               ) : (
-                <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300" />
+                <input value={modelName} onChange={(e) => setModelName(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700" />
               )}
               {provider.trim().toLowerCase() === 'ollama' && ollamaModelsLoading && (
-                <div className="text-[10px] text-slate-500">Loading available Ollama models...</div>
+                <div className="text-[10px] text-gray-400">Loading available Ollama models...</div>
               )}
             </div>
             <div className="space-y-1 md:col-span-4">
-              <label className="text-xs uppercase tracking-wider font-semibold text-slate-500">Target Categories (Comma Separated)</label>
-              <input value={categories} onChange={(e) => setCategories(e.target.value)} className="w-full h-8 text-xs bg-slate-900 border border-slate-800 rounded px-2 text-slate-300 font-mono" />
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Target Categories (Comma Separated)</label>
+              <input value={categories} onChange={(e) => setCategories(e.target.value)} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700 font-mono" />
             </div>
           </div>
         </form>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
-        <div className="px-6 py-4 border-b border-slate-800 bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200 bg-white flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <h3 className="font-bold text-white tracking-wide">Job Queue</h3>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 bg-slate-950 px-2 py-1 rounded shadow-inner border border-slate-800">
+            <h3 className="font-bold text-gray-900 tracking-wide">Job Queue</h3>
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded shadow-inner border border-gray-200">
               <ClockIcon className="w-3 h-3 text-emerald-500" /> Auto-syncing ({formatDistanceToNow(lastUpdated, { addSuffix: true })})
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
-              <MagnifyingGlassIcon className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-500" />
-              <input value={search} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search job, brand, category..." className="pl-8 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 w-56 focus:ring-1 focus:ring-primary-500 font-mono" />
+              <MagnifyingGlassIcon className="absolute left-2.5 top-2.5 w-4 h-4 text-gray-400" />
+              <input value={search} onChange={(e) => handleSearchChange(e.target.value)} placeholder="Search job, brand, category..." className="pl-8 pr-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded text-gray-700 w-56 focus:ring-1 focus:ring-primary-500 font-mono" />
             </div>
-            <select value={statusFilter} onChange={(e) => handleStatusFilterChange(e.target.value)} className="py-1.5 px-3 text-xs bg-slate-950 border border-slate-800 rounded text-slate-300 font-medium tracking-wide">
+            <select value={statusFilter} onChange={(e) => handleStatusFilterChange(e.target.value)} className="py-1.5 px-3 text-xs bg-gray-50 border border-gray-200 rounded text-gray-700 font-medium tracking-wide">
               <option value="all">ALL STATUSES</option>
               <option value="queued">QUEUED</option>
               <option value="processing">PROCESSING</option>
               <option value="completed">COMPLETED</option>
               <option value="failed">FAILED</option>
             </select>
-            <button onClick={fetchJobs} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors border border-slate-700">
+            <button onClick={fetchJobs} className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700 transition-colors border border-gray-300">
               <UpdateIcon className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {hasSelection && (
-          <div className="px-6 py-3 bg-red-500/5 border-b border-red-500/20 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="px-6 py-3 bg-red-50 border-b border-red-200 flex items-center justify-between animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-300">
-                <span className="font-bold text-white">{selectedJobs.size}</span> job{selectedJobs.size > 1 ? 's' : ''} selected
+              <span className="text-sm text-gray-700">
+                <span className="font-bold text-gray-900">{selectedJobs.size}</span> job{selectedJobs.size > 1 ? 's' : ''} selected
               </span>
               <button
                 onClick={() => setSelectedJobs(new Set())}
-                className="text-xs text-slate-500 hover:text-slate-300 transition-colors underline"
+                className="text-xs text-gray-400 hover:text-gray-700 transition-colors underline"
               >
                 Clear selection
               </button>
@@ -419,14 +419,14 @@ export function Jobs() {
 
         <div className="overflow-x-auto min-h-[400px]">
           <table className="w-full text-sm text-left whitespace-nowrap">
-            <thead className="text-[10px] uppercase font-bold tracking-wider text-slate-500 bg-slate-950/50">
+            <thead className="text-[10px] uppercase font-bold tracking-wider text-gray-400 bg-gray-50/80">
               <tr>
                 <th className="px-4 py-4 w-10">
                   <input
                     type="checkbox"
                     checked={isAllSelected}
                     onChange={toggleSelectAll}
-                    className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+                    className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
                     title={isAllSelected ? 'Deselect all' : 'Select all'}
                   />
                 </th>
@@ -441,52 +441,52 @@ export function Jobs() {
                 <th className="px-6 py-4">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody className="divide-y divide-gray-100">
               {loading && jobs.length === 0 ? (
-                <tr><td colSpan={10} className="px-6 py-12 text-center text-slate-500">Syncing node cluster state...</td></tr>
+                <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-400">Syncing node cluster state...</td></tr>
               ) : filteredJobs.length === 0 ? (
-                <tr><td colSpan={10} className="px-6 py-12 text-center text-slate-500">No jobs found.</td></tr>
+                <tr><td colSpan={10} className="px-6 py-12 text-center text-gray-400">No jobs found.</td></tr>
               ) : filteredJobs.map((job) => (
-                <tr key={job.job_id} className={`hover:bg-slate-800/20 transition-colors group ${selectedJobs.has(job.job_id) ? 'bg-primary-500/5' : ''}`}>
+                <tr key={job.job_id} className={`hover:bg-gray-50 transition-colors group ${selectedJobs.has(job.job_id) ? 'bg-primary-50' : ''}`}>
                   <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedJobs.has(job.job_id)}
                       onChange={() => toggleSelectJob(job.job_id)}
-                      className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
+                      className="w-3.5 h-3.5 rounded border-gray-300 bg-gray-100 text-primary-500 focus:ring-primary-500/30 cursor-pointer"
                     />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col gap-1">
-                      <Link to={`/jobs/${job.job_id}`} className="font-mono text-xs text-primary-400 group-hover:text-primary-300 transition-colors">{job.job_id}</Link>
-                      <span className="text-[10px] text-slate-500 font-mono max-w-xs truncate">{job.url}</span>
+                      <Link to={`/jobs/${job.job_id}`} className="font-mono text-xs text-primary-600 group-hover:text-primary-700 transition-colors">{job.job_id}</Link>
+                      <span className="text-[10px] text-gray-400 font-mono max-w-xs truncate">{job.url}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-xs text-slate-300">{job.brand || '—'}</td>
-                  <td className="px-6 py-4 text-xs text-slate-300">{job.category || '—'}</td>
+                  <td className="px-6 py-4 text-xs text-gray-700">{job.brand || '—'}</td>
+                  <td className="px-6 py-4 text-xs text-gray-700">{job.category || '—'}</td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border shadow-inner ${
-                      job.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                      job.status === 'failed' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                      job.status === 'processing' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                      'bg-amber-500/10 text-amber-500 border-amber-500/20'
+                    <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border ${
+                      job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      job.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
+                      job.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
+                      'bg-amber-50 text-amber-700 border-amber-200'
                     }`}>
                       {job.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-slate-400">{job.mode || '—'}</td>
-                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-slate-400">{job.stage || '—'}</td>
-                  <td className="px-6 py-4 font-mono text-xs text-right text-slate-300">
+                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.mode || '—'}</td>
+                  <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.stage || '—'}</td>
+                  <td className="px-6 py-4 font-mono text-xs text-right text-gray-700">
                     {job.status === 'processing' ? `${job.progress.toFixed(1)}%` : job.status === 'completed' ? '100%' : '—'}
                   </td>
-                  <td className="px-6 py-4 font-mono text-xs text-slate-400">
+                  <td className="px-6 py-4 font-mono text-xs text-gray-500">
                     {job.duration_seconds != null
                       ? job.duration_seconds < 60
                         ? `${job.duration_seconds.toFixed(1)}s`
                         : `${Math.floor(job.duration_seconds / 60)}m ${Math.round(job.duration_seconds % 60)}s`
                       : '—'}
                   </td>
-                  <td className="px-6 py-4 font-mono text-[10px] text-slate-500">{job.created_at}</td>
+                  <td className="px-6 py-4 font-mono text-[10px] text-gray-400">{job.created_at}</td>
                 </tr>
               ))}
             </tbody>
