@@ -10,3 +10,4 @@ timm
 requests
 ddgs
 watchdog>=4.0.0
+sse-starlette
