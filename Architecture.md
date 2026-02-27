@@ -2,11 +2,14 @@
 
 ## Runtime Topology
 - `video_service.app.main` runs the FastAPI API server.
-- `video_service.workers.worker` runs background job processing against the same SQLite schema.
+- By default, API lifespan embeds worker child processes from `video_service.workers.embedded`.
+- `video_service.workers.worker` remains available as a standalone entrypoint when `EMBED_WORKERS=false`.
 - Cluster mode is configured by `cluster_config*.json`; each node owns and serves its local jobs through `/admin/jobs`, while `/cluster/jobs` aggregates across healthy nodes.
 - Concurrency knobs:
-  - `WORKER_PROCESSES`: number of worker processes spawned by a single `python -m video_service.workers.worker` command.
+  - `EMBED_WORKERS`: when `true`, API process spawns workers on startup.
+  - `WORKER_PROCESSES`: number of worker child processes per node (embedded or standalone mode).
   - `PIPELINE_THREADS_PER_JOB`: per-job thread fanout used by pipeline execution.
+  - Run Uvicorn with `--workers=1` to avoid duplicate embedded worker trees per node.
 
 ## Data and Storage
 - Primary persistence is SQLite (`video_service.db.database`).
