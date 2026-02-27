@@ -296,6 +296,7 @@ def claim_and_process_job() -> bool:
         claim_conn.commit()
         claim_conn.close()
         claim_conn = None
+        processing_start = time.monotonic()
 
         job_token = set_job_context(job_id)
         set_stage_context("claim", "worker claimed job")
@@ -325,6 +326,7 @@ def claim_and_process_job() -> bool:
         except Exception as exc:
             logger.exception("job_error")
             error_msg = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        duration_seconds = round(time.monotonic() - processing_start, 2)
 
         # Persist result
         if error_msg:
@@ -335,12 +337,16 @@ def claim_and_process_job() -> bool:
                 status="failed",
                 error=error_msg,
             )
+            _execute_job_update_with_retry(
+                "UPDATE jobs SET duration_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (duration_seconds, job_id),
+            )
             logger.error("job_failed: error=%.200s", error_msg)
         else:
             _set_stage(job_id, "persist", "persisting result payload")
             brand, category, category_id = _extract_summary_fields(result_json)
             _execute_job_update_with_retry(
-                "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE jobs SET status = 'completed', stage = 'completed', stage_detail = ?, progress = 100, result_json = ?, artifacts_json = ?, brand = ?, category = ?, category_id = ?, duration_seconds = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (
                     "result persisted",
                     result_json,
@@ -348,6 +354,7 @@ def claim_and_process_job() -> bool:
                     brand,
                     category,
                     category_id,
+                    duration_seconds,
                     job_id,
                 ),
             )
