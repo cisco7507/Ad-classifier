@@ -26,6 +26,7 @@ import shutil
 import logging
 import mimetypes
 import asyncio
+import math
 import time as _time
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -79,6 +80,251 @@ NODE_NAME = cluster.self_name
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/tmp/video_service_uploads")
 ARTIFACTS_DIR = os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts")
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+
+
+def _round_or_none(value):
+    return round(value, 1) if value is not None else None
+
+
+def _percentile(values: list[float], quantile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    q = max(0.0, min(1.0, float(quantile)))
+    pos = (len(ordered) - 1) * q
+    lower = int(math.floor(pos))
+    upper = int(math.ceil(pos))
+    if lower == upper:
+        return ordered[lower]
+    weight = pos - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
+def _compute_duration_analytics(points: list[dict], bucket_count: int = 48) -> tuple[dict, list[dict]]:
+    durations = [
+        float(p.get("duration_seconds"))
+        for p in points
+        if p.get("duration_seconds") is not None
+    ]
+    duration_percentiles = {
+        "count": len(durations),
+        "p50": _round_or_none(_percentile(durations, 0.50)),
+        "p90": _round_or_none(_percentile(durations, 0.90)),
+        "p95": _round_or_none(_percentile(durations, 0.95)),
+        "p99": _round_or_none(_percentile(durations, 0.99)),
+    }
+
+    buckets: dict[str, list[float]] = defaultdict(list)
+    for point in points:
+        completed_at = str(point.get("completed_at") or "")
+        duration = point.get("duration_seconds")
+        if duration is None:
+            continue
+        if len(completed_at) >= 13:
+            bucket = f"{completed_at[:13]}:00"
+        else:
+            bucket = completed_at or "unknown"
+        buckets[bucket].append(float(duration))
+
+    series = []
+    for bucket in sorted(buckets.keys())[-max(1, int(bucket_count)):]:
+        values = buckets[bucket]
+        series.append(
+            {
+                "bucket": bucket,
+                "count": len(values),
+                "p50": _round_or_none(_percentile(values, 0.50)),
+                "p90": _round_or_none(_percentile(values, 0.90)),
+                "p95": _round_or_none(_percentile(values, 0.95)),
+                "p99": _round_or_none(_percentile(values, 0.99)),
+            }
+        )
+
+    return duration_percentiles, series
+
+
+def _merge_analytics_payloads(payloads: list[dict]) -> dict:
+    if not payloads:
+        return {
+            "top_brands": [],
+            "categories": [],
+            "avg_duration_by_mode": [],
+            "avg_duration_by_scan": [],
+            "daily_outcomes": [],
+            "providers": [],
+            "totals": {
+                "total": 0,
+                "completed": 0,
+                "failed": 0,
+                "avg_duration": None,
+            },
+            "duration_percentiles": {
+                "count": 0,
+                "p50": None,
+                "p90": None,
+                "p95": None,
+                "p99": None,
+            },
+            "duration_series": [],
+            "recent_duration_points": [],
+        }
+
+    brand_counts: dict[str, int] = defaultdict(int)
+    category_counts: dict[str, int] = defaultdict(int)
+    provider_counts: dict[str, int] = defaultdict(int)
+    daily_counts: dict[tuple[str, str], int] = defaultdict(int)
+
+    mode_accumulator: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"duration_sum": 0.0, "count": 0}
+    )
+    scan_accumulator: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"duration_sum": 0.0, "count": 0}
+    )
+
+    total_jobs = 0
+    total_completed = 0
+    total_failed = 0
+    completed_duration_sum = 0.0
+    completed_duration_count = 0
+
+    merged_duration_points: list[dict] = []
+
+    for payload in payloads:
+        for row in payload.get("top_brands", []):
+            brand = str(row.get("brand") or "").strip()
+            if brand:
+                brand_counts[brand] += int(row.get("count") or 0)
+
+        for row in payload.get("categories", []):
+            category = str(row.get("category") or "").strip()
+            if category:
+                category_counts[category] += int(row.get("count") or 0)
+
+        for row in payload.get("providers", []):
+            provider = str(row.get("provider") or "").strip()
+            if provider:
+                provider_counts[provider] += int(row.get("count") or 0)
+
+        for row in payload.get("daily_outcomes", []):
+            day = str(row.get("day") or "").strip()
+            status = str(row.get("status") or "").strip()
+            if day and status:
+                daily_counts[(day, status)] += int(row.get("count") or 0)
+
+        for row in payload.get("avg_duration_by_mode", []):
+            mode = str(row.get("mode") or "unknown").strip() or "unknown"
+            avg = row.get("avg_duration")
+            count = int(row.get("count") or 0)
+            if avg is None or count <= 0:
+                continue
+            mode_accumulator[mode]["duration_sum"] += float(avg) * count
+            mode_accumulator[mode]["count"] += count
+
+        for row in payload.get("avg_duration_by_scan", []):
+            scan = str(row.get("scan_mode") or "unknown").strip() or "unknown"
+            avg = row.get("avg_duration")
+            count = int(row.get("count") or 0)
+            if avg is None or count <= 0:
+                continue
+            scan_accumulator[scan]["duration_sum"] += float(avg) * count
+            scan_accumulator[scan]["count"] += count
+
+        totals = payload.get("totals", {})
+        total_jobs += int(totals.get("total") or 0)
+        total_completed += int(totals.get("completed") or 0)
+        total_failed += int(totals.get("failed") or 0)
+        avg_duration = totals.get("avg_duration")
+        completed_count = int(totals.get("completed") or 0)
+        if avg_duration is not None and completed_count > 0:
+            completed_duration_sum += float(avg_duration) * completed_count
+            completed_duration_count += completed_count
+
+        for point in payload.get("recent_duration_points", []):
+            completed_at = str(point.get("completed_at") or "").strip()
+            duration = point.get("duration_seconds")
+            if completed_at and duration is not None:
+                merged_duration_points.append(
+                    {
+                        "completed_at": completed_at,
+                        "duration_seconds": float(duration),
+                    }
+                )
+
+    merged_duration_points.sort(key=lambda row: row["completed_at"])
+    merged_duration_points = merged_duration_points[-1200:]
+    duration_percentiles, duration_series = _compute_duration_analytics(merged_duration_points)
+
+    return {
+        "top_brands": [
+            {"brand": brand, "count": count}
+            for brand, count in sorted(
+                brand_counts.items(), key=lambda item: item[1], reverse=True
+            )[:20]
+        ],
+        "categories": [
+            {"category": category, "count": count}
+            for category, count in sorted(
+                category_counts.items(), key=lambda item: item[1], reverse=True
+            )[:25]
+        ],
+        "avg_duration_by_mode": [
+            {
+                "mode": mode,
+                "avg_duration": _round_or_none(
+                    values["duration_sum"] / values["count"]
+                    if values["count"] > 0
+                    else None
+                ),
+                "count": int(values["count"]),
+            }
+            for mode, values in sorted(
+                mode_accumulator.items(),
+                key=lambda item: item[1]["count"],
+                reverse=True,
+            )
+        ],
+        "avg_duration_by_scan": [
+            {
+                "scan_mode": scan_mode,
+                "avg_duration": _round_or_none(
+                    values["duration_sum"] / values["count"]
+                    if values["count"] > 0
+                    else None
+                ),
+                "count": int(values["count"]),
+            }
+            for scan_mode, values in sorted(
+                scan_accumulator.items(),
+                key=lambda item: item[1]["count"],
+                reverse=True,
+            )
+        ],
+        "daily_outcomes": [
+            {"day": day, "status": status, "count": count}
+            for (day, status), count in sorted(daily_counts.items())
+        ],
+        "providers": [
+            {"provider": provider, "count": count}
+            for provider, count in sorted(
+                provider_counts.items(), key=lambda item: item[1], reverse=True
+            )
+        ],
+        "totals": {
+            "total": total_jobs,
+            "completed": total_completed,
+            "failed": total_failed,
+            "avg_duration": _round_or_none(
+                completed_duration_sum / completed_duration_count
+                if completed_duration_count > 0
+                else None
+            ),
+        },
+        "duration_percentiles": duration_percentiles,
+        "duration_series": duration_series,
+        "recent_duration_points": merged_duration_points,
+    }
 
 
 # ── App lifespan ─────────────────────────────────────────────────────────────
@@ -222,6 +468,31 @@ async def cluster_jobs():
     return deduped
 
 
+@app.get("/cluster/analytics", tags=["analytics"])
+async def cluster_analytics():
+    if not cluster.enabled:
+        return get_analytics()
+
+    payloads: list[dict] = []
+    async with httpx.AsyncClient() as client:
+        for node, url in cluster.nodes.items():
+            if not cluster.node_status.get(node):
+                continue
+            try:
+                res = await client.get(
+                    f"{url}/analytics?internal=1",
+                    timeout=cluster.internal_timeout,
+                )
+                if res.status_code == 200:
+                    payload = res.json()
+                    if isinstance(payload, dict):
+                        payloads.append(payload)
+            except Exception as exc:
+                logger.warning("cluster_analytics: node %s unreachable: %s", node, exc)
+
+    return _merge_analytics_payloads(payloads)
+
+
 @app.get("/diagnostics/device", tags=["ops"])
 def device_diagnostics():
     return get_diagnostics()
@@ -353,8 +624,28 @@ def get_analytics():
             """
         ).fetchone()
 
-    def _round_or_none(value):
-        return round(value, 1) if value is not None else None
+        recent_duration_rows = conn.execute(
+            """
+            SELECT completed_at, duration_seconds
+            FROM job_stats
+            WHERE status = 'completed'
+              AND duration_seconds IS NOT NULL
+              AND completed_at IS NOT NULL
+            ORDER BY completed_at DESC
+            LIMIT 600
+            """
+        ).fetchall()
+    recent_duration_points = [
+        {
+            "completed_at": row["completed_at"],
+            "duration_seconds": float(row["duration_seconds"]),
+        }
+        for row in reversed(recent_duration_rows)
+        if row["completed_at"] and row["duration_seconds"] is not None
+    ]
+    duration_percentiles, duration_series = _compute_duration_analytics(
+        recent_duration_points
+    )
 
     return {
         "top_brands": [{"brand": r["brand"], "count": r["count"]} for r in top_brands],
@@ -386,6 +677,9 @@ def get_analytics():
             "failed": totals["failed"] if totals and totals["failed"] is not None else 0,
             "avg_duration": _round_or_none(totals["avg_duration"] if totals else None),
         },
+        "duration_percentiles": duration_percentiles,
+        "duration_series": duration_series,
+        "recent_duration_points": recent_duration_points,
     }
 
 

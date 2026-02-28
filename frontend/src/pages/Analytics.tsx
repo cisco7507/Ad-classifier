@@ -3,9 +3,7 @@ import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import { BarChartIcon, ExclamationTriangleIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { getClusterAnalytics } from '../lib/api';
-import type { AnalyticsData } from '../lib/api';
-
-const PALETTE = ['#4f46e5', '#6366f1', '#818cf8', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#14b8a6', '#ec4899', '#8b5cf6'];
+import type { AnalyticsData, DurationSeriesPoint } from '../lib/api';
 
 function formatSeconds(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
@@ -15,13 +13,17 @@ function formatSeconds(value: number | null | undefined): string {
   return `${minutes}m ${seconds}s`;
 }
 
-function chartCard(title: string, option: EChartsOption) {
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-800 mb-3">{title}</h3>
-      <ReactECharts option={option} style={{ height: 320, width: '100%' }} notMerge lazyUpdate />
-    </div>
-  );
+function formatBucketLabel(bucket: string): string {
+  if (!bucket) return '—';
+  const normalized = bucket.replace('T', ' ');
+  if (normalized.length >= 16) return normalized.slice(5, 16);
+  return normalized;
+}
+
+function sortedDurationSeries(series: DurationSeriesPoint[]): DurationSeriesPoint[] {
+  return [...series]
+    .sort((a, b) => String(a.bucket || '').localeCompare(String(b.bucket || '')))
+    .slice(-48);
 }
 
 export function Analytics() {
@@ -55,266 +57,102 @@ export function Analytics() {
   }, []);
 
   const totals = data?.totals ?? { total: 0, completed: 0, failed: 0, avg_duration: null };
-  const successRate = totals.total > 0 ? (totals.completed / totals.total) * 100 : 0;
-  const topBrand = data?.top_brands?.[0]?.brand || '—';
+  const percentiles = data?.duration_percentiles ?? {
+    count: 0,
+    p50: null,
+    p90: null,
+    p95: null,
+    p99: null,
+  };
 
-  const topBrandsOption: EChartsOption = useMemo(() => {
-    const rows = [...(data?.top_brands || [])].sort((a, b) => b.count - a.count).slice(0, 20);
-    const labels = rows.map((r) => r.brand).reverse();
-    const values = rows.map((r) => r.count).reverse();
-    return {
-      animationDuration: 1000,
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { left: 120, right: 24, top: 8, bottom: 16, containLabel: true },
-      xAxis: { type: 'value', axisLabel: { color: '#6b7280' }, splitLine: { lineStyle: { color: '#e5e7eb' } } },
-      yAxis: { type: 'category', data: labels, axisLabel: { color: '#374151' } },
-      series: [
-        {
-          type: 'bar',
-          data: values,
-          barWidth: 14,
-          label: { show: true, position: 'right', color: '#374151', fontWeight: 600 },
-          itemStyle: {
-            borderRadius: [0, 8, 8, 0],
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 1,
-              y2: 0,
-              colorStops: [
-                { offset: 0, color: '#818cf8' },
-                { offset: 1, color: '#4f46e5' },
-              ],
-            },
-          },
-        },
-      ],
-    };
-  }, [data]);
+  const durationOption: EChartsOption = useMemo(() => {
+    const series = sortedDurationSeries(data?.duration_series || []);
+    const xValues = series.map((row) => formatBucketLabel(row.bucket));
+    const p50Values = series.map((row) => row.p50);
+    const p90Values = series.map((row) => row.p90);
+    const p95Values = series.map((row) => row.p95);
+    const p99Values = series.map((row) => row.p99);
 
-  const categoriesOption: EChartsOption = useMemo(() => {
-    const rows = (data?.categories || []).slice(0, 25);
     return {
+      backgroundColor: 'transparent',
+      animationDuration: 600,
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => `${params?.name || 'unknown'}<br/>${params?.value || 0} jobs`,
+        trigger: 'axis',
+        backgroundColor: 'rgba(2, 6, 23, 0.95)',
+        borderColor: 'rgba(56, 189, 248, 0.35)',
+        textStyle: { color: '#e2e8f0' },
       },
-      color: PALETTE,
-      series: [
-        {
-          name: 'Categories',
-          type: 'treemap',
-          roam: false,
-          breadcrumb: { show: false },
-          nodeClick: false,
-          upperLabel: { show: false },
-          leafDepth: 1,
-          itemStyle: {
-            borderColor: '#fff',
-            borderWidth: 1,
-            gapWidth: 2,
-          },
-          label: {
-            show: true,
-            formatter: (params: any) => {
-              const name = String(params?.name || '');
-              const value = Number(params?.value || 0);
-              return name.length > 26 ? `${name.slice(0, 25)}…\n${value}` : `${name}\n${value}`;
-            },
-            color: '#1f2937',
-            fontSize: 11,
-            overflow: 'truncate',
-          },
-          emphasis: {
-            label: {
-              show: true,
-              color: '#111827',
-            },
-            itemStyle: {
-              borderColor: '#111827',
-              borderWidth: 1,
-            },
-          },
-          data: rows.map((row) => ({
-            name: row.category,
-            value: row.count,
-          })),
+      legend: {
+        top: 8,
+        textStyle: { color: '#94a3b8' },
+      },
+      grid: {
+        left: 40,
+        right: 20,
+        top: 48,
+        bottom: 28,
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: xValues,
+        boundaryGap: false,
+        axisLabel: { color: '#64748b', fontSize: 10 },
+        axisLine: { lineStyle: { color: '#334155' } },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: {
+          color: '#94a3b8',
+          formatter: (value: number) => `${Math.round(value)}s`,
         },
-      ],
-    };
-  }, [data]);
-
-  const dailyOption: EChartsOption = useMemo(() => {
-    const outcomes = data?.daily_outcomes || [];
-    const days = Array.from(new Set(outcomes.map((d) => d.day))).sort();
-    const completedMap = new Map<string, number>();
-    const failedMap = new Map<string, number>();
-    for (const row of outcomes) {
-      const status = (row.status || '').toLowerCase();
-      if (status === 'completed') completedMap.set(row.day, row.count);
-      if (status === 'failed') failedMap.set(row.day, row.count);
-    }
-    const completed = days.map((day) => completedMap.get(day) || 0);
-    const failed = days.map((day) => failedMap.get(day) || 0);
-
-    return {
-      tooltip: { trigger: 'axis' },
-      legend: { top: 0, textStyle: { color: '#4b5563' } },
-      grid: { left: 24, right: 24, top: 40, bottom: 24, containLabel: true },
-      xAxis: { type: 'category', data: days, boundaryGap: false, axisLabel: { color: '#6b7280' } },
-      yAxis: { type: 'value', axisLabel: { color: '#6b7280' }, splitLine: { lineStyle: { color: '#e5e7eb' } } },
-      series: [
-        {
-          name: 'Completed',
-          type: 'line',
-          smooth: true,
-          stack: 'total',
-          symbol: 'none',
-          lineStyle: { color: '#10b981', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(16, 185, 129, 0.35)' },
-                { offset: 1, color: 'rgba(16, 185, 129, 0.03)' },
-              ],
-            },
-          },
-          data: completed,
-        },
-        {
-          name: 'Failed',
-          type: 'line',
-          smooth: true,
-          stack: 'total',
-          symbol: 'none',
-          lineStyle: { color: '#ef4444', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(239, 68, 68, 0.30)' },
-                { offset: 1, color: 'rgba(239, 68, 68, 0.03)' },
-              ],
-            },
-          },
-          data: failed,
-        },
-      ],
-    };
-  }, [data]);
-
-  const gaugeOptions = useMemo(() => {
-    const modes = data?.avg_duration_by_mode || [];
-    const fallback = ['pipeline', 'agent'];
-    const selected = fallback.map((name) => {
-      const row = modes.find((mode) => (mode.mode || '').toLowerCase() === name);
-      return {
-        label: name === 'pipeline' ? 'Pipeline' : 'Agent',
-        avg: row?.avg_duration ?? 0,
-        count: row?.count ?? 0,
-      };
-    });
-
-    return selected.map((item) => {
-      const maxValue = Math.max(120, Math.ceil((item.avg || 1) * 1.6));
-      return {
-        title: `${item.label} Avg Duration`,
-        option: {
-          series: [
-            {
-              type: 'gauge',
-              min: 0,
-              max: maxValue,
-              splitNumber: 6,
-              axisLine: {
-                lineStyle: {
-                  width: 14,
-                  color: [
-                    [Math.min(30 / maxValue, 1), '#10b981'],
-                    [Math.min(60 / maxValue, 1), '#f59e0b'],
-                    [1, '#ef4444'],
-                  ],
-                },
-              },
-              pointer: { width: 4, length: '70%' },
-              axisTick: { show: false },
-              splitLine: { length: 10, lineStyle: { color: '#9ca3af' } },
-              axisLabel: { color: '#6b7280' },
-              detail: {
-                valueAnimation: true,
-                formatter: (value: number) => `${value.toFixed(1)}s`,
-                color: '#111827',
-                fontSize: 18,
-                offsetCenter: [0, '62%'],
-              },
-              title: { color: '#4b5563', offsetCenter: [0, '90%'] },
-              data: [{ value: item.avg || 0, name: `${item.count} jobs` }],
-            },
-          ],
-        } as EChartsOption,
-      };
-    });
-  }, [data]);
-
-  const radarOption: EChartsOption = useMemo(() => {
-    const scans = data?.avg_duration_by_scan || [];
-    const indicators = scans.map((row) => ({
-      name: row.scan_mode || 'unknown',
-      max: Math.max(10, Math.ceil((row.avg_duration || 0) * 1.5) || 10),
-    }));
-    const values = scans.map((row) => row.avg_duration || 0);
-    return {
-      tooltip: {},
-      radar: {
-        indicator: indicators,
-        splitArea: { areaStyle: { color: ['rgba(99, 102, 241, 0.04)', 'rgba(99, 102, 241, 0.01)'] } },
-        axisName: { color: '#4b5563' },
+        splitLine: { lineStyle: { color: 'rgba(148, 163, 184, 0.16)' } },
+        axisLine: { lineStyle: { color: '#334155' } },
       },
       series: [
         {
-          type: 'radar',
-          data: [
-            {
-              value: values,
-              name: 'Avg duration',
-              areaStyle: { color: 'rgba(79, 70, 229, 0.25)' },
-              lineStyle: { color: '#4f46e5' },
-              itemStyle: { color: '#4f46e5' },
-            },
-          ],
+          name: 'Median (P50)',
+          type: 'line',
+          data: p50Values,
+          smooth: true,
+          symbol: 'circle',
+          symbolSize: 5,
+          lineStyle: { width: 2.8, color: '#22d3ee' },
+          itemStyle: { color: '#22d3ee' },
+          emphasis: { focus: 'series' },
         },
-      ],
-    };
-  }, [data]);
-
-  const treemapOption: EChartsOption = useMemo(() => {
-    const providers = data?.providers || [];
-    return {
-      tooltip: { formatter: '{b}: {c}' },
-      series: [
         {
-          type: 'treemap',
-          roam: false,
-          nodeClick: false,
-          breadcrumb: { show: false },
-          label: { show: true, formatter: '{b}\n{c}', color: '#111827', fontWeight: 600 },
-          itemStyle: { borderColor: '#fff', borderWidth: 2, gapWidth: 2 },
-          levels: [{ color: PALETTE }],
-          data: providers.map((row) => ({ name: row.provider || 'unknown', value: row.count })),
+          name: 'P90',
+          type: 'line',
+          data: p90Values,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { width: 1.5, color: '#a78bfa', type: 'dashed' },
+          areaStyle: { color: 'rgba(167, 139, 250, 0.12)' },
+          emphasis: { focus: 'series' },
+        },
+        {
+          name: 'P95',
+          type: 'line',
+          data: p95Values,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { width: 1.8, color: '#f472b6' },
+          areaStyle: { color: 'rgba(244, 114, 182, 0.08)' },
+          emphasis: { focus: 'series' },
+        },
+        {
+          name: 'P99',
+          type: 'line',
+          data: p99Values,
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { width: 1.2, color: '#fb7185', type: 'dotted' },
+          emphasis: { focus: 'series' },
         },
       ],
     };
-  }, [data]);
+  }, [data?.duration_series]);
 
   if (loading) {
     return (
@@ -339,52 +177,50 @@ export function Analytics() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">Total Jobs Processed</div>
-          <div className="text-3xl font-bold text-gray-900 font-mono">{totals.total}</div>
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">Completed Jobs</div>
+          <div className="text-3xl font-bold text-gray-900 font-mono">{totals.completed}</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">Success Rate</div>
-          <div className="text-3xl font-bold text-emerald-700 font-mono">{totals.total ? `${successRate.toFixed(1)}%` : '—'}</div>
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">P50</div>
+          <div className="text-3xl font-bold text-cyan-700 font-mono">{formatSeconds(percentiles.p50)}</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">Average Duration</div>
-          <div className="text-3xl font-bold text-primary-700 font-mono">{formatSeconds(totals.avg_duration)}</div>
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">P90</div>
+          <div className="text-3xl font-bold text-violet-700 font-mono">{formatSeconds(percentiles.p90)}</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">Most Common Brand</div>
-          <div className="text-lg font-bold text-gray-900 truncate">{topBrand}</div>
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">P95</div>
+          <div className="text-3xl font-bold text-pink-700 font-mono">{formatSeconds(percentiles.p95)}</div>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase tracking-wider text-gray-500 mb-1">P99</div>
+          <div className="text-3xl font-bold text-rose-700 font-mono">{formatSeconds(percentiles.p99)}</div>
         </div>
       </div>
 
-      {totals.total === 0 ? (
+      {totals.completed === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-12 text-center text-gray-500 shadow-sm">
-          No analytics data yet. Complete some jobs to see trends.
+          No duration analytics yet. Complete some jobs to populate percentile trends.
         </div>
       ) : (
-        <>
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {chartCard('Top Brands', topBrandsOption)}
-            {chartCard('Category Distribution', categoriesOption)}
+        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-2xl">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+                Job Duration Percentiles
+              </h3>
+              <p className="text-xs text-slate-500">
+                Median and upper-tail bounds across recent completion windows.
+              </p>
+            </div>
+            <div className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-[11px] text-slate-300">
+              Samples: {percentiles.count}
+            </div>
           </div>
-
-          {chartCard('Success / Failure Over Time', dailyOption)}
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {gaugeOptions.map((gauge) => (
-              <div key={gauge.title} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-                <h3 className="text-sm font-semibold text-gray-800 mb-3">{gauge.title}</h3>
-                <ReactECharts option={gauge.option} style={{ height: 280, width: '100%' }} notMerge lazyUpdate />
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {chartCard('Processing Time by Scan Strategy', radarOption)}
-            {chartCard('Provider Usage', treemapOption)}
-          </div>
-        </>
+          <ReactECharts option={durationOption} style={{ height: 420, width: '100%' }} notMerge lazyUpdate />
+        </div>
       )}
     </div>
   );

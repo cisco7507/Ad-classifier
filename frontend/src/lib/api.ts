@@ -114,6 +114,28 @@ export interface Metrics {
   node:                      string;
 }
 
+export interface DurationPercentiles {
+  count: number;
+  p50: number | null;
+  p90: number | null;
+  p95: number | null;
+  p99: number | null;
+}
+
+export interface DurationSeriesPoint {
+  bucket: string;
+  count: number;
+  p50: number | null;
+  p90: number | null;
+  p95: number | null;
+  p99: number | null;
+}
+
+export interface DurationSamplePoint {
+  completed_at: string;
+  duration_seconds: number;
+}
+
 export interface AnalyticsData {
   top_brands: { brand: string; count: number }[];
   categories: { category: string; count: number }[];
@@ -127,6 +149,9 @@ export interface AnalyticsData {
     failed: number;
     avg_duration: number | null;
   };
+  duration_percentiles: DurationPercentiles;
+  duration_series: DurationSeriesPoint[];
+  recent_duration_points: DurationSamplePoint[];
 }
 
 export function emptyAnalytics(): AnalyticsData {
@@ -143,7 +168,75 @@ export function emptyAnalytics(): AnalyticsData {
       failed: 0,
       avg_duration: null,
     },
+    duration_percentiles: {
+      count: 0,
+      p50: null,
+      p90: null,
+      p95: null,
+      p99: null,
+    },
+    duration_series: [],
+    recent_duration_points: [],
   };
+}
+
+function percentile(values: number[], q: number): number | null {
+  if (!values.length) return null;
+  const ordered = [...values].sort((a, b) => a - b);
+  if (ordered.length === 1) return ordered[0];
+  const clamped = Math.max(0, Math.min(1, q));
+  const pos = (ordered.length - 1) * clamped;
+  const lower = Math.floor(pos);
+  const upper = Math.ceil(pos);
+  if (lower === upper) return ordered[lower];
+  const weight = pos - lower;
+  return ordered[lower] * (1 - weight) + ordered[upper] * weight;
+}
+
+function roundOrNull(value: number | null): number | null {
+  return value == null || !Number.isFinite(value) ? null : Math.round(value * 10) / 10;
+}
+
+function computeDurationAnalyticsFromPoints(points: DurationSamplePoint[]): {
+  durationPercentiles: DurationPercentiles;
+  durationSeries: DurationSeriesPoint[];
+} {
+  const durations = points
+    .map((point) => Number(point.duration_seconds))
+    .filter((value) => Number.isFinite(value));
+
+  const durationPercentiles: DurationPercentiles = {
+    count: durations.length,
+    p50: roundOrNull(percentile(durations, 0.5)),
+    p90: roundOrNull(percentile(durations, 0.9)),
+    p95: roundOrNull(percentile(durations, 0.95)),
+    p99: roundOrNull(percentile(durations, 0.99)),
+  };
+
+  const bucketMap = new Map<string, number[]>();
+  for (const point of points) {
+    const completedAt = String(point.completed_at || '').trim();
+    const duration = Number(point.duration_seconds);
+    if (!completedAt || !Number.isFinite(duration)) continue;
+    const bucket = completedAt.length >= 13 ? `${completedAt.slice(0, 13)}:00` : completedAt;
+    const current = bucketMap.get(bucket) || [];
+    current.push(duration);
+    bucketMap.set(bucket, current);
+  }
+
+  const durationSeries = Array.from(bucketMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(-48)
+    .map(([bucket, values]) => ({
+      bucket,
+      count: values.length,
+      p50: roundOrNull(percentile(values, 0.5)),
+      p90: roundOrNull(percentile(values, 0.9)),
+      p95: roundOrNull(percentile(values, 0.95)),
+      p99: roundOrNull(percentile(values, 0.99)),
+    }));
+
+  return { durationPercentiles, durationSeries };
 }
 
 function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
@@ -230,6 +323,14 @@ function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
     }
   }
 
+  const mergedDurationPoints = responses
+    .flatMap((response) => response.recent_duration_points || [])
+    .filter((point) => point?.completed_at && Number.isFinite(Number(point.duration_seconds)))
+    .sort((a, b) => String(a.completed_at).localeCompare(String(b.completed_at)))
+    .slice(-1200);
+
+  const { durationPercentiles, durationSeries } = computeDurationAnalyticsFromPoints(mergedDurationPoints);
+
   return {
     top_brands: mergeCounts(
       'brand',
@@ -265,6 +366,9 @@ function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
           ? Math.round((weightedDurationSum / weightedDurationCount) * 10) / 10
           : null,
     },
+    duration_percentiles: durationPercentiles,
+    duration_series: durationSeries,
+    recent_duration_points: mergedDurationPoints,
   };
 }
 
@@ -311,6 +415,12 @@ export const submitFolderPath = (data: unknown) => safe(() => api.post('/jobs/by
 export const getJobVideoUrl   = (jobId: string): string => `${API_BASE_URL}/jobs/${jobId}/video`;
 
 export async function getClusterAnalytics(): Promise<AnalyticsData> {
+  try {
+    return await safe(() => api.get<AnalyticsData>('/cluster/analytics').then((r) => r.data));
+  } catch {
+    // Backward-compatible fallback for nodes without /cluster/analytics.
+  }
+
   const cluster = await getClusterNodes();
   const nodeUrls = Object.values(cluster.nodes || {});
   if (nodeUrls.length === 0) return emptyAnalytics();
