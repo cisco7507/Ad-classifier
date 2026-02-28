@@ -125,6 +125,7 @@ Rely on Internal Brand Knowledge: You know every major brand, their parent compa
 Treat OCR as Noisy Hints: The extracted OCR text is machine-generated and may contain typos, missing letters, and random artifacts. DO NOT blindly trust or copy the OCR text. Use your knowledge to autocorrect obvious errors.
 IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are NOT OCR errors — they are legitimate content. Use them to identify brands, products, and categories just as you would English text.
 (e.g., if OCR says 'Strbcks' or 'Star bucks co', you know the true brand is 'Starbucks'. But if OCR says 'Économisez avec Desjardins' or 'Assurance auto', those are valid French — do NOT treat them as typos).
+IGNORE TIMESTAMPS: The OCR and Scene data text will be prefixed with bracketed timestamps like '[71.7s]' or '[12.5s]'. THESE ARE NOT PART OF THE AD. Do NOT use these numbers to identify brands or products (e.g. do not guess 'Boeing 717' just because you see '[71.7s]'). Ignore them completely.
 Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True.
 
 CRITICAL PROTOCOL - YOU MUST FOLLOW THESE STEPS IN ORDER:
@@ -188,9 +189,10 @@ Current Memory:
                     
                 elif tool_name == "OCR":
                     all_findings = []
-                    for i, f in enumerate(frames_data):
+                    for f in frames_data:
                         text = ocr_manager.extract_text(ocr_engine, f["ocr_image"], mode=ocr_mode)
-                        if text: all_findings.append(f"[Scene {i+1}]: {text}")
+                        if text:
+                            all_findings.append(text)
                     observation = "Observation: " + (" | ".join(all_findings) if all_findings else "No text found.")
                     
                 elif tool_name == "VISION":

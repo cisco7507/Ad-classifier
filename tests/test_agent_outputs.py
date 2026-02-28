@@ -180,6 +180,8 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
     assert sum("Initial State:" in l for l in logs) == 1
     assert any(l.startswith("--- Step 1 ---") for l in logs)
     assert any("✅ FINAL CONCLUSION REACHED." in l for l in logs)
+    assert any("Observation: VOLVO" in l for l in logs)
+    assert all("[Scene" not in l for l in logs)
 
     final = outputs[-1]
     assert final[1] == "Volvo"

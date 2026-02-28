@@ -173,7 +173,8 @@ def process_single_video(
                             dedup_threshold,
                         )
                         continue
-                    ocr_lines.append(f"[{frame['time']:.1f}s] {raw_text}")
+                    # Do not inject frame timestamps into OCR text; they pollute LLM/search input.
+                    ocr_lines.append(raw_text)
                     prev_normalized = normalized
                 logger.info(
                     "ocr_dedup: processed=%d skipped=%d total_frames=%d threshold=%.2f",
