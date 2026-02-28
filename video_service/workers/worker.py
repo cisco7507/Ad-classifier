@@ -228,7 +228,7 @@ def _record_job_stats(
 
 def _extract_agent_ocr_text(events: list[str]) -> str:
     for evt in events:
-        if not evt or "[Scene" not in evt:
+        if not evt:
             continue
         if "Observation:" not in evt:
             continue

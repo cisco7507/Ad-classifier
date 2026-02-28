@@ -60,3 +60,10 @@ def test_run_pipeline_uses_pipeline_threads_per_job_env(monkeypatch):
 
     worker._run_pipeline("job-1", "https://example.test/ad.mp4", {})
     assert captured["workers"] == 3
+
+
+def test_extract_agent_ocr_text_supports_observation_without_scene_prefix():
+    events = [
+        "2026-02-28T00:00:00Z agent:\n--- Step 1 ---\nAction: [TOOL: OCR]\nResult: Observation: VOLVO | XC90",
+    ]
+    assert worker._extract_agent_ocr_text(events) == "VOLVO | XC90"

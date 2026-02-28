@@ -91,7 +91,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     def _stage_cb(stage, detail):
         stages.append((stage, detail))
 
-    vision_scores, per_frame_vision, _, _, _, row = pipeline_module.process_single_video(
+    vision_scores, per_frame_vision, ocr_text, _, _, row = pipeline_module.process_single_video(
         url="https://example.test/ad.mp4",
         categories=[],
         p="Ollama",
@@ -110,6 +110,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     assert vision_scores
     assert len(per_frame_vision) == 1
     assert per_frame_vision[0]["top_category"] == "Category One"
+    assert ocr_text == "sample ocr"
     assert list(vision_scores.keys())[0] == "Category One"
     assert row[1] == "Brand X"
     assert row[2] == "101"
