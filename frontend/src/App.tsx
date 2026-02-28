@@ -6,6 +6,7 @@ import { Jobs } from './pages/Jobs';
 import { JobDetail } from './pages/JobDetail';
 
 const Analytics = lazy(async () => ({ default: (await import('./pages/Analytics')).Analytics }));
+const Benchmark = lazy(async () => ({ default: (await import('./pages/Benchmark')).Benchmark }));
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Overview />} />
             <Route path="analytics" element={<Analytics />} />
+            <Route path="benchmark" element={<Benchmark />} />
             <Route path="jobs" element={<Jobs />} />
             <Route path="jobs/:id" element={<JobDetail />} />
             <Route path="*" element={<Navigate to="/" replace />} />

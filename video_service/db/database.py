@@ -48,6 +48,9 @@ def init_db():
                     brand TEXT,
                     category TEXT,
                     category_id TEXT,
+                    benchmark_suite_id TEXT,
+                    benchmark_truth_id TEXT,
+                    benchmark_params_json TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     progress REAL DEFAULT 0,
@@ -79,6 +82,55 @@ def init_db():
                 )
             """)
 
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS benchmark_truth (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    video_url TEXT NOT NULL,
+                    expected_ocr_text TEXT DEFAULT '',
+                    expected_categories_json TEXT DEFAULT '[]',
+                    metadata_json TEXT DEFAULT '{}',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS benchmark_suites (
+                    id TEXT PRIMARY KEY,
+                    truth_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    matrix_json TEXT DEFAULT '{}',
+                    created_by TEXT DEFAULT 'api',
+                    total_jobs INTEGER DEFAULT 0,
+                    completed_jobs INTEGER DEFAULT 0,
+                    failed_jobs INTEGER DEFAULT 0,
+                    evaluated_at TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS benchmark_result (
+                    id TEXT PRIMARY KEY,
+                    suite_id TEXT NOT NULL,
+                    job_id TEXT NOT NULL,
+                    duration_seconds REAL,
+                    classification_accuracy REAL,
+                    ocr_accuracy REAL,
+                    composite_accuracy REAL,
+                    params_json TEXT DEFAULT '{}',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
             existing_cols = {
                 row["name"]
                 for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
@@ -95,9 +147,23 @@ def init_db():
                 conn.execute("ALTER TABLE jobs ADD COLUMN category_id TEXT")
             if "duration_seconds" not in existing_cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN duration_seconds REAL")
+            if "benchmark_suite_id" not in existing_cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN benchmark_suite_id TEXT")
+            if "benchmark_truth_id" not in existing_cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN benchmark_truth_id TEXT")
+            if "benchmark_params_json" not in existing_cols:
+                conn.execute("ALTER TABLE jobs ADD COLUMN benchmark_params_json TEXT")
 
             conn.execute("UPDATE jobs SET stage = COALESCE(stage, status, 'queued') WHERE stage IS NULL")
             conn.execute("UPDATE jobs SET stage_detail = COALESCE(stage_detail, '') WHERE stage_detail IS NULL")
             conn.execute("UPDATE jobs SET brand = COALESCE(brand, '') WHERE brand IS NULL")
             conn.execute("UPDATE jobs SET category = COALESCE(category, '') WHERE category IS NULL")
             conn.execute("UPDATE jobs SET category_id = COALESCE(category_id, '') WHERE category_id IS NULL")
+            conn.execute("UPDATE jobs SET benchmark_suite_id = COALESCE(benchmark_suite_id, '') WHERE benchmark_suite_id IS NULL")
+            conn.execute("UPDATE jobs SET benchmark_truth_id = COALESCE(benchmark_truth_id, '') WHERE benchmark_truth_id IS NULL")
+            conn.execute("UPDATE jobs SET benchmark_params_json = COALESCE(benchmark_params_json, '{}') WHERE benchmark_params_json IS NULL")
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_updated ON jobs(status, updated_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_benchmark_suite ON jobs(benchmark_suite_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_suite_truth ON benchmark_suites(truth_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_result_suite ON benchmark_result(suite_id)")

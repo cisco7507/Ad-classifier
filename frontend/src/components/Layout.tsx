@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayersIcon, BarChartIcon, ComponentInstanceIcon, CodeIcon } from '@radix-ui/react-icons';
+import { LayersIcon, BarChartIcon, ComponentInstanceIcon, CodeIcon, ClockIcon } from '@radix-ui/react-icons';
 import { cn } from '../lib/utils';
 import { DebugConsole } from './DebugConsole';
 
@@ -12,6 +12,7 @@ export function Layout() {
     { name: 'Overview', path: '/', icon: LayersIcon },
     { name: 'Jobs', path: '/jobs', icon: ComponentInstanceIcon },
     { name: 'Analytics', path: '/analytics', icon: BarChartIcon },
+    { name: 'Benchmarking', path: '/benchmark', icon: ClockIcon },
   ];
 
   return (

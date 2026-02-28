@@ -5,6 +5,7 @@ from enum import Enum
 class JobMode(str, Enum):
     pipeline = "pipeline"
     agent = "agent"
+    benchmark = "benchmark"
 
 class JobSettings(BaseModel):
     categories: str = ""
@@ -82,3 +83,18 @@ class JobStatus(BaseModel):
     brand: Optional[str] = None
     category: Optional[str] = None
     category_id: Optional[str] = None
+
+
+class BenchmarkTruthCreateRequest(BaseModel):
+    name: str
+    video_url: str
+    expected_ocr_text: str = ""
+    expected_categories: List[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+
+class BenchmarkRunRequest(BaseModel):
+    truth_id: str
+    categories: str = ""
+    providers: Optional[List[str]] = None
+    models: Optional[List[str]] = None

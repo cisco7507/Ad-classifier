@@ -1,0 +1,20 @@
+[
+  {
+    "model": "qwen3-vl:8b-instruct",
+    "accelerator": "any",
+    "min_ram_mb": 16000,
+    "min_vram_mb": 6000
+  },
+  {
+    "model": "qwen2.5-vl:7b",
+    "accelerator": "any",
+    "min_ram_mb": 14000,
+    "min_vram_mb": 5500
+  },
+  {
+    "model": "microsoft/Florence-2-base",
+    "accelerator": "any",
+    "min_ram_mb": 12000,
+    "min_vram_mb": 4500
+  }
+]

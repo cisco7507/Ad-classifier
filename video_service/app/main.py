@@ -52,11 +52,19 @@ from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
     UrlBatchRequest, FolderRequest, FilePathRequest, BulkDeleteRequest, JobMode,
+    BenchmarkTruthCreateRequest, BenchmarkRunRequest,
 )
 from video_service.core.device import get_diagnostics
 from video_service.core.concurrency import get_concurrency_diagnostics
 from video_service.core.cluster import cluster
 from video_service.core.categories import category_mapper
+from video_service.core.hardware_profiler import get_system_profile
+from video_service.core.benchmarking import (
+    evaluate_benchmark_suite,
+    normalize_scan_mode,
+    normalize_ocr_engine,
+    normalize_ocr_mode,
+)
 from video_service.core.security import (
     validate_url, safe_folder_path, check_upload_size,
     MAX_UPLOAD_BYTES, MAX_UPLOAD_MB,
@@ -524,6 +532,11 @@ def category_mapping_diagnostics_legacy():
     return _get_category_mapping_diagnostics()
 
 
+@app.get("/api/system/profile", tags=["ops"])
+def system_profile():
+    return get_system_profile()
+
+
 @app.get("/metrics", tags=["ops"])
 def get_metrics():
     """Basic prometheus-style counters (text format available via Accept header)."""
@@ -683,14 +696,373 @@ def get_analytics():
     }
 
 
-# ── Internal helpers ─────────────────────────────────────────────────────────
+async def _resolve_benchmark_provider_models(
+    requested_providers: list[str] | None = None,
+    requested_models: list[str] | None = None,
+) -> list[tuple[str, str]]:
+    providers = [p.strip() for p in (requested_providers or []) if p and p.strip()]
+    models = [m.strip() for m in (requested_models or []) if m and m.strip()]
 
-def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
-    job_id = f"{NODE_NAME}-{uuid.uuid4()}"
+    if providers and models:
+        return [(provider, model) for provider in providers for model in models]
+
+    pairs: list[tuple[str, str]] = []
+
+    use_provider = lambda name: (not providers) or any(
+        p.lower() == name.lower() for p in providers
+    )
+
+    if use_provider("Ollama"):
+        try:
+            ollama_models = await list_ollama_models()
+        except Exception:
+            ollama_models = []
+        ollama_names = [m.get("name") for m in ollama_models if isinstance(m, dict) and m.get("name")]
+        if not ollama_names:
+            ollama_names = [os.environ.get("DEFAULT_MODEL", "qwen3-vl:8b-instruct")]
+        for model in ollama_names[:3]:
+            pairs.append(("Ollama", str(model)))
+
+    if use_provider("LM Studio"):
+        pairs.append(("LM Studio", os.environ.get("BENCHMARK_LM_STUDIO_MODEL", "local-model")))
+
+    if use_provider("Gemini CLI"):
+        pairs.append(("Gemini CLI", os.environ.get("BENCHMARK_GEMINI_MODEL", "Gemini CLI Default")))
+
+    if models:
+        pairs = [(provider, model) for provider, _ in pairs for model in models]
+
+    deduped: list[tuple[str, str]] = []
+    seen = set()
+    for provider, model in pairs:
+        key = (provider.strip(), model.strip())
+        if key not in seen:
+            seen.add(key)
+            deduped.append(key)
+    return deduped
+
+
+@app.post("/api/benchmark/truths", tags=["benchmark"])
+def create_benchmark_truth(body: BenchmarkTruthCreateRequest):
+    truth_id = f"truth-{uuid.uuid4()}"
     with closing(get_db()) as conn:
         with conn:
             conn.execute(
-                "INSERT INTO jobs (id, status, stage, stage_detail, mode, settings, url, events) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO benchmark_truth (
+                    id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    truth_id,
+                    body.name.strip(),
+                    body.video_url.strip(),
+                    body.expected_ocr_text or "",
+                    json.dumps(body.expected_categories or []),
+                    json.dumps(body.metadata or {}),
+                ),
+            )
+    return {"truth_id": truth_id}
+
+
+@app.get("/api/benchmark/truths", tags=["benchmark"])
+def list_benchmark_truths():
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json, created_at, updated_at
+            FROM benchmark_truth
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    payload = []
+    for row in rows:
+        payload.append(
+            {
+                "truth_id": row["id"],
+                "name": row["name"],
+                "video_url": row["video_url"],
+                "expected_ocr_text": row["expected_ocr_text"] or "",
+                "expected_categories": json.loads(row["expected_categories_json"] or "[]"),
+                "metadata": json.loads(row["metadata_json"] or "{}"),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        )
+    return {"truths": payload}
+
+
+@app.get("/api/benchmark/truths/{truth_id}", tags=["benchmark"])
+def get_benchmark_truth(truth_id: str):
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            """
+            SELECT id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json, created_at, updated_at
+            FROM benchmark_truth
+            WHERE id = ?
+            """,
+            (truth_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Benchmark truth not found")
+    return {
+        "truth_id": row["id"],
+        "name": row["name"],
+        "video_url": row["video_url"],
+        "expected_ocr_text": row["expected_ocr_text"] or "",
+        "expected_categories": json.loads(row["expected_categories_json"] or "[]"),
+        "metadata": json.loads(row["metadata_json"] or "{}"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+@app.post("/api/benchmark/run", tags=["benchmark"])
+async def run_benchmark_suite(body: BenchmarkRunRequest):
+    with closing(get_db()) as conn:
+        truth = conn.execute(
+            "SELECT id, name, video_url FROM benchmark_truth WHERE id = ?",
+            (body.truth_id,),
+        ).fetchone()
+    if not truth:
+        raise HTTPException(status_code=404, detail="Benchmark truth not found")
+
+    provider_model_pairs = await _resolve_benchmark_provider_models(
+        requested_providers=body.providers,
+        requested_models=body.models,
+    )
+    if not provider_model_pairs:
+        raise HTTPException(status_code=400, detail="No provider/model pairs available for benchmark")
+
+    scan_options = ["tail", "full"]
+    ocr_engines = ["easyocr", "microsoft"]
+    ocr_modes = ["fast", "detailed"]
+
+    permutations = []
+    for scan in scan_options:
+        for ocr_engine in ocr_engines:
+            for ocr_mode in ocr_modes:
+                for provider, model in provider_model_pairs:
+                    permutations.append(
+                        {
+                            "scan_strategy": scan,
+                            "ocr_engine": ocr_engine,
+                            "ocr_mode": ocr_mode,
+                            "provider": provider,
+                            "model_name": model,
+                        }
+                    )
+
+    suite_id = f"suite-{uuid.uuid4()}"
+    matrix_payload = {
+        "scan_strategy": scan_options,
+        "ocr_engine": ocr_engines,
+        "ocr_mode": ocr_modes,
+        "provider_model_pairs": provider_model_pairs,
+        "permutations": len(permutations),
+    }
+
+    with closing(get_db()) as conn:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO benchmark_suites (
+                    id, truth_id, status, matrix_json, created_by, total_jobs, completed_jobs, failed_jobs
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
+                """,
+                (
+                    suite_id,
+                    truth["id"],
+                    "running",
+                    json.dumps(matrix_payload),
+                    "api",
+                    len(permutations),
+                ),
+            )
+
+    benchmark_jobs = []
+    for permutation in permutations:
+        settings = JobSettings(
+            categories=body.categories or "",
+            provider=permutation["provider"],
+            model_name=permutation["model_name"],
+            ocr_engine=normalize_ocr_engine(permutation["ocr_engine"]),
+            ocr_mode=normalize_ocr_mode(permutation["ocr_mode"]),
+            scan_mode=normalize_scan_mode(permutation["scan_strategy"]),
+            override=False,
+            enable_search=True,
+            enable_web_search=True,
+            enable_agentic_search=True,
+            enable_vision=True,
+            context_size=8192,
+        )
+        job_id = _create_job(
+            JobMode.benchmark.value,
+            settings,
+            url=truth["video_url"],
+            benchmark_suite_id=suite_id,
+            benchmark_truth_id=truth["id"],
+            benchmark_params=permutation,
+        )
+        benchmark_jobs.append(
+            {
+                "job_id": job_id,
+                "params": permutation,
+            }
+        )
+
+    logger.info(
+        "benchmark_suite_started: suite_id=%s truth_id=%s jobs=%d",
+        suite_id,
+        truth["id"],
+        len(benchmark_jobs),
+    )
+
+    return {
+        "suite_id": suite_id,
+        "truth_id": truth["id"],
+        "jobs_enqueued": len(benchmark_jobs),
+        "matrix": matrix_payload,
+        "jobs": benchmark_jobs,
+    }
+
+
+@app.get("/api/benchmark/suites", tags=["benchmark"])
+def list_benchmark_suites():
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.truth_id, s.status, s.total_jobs, s.completed_jobs, s.failed_jobs,
+                   s.evaluated_at, s.created_at, s.updated_at, t.name as truth_name
+            FROM benchmark_suites s
+            LEFT JOIN benchmark_truth t ON t.id = s.truth_id
+            ORDER BY s.created_at DESC
+            """
+        ).fetchall()
+    return {
+        "suites": [
+            {
+                "suite_id": row["id"],
+                "truth_id": row["truth_id"],
+                "truth_name": row["truth_name"],
+                "status": row["status"],
+                "total_jobs": row["total_jobs"],
+                "completed_jobs": row["completed_jobs"],
+                "failed_jobs": row["failed_jobs"],
+                "evaluated_at": row["evaluated_at"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/benchmark/suites/{suite_id}", tags=["benchmark"])
+def get_benchmark_suite(suite_id: str):
+    with closing(get_db()) as conn:
+        row = conn.execute(
+            """
+            SELECT s.*, t.name as truth_name, t.video_url
+            FROM benchmark_suites s
+            LEFT JOIN benchmark_truth t ON t.id = s.truth_id
+            WHERE s.id = ?
+            """,
+            (suite_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Benchmark suite not found")
+    return {
+        "suite_id": row["id"],
+        "truth_id": row["truth_id"],
+        "truth_name": row["truth_name"],
+        "video_url": row["video_url"],
+        "status": row["status"],
+        "matrix": json.loads(row["matrix_json"] or "{}"),
+        "total_jobs": row["total_jobs"],
+        "completed_jobs": row["completed_jobs"],
+        "failed_jobs": row["failed_jobs"],
+        "evaluated_at": row["evaluated_at"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+@app.get("/api/benchmark/suites/{suite_id}/results", tags=["benchmark"])
+def get_benchmark_suite_results(suite_id: str):
+    evaluation = evaluate_benchmark_suite(suite_id)
+    if not evaluation.get("ok"):
+        raise HTTPException(status_code=404, detail=evaluation.get("error", "benchmark_evaluation_failed"))
+
+    with closing(get_db()) as conn:
+        rows = conn.execute(
+            """
+            SELECT job_id, duration_seconds, classification_accuracy, ocr_accuracy, composite_accuracy, params_json
+            FROM benchmark_result
+            WHERE suite_id = ?
+            ORDER BY created_at ASC
+            """,
+            (suite_id,),
+        ).fetchall()
+        suite = conn.execute(
+            "SELECT status, total_jobs, completed_jobs, failed_jobs FROM benchmark_suites WHERE id = ?",
+            (suite_id,),
+        ).fetchone()
+
+    scatter_points = []
+    for row in rows:
+        params = json.loads(row["params_json"] or "{}")
+        label = (
+            f"{params.get('provider', 'unknown')} + "
+            f"{params.get('model_name', 'model')} + "
+            f"{params.get('ocr_engine', 'ocr')} + "
+            f"{params.get('scan_strategy', 'scan')}"
+        )
+        composite_pct = round(float(row["composite_accuracy"] or 0.0) * 100.0, 2)
+        scatter_points.append(
+            {
+                "job_id": row["job_id"],
+                "x_duration_seconds": row["duration_seconds"],
+                "y_composite_accuracy_pct": composite_pct,
+                "classification_accuracy": row["classification_accuracy"],
+                "ocr_accuracy": row["ocr_accuracy"],
+                "params": params,
+                "label": label,
+            }
+        )
+
+    return {
+        "suite_id": suite_id,
+        "status": suite["status"] if suite else evaluation.get("status"),
+        "total_jobs": suite["total_jobs"] if suite else evaluation.get("total_jobs"),
+        "completed_jobs": suite["completed_jobs"] if suite else evaluation.get("completed_jobs"),
+        "failed_jobs": suite["failed_jobs"] if suite else evaluation.get("failed_jobs"),
+        "points": scatter_points,
+    }
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────────
+
+def _create_job(
+    mode: str,
+    settings: JobSettings,
+    url: str = None,
+    *,
+    benchmark_suite_id: str | None = None,
+    benchmark_truth_id: str | None = None,
+    benchmark_params: dict | None = None,
+) -> str:
+    job_id = f"{NODE_NAME}-{uuid.uuid4()}"
+    benchmark_params_json = json.dumps(benchmark_params or {})
+    with closing(get_db()) as conn:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO jobs (
+                    id, status, stage, stage_detail, mode, settings, url, events,
+                    benchmark_suite_id, benchmark_truth_id, benchmark_params_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     job_id,
                     "queued",
@@ -700,10 +1072,19 @@ def _create_job(mode: str, settings: JobSettings, url: str = None) -> str:
                     settings.model_dump_json(),
                     url,
                     "[]",
+                    benchmark_suite_id or "",
+                    benchmark_truth_id or "",
+                    benchmark_params_json,
                 ),
             )
     _counters["submitted"] += 1
-    logger.info("job_created: job_id=%s mode=%s url=%s", job_id, mode, url)
+    logger.info(
+        "job_created: job_id=%s mode=%s url=%s benchmark_suite_id=%s",
+        job_id,
+        mode,
+        url,
+        benchmark_suite_id or "-",
+    )
     return job_id
 
 

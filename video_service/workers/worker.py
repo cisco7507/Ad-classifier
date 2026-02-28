@@ -43,6 +43,7 @@ from video_service.core.concurrency import (
     get_worker_processes_config,
 )
 from video_service.core.device import get_diagnostics, DEVICE
+from video_service.core.benchmarking import evaluate_benchmark_suite
 
 logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts"))
@@ -467,6 +468,7 @@ def claim_and_process_job() -> bool:
 
         url      = row["url"]
         mode     = row["mode"]
+        benchmark_suite_id = (row["benchmark_suite_id"] or "").strip() if "benchmark_suite_id" in row.keys() else ""
         settings = json.loads(row["settings"]) if row["settings"] else {}
 
         events: list[str] = []
@@ -479,6 +481,8 @@ def claim_and_process_job() -> bool:
                 result_json, artifacts_payload = _run_pipeline(job_id, url, settings)
             elif mode == "agent":
                 result_json, events, artifacts_payload = _run_agent(job_id, url, settings)
+            elif mode == "benchmark":
+                result_json, artifacts_payload = _run_pipeline(job_id, url, settings)
             else:
                 raise ValueError(f"Unknown mode: {mode}")
 
@@ -558,6 +562,23 @@ def claim_and_process_job() -> bool:
             )
             set_stage_context("completed", "result persisted")
             logger.info("job_completed")
+
+        if benchmark_suite_id:
+            try:
+                evaluation = evaluate_benchmark_suite(benchmark_suite_id)
+                logger.info(
+                    "benchmark_suite_eval: suite_id=%s status=%s completed=%s/%s",
+                    benchmark_suite_id,
+                    evaluation.get("status"),
+                    evaluation.get("completed_jobs"),
+                    evaluation.get("total_jobs"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "benchmark_suite_eval_failed: suite_id=%s error=%s",
+                    benchmark_suite_id,
+                    exc,
+                )
 
         return True
 

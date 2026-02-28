@@ -154,6 +154,80 @@ export interface AnalyticsData {
   recent_duration_points: DurationSamplePoint[];
 }
 
+export interface SystemProfileWarning {
+  model: string;
+  severity: string;
+  message: string;
+  requirements: {
+    min_ram_mb: number;
+    min_vram_mb: number;
+    accelerator: string;
+  };
+}
+
+export interface SystemProfile {
+  timestamp: string;
+  hardware: {
+    cpu_count_logical: number;
+    cpu_count_physical: number;
+    total_ram_mb: number;
+    used_ram_mb: number;
+    free_ram_mb: number;
+    memory_percent: number;
+    accelerator: string;
+    device_name: string;
+    cuda_available: boolean;
+    mps_available: boolean;
+    total_vram_mb: number | null;
+    free_vram_mb: number | null;
+  };
+  capability_matrix: Array<Record<string, unknown>>;
+  warnings: SystemProfileWarning[];
+}
+
+export interface BenchmarkTruth {
+  truth_id: string;
+  name: string;
+  video_url: string;
+  expected_ocr_text: string;
+  expected_categories: string[];
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkSuiteSummary {
+  suite_id: string;
+  truth_id: string;
+  truth_name?: string;
+  status: string;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  evaluated_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BenchmarkPoint {
+  job_id: string;
+  x_duration_seconds: number;
+  y_composite_accuracy_pct: number;
+  classification_accuracy: number;
+  ocr_accuracy: number;
+  params: Record<string, unknown>;
+  label: string;
+}
+
+export interface BenchmarkSuiteResults {
+  suite_id: string;
+  status: string;
+  total_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  points: BenchmarkPoint[];
+}
+
 export function emptyAnalytics(): AnalyticsData {
   return {
     top_brands: [],
@@ -397,6 +471,7 @@ export const getClusterNodes  = () => safe(() => api.get<ClusterNode>('/cluster/
 export const getClusterJobs   = () => safe(() => api.get<JobStatus[]>('/cluster/jobs').then(r => r.data));
 export const getMetrics       = () => safe(() => api.get<Metrics>('/metrics').then(r => r.data));
 export const getAnalytics     = () => safe(() => api.get<AnalyticsData>('/analytics').then(r => r.data));
+export const getSystemProfile = () => safe(() => api.get<SystemProfile>('/api/system/profile').then(r => r.data));
 export const getJob           = (id: string) => safe(() => api.get<JobStatus>(`/jobs/${id}`).then(r => r.data));
 export const getJobResult     = (id: string) => safe(() => api.get<{ result: ResultRow[] | null }>(`/jobs/${id}/result`).then(r => r.data));
 export const getJobArtifacts  = (id: string) => safe(() => api.get<{ artifacts: JobArtifacts }>(`/jobs/${id}/artifacts`).then(r => r.data));
@@ -412,6 +487,16 @@ export const deleteJobsBulk   = async (jobIds: string[]) => {
 export const submitUrls       = (data: unknown) => safe(() => api.post('/jobs/by-urls', data).then(r => r.data));
 export const submitFilePath   = (data: unknown) => safe(() => api.post('/jobs/by-filepath', data).then(r => r.data));
 export const submitFolderPath = (data: unknown) => safe(() => api.post('/jobs/by-folder', data).then(r => r.data));
+export const createBenchmarkTruth = (data: unknown) =>
+  safe(() => api.post<{ truth_id: string }>('/api/benchmark/truths', data).then((r) => r.data));
+export const getBenchmarkTruths = () =>
+  safe(() => api.get<{ truths: BenchmarkTruth[] }>('/api/benchmark/truths').then((r) => r.data));
+export const runBenchmarkSuite = (data: unknown) =>
+  safe(() => api.post('/api/benchmark/run', data).then((r) => r.data));
+export const getBenchmarkSuites = () =>
+  safe(() => api.get<{ suites: BenchmarkSuiteSummary[] }>('/api/benchmark/suites').then((r) => r.data));
+export const getBenchmarkSuiteResults = (suiteId: string) =>
+  safe(() => api.get<BenchmarkSuiteResults>(`/api/benchmark/suites/${suiteId}/results`).then((r) => r.data));
 export const getJobVideoUrl   = (jobId: string): string => `${API_BASE_URL}/jobs/${jobId}/video`;
 
 export async function getClusterAnalytics(): Promise<AnalyticsData> {
