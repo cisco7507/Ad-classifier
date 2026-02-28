@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import logging
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -106,10 +107,33 @@ def test_watchdog_recovery_only_resets_stale_processing_jobs(tmp_path, monkeypat
     check = _make_conn(db_path)
     stale_row = check.execute("SELECT * FROM jobs WHERE id = ?", ("stale-job",)).fetchone()
     fresh_row = check.execute("SELECT * FROM jobs WHERE id = ?", ("fresh-job",)).fetchone()
-    assert stale_row["status"] == "queued"
-    assert stale_row["stage"] == "queued"
+    assert stale_row["status"] == "re-queued"
+    assert stale_row["stage"] == "re-queued"
     assert stale_row["stage_detail"] == "recovered by watchdog (stale timeout)"
     events = json.loads(stale_row["events"])
     assert any("recovered by watchdog (stale timeout)" in event for event in events)
     assert fresh_row["status"] == "processing"
     check.close()
+
+
+def test_watchdog_recovery_logs_recovered_job_ids(tmp_path, monkeypatch, caplog):
+    db_path = str(tmp_path / "watchdog_recovery_log_ids.db")
+    conn = _make_conn(db_path)
+    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO jobs (id, status, stage, stage_detail, updated_at, events) VALUES (?, ?, ?, ?, ?, ?)",
+        ("stale-log-job", "processing", "vision", "running", stale_ts, "[]"),
+    )
+    conn.commit()
+    conn.close()
+
+    def _get_db():
+        return _make_conn(db_path)
+
+    monkeypatch.setattr(stale_recovery, "get_db", _get_db)
+    monkeypatch.setattr(stale_recovery, "STALE_TIMEOUT_SECONDS", 600)
+    caplog.set_level(logging.INFO, logger=stale_recovery.__name__)
+
+    recovered = stale_recovery._recover_stale_jobs()
+    assert recovered == 1
+    assert "stale-log-job" in caplog.text

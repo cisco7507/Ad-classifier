@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+import threading
 
 from video_service.workers import worker
 
@@ -67,3 +68,23 @@ def test_extract_agent_ocr_text_supports_observation_without_scene_prefix():
         "2026-02-28T00:00:00Z agent:\n--- Step 1 ---\nAction: [TOOL: OCR]\nResult: Observation: VOLVO | XC90",
     ]
     assert worker._extract_agent_ocr_text(events) == "VOLVO | XC90"
+
+
+def test_job_heartbeat_updates_updated_at_and_stops(monkeypatch):
+    calls: list[tuple[str, tuple]] = []
+
+    def _fake_execute(sql: str, params: tuple, *, attempts: int = 10):
+        calls.append((sql, params))
+        stop_event.set()
+
+    stop_event = threading.Event()
+    monkeypatch.setattr(worker, "_execute_job_update_with_retry", _fake_execute)
+    hb_thread = worker._start_job_heartbeat(
+        "node-a-heartbeat-test",
+        stop_event,
+        interval_seconds=0.01,
+    )
+    hb_thread.join(timeout=1.0)
+
+    assert calls
+    assert calls[0][1] == ("node-a-heartbeat-test",)
