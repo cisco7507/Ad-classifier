@@ -116,11 +116,11 @@ class HybridLLM:
                 elif provider == "Ollama":
                     payload = {"model": backend_model, "prompt": f"{sys}\n\n{usr}", "stream": False, "format": "json", "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                     if img: payload["images"] = [img]
-                    return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/generate", json=payload).json().get("response", ""))
+                    return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=300).json().get("response", ""))
                 elif provider == "LM Studio":
                     msgs = [{"role": "system", "content": sys}, {"role": "user", "content": usr}]
                     if img: msgs[1]["content"] = [{"type": "text", "text": usr}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}]
-                    return self._clean_and_parse_json(requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}).json().get("choices", [{}])[0].get("message", {}).get("content", ""))
+                    return self._clean_and_parse_json(requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=300).json().get("choices", [{}])[0].get("message", {}).get("content", ""))
             except Exception as e: return {"error": str(e)}
 
         res = call_model(sys_msg, usr_msg, b64_img if force_multimodal else None)
@@ -185,7 +185,7 @@ class HybridLLM:
             elif provider == "Ollama":
                 payload = {"model": backend_model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                 if b64_imgs: payload["images"] = b64_imgs
-                res = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=120)
+                res = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=300)
                 if res.status_code != 200:
                     return f'[TOOL: ERROR | reason="Ollama HTTP {res.status_code}: {res.text}"]'
                 return res.json().get("response", "").strip()
@@ -193,7 +193,7 @@ class HybridLLM:
             elif provider == "LM Studio":
                 msgs = [{"role": "system", "content": "You are a ReACT Agent. Strictly follow the prompt formatting."}, {"role": "user", "content": prompt}]
                 if b64_imgs: msgs[1]["content"] = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_imgs[0]}"}}]
-                res = requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=120)
+                res = requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=300)
                 if res.status_code != 200:
                     return f'[TOOL: ERROR | reason="LM Studio HTTP {res.status_code}: {res.text}"]'
                 return res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
