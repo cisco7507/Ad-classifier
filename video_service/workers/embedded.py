@@ -9,6 +9,7 @@ import multiprocessing
 import os
 import threading
 import time
+from logging.handlers import QueueHandler, QueueListener
 
 from video_service.core.concurrency import get_worker_processes_config
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 _children: list[multiprocessing.Process] = []
 _monitor_thread: threading.Thread | None = None
 _shutdown_event = threading.Event()
+_log_queue: multiprocessing.Queue | None = None
+_log_listener: QueueListener | None = None
 
 
 def _parse_embed_workers() -> bool:
@@ -24,7 +27,19 @@ def _parse_embed_workers() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-def _worker_child_main(index: int) -> None:
+def _worker_child_main(index: int, log_queue: multiprocessing.Queue) -> None:
+    # 1. Clear out any existing handlers inherited from the fork
+    root = logging.getLogger()
+    if root.handlers:
+        root.handlers.clear()
+        
+    # 2. Pipe all worker logs to the parent process's queue
+    qh = QueueHandler(log_queue)
+    # We do NOT want the QueueHandler to format the string here; 
+    # we want the parent to format it so it hits the MemoryListHandler identically.
+    root.addHandler(qh)
+    root.setLevel(logging.INFO)
+
     # Lazy import keeps worker ML deps out of API parent process.
     from video_service.workers.worker import _run_single_worker
 
@@ -33,9 +48,10 @@ def _worker_child_main(index: int) -> None:
 
 
 def _spawn_child(index: int) -> multiprocessing.Process:
+    global _log_queue
     proc = multiprocessing.Process(
         target=_worker_child_main,
-        kwargs={"index": index},
+        kwargs={"index": index, "log_queue": _log_queue},
         name=f"embedded-worker-{index}",
         daemon=False,
     )
@@ -91,6 +107,16 @@ def start() -> int:
     logger.info("embedded_workers: spawning %d worker process(es)", process_count)
 
     _shutdown_event.clear()
+    
+    global _log_queue, _log_listener
+    if _log_queue is None:
+        _log_queue = multiprocessing.Queue()
+        # The parent process listens to the queue and passes records physical 
+        # root logger handlers (which includes MemoryListHandler for the UI)
+        parent_handlers = logging.getLogger().handlers
+        _log_listener = QueueListener(_log_queue, *parent_handlers, respect_handler_level=True)
+        _log_listener.start()
+
     for index in range(1, process_count + 1):
         proc = _spawn_child(index)
         proc.start()
@@ -128,5 +154,14 @@ def shutdown() -> None:
             proc.join(timeout=2.0)
 
     _children.clear()
+    
+    global _log_listener, _log_queue
+    if _log_listener:
+        _log_listener.stop()
+        _log_listener = None
+    if _log_queue:
+        _log_queue.close()
+        _log_queue = None
+        
     logger.info("embedded_workers: all workers stopped")
 
