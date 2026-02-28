@@ -2,6 +2,7 @@ import sys
 import types
 
 import pytest
+import requests
 
 # `video_service.core.llm` imports `ddgs`; stub it for unit tests.
 if "ddgs" not in sys.modules:
@@ -80,3 +81,40 @@ def test_query_agent_uses_timeout_300_for_remote_calls(monkeypatch):
 
     assert len(calls) == 2
     assert all(call["timeout"] == 300 for call in calls)
+
+
+def test_query_pipeline_timeout_returns_structured_error(monkeypatch):
+    llm = HybridLLM()
+
+    def _timeout_post(url, json=None, timeout=None):
+        raise requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _timeout_post)
+
+    result = llm.query_pipeline(
+        provider="Ollama",
+        backend_model="qwen3-vl:8b-instruct",
+        text="sample",
+        categories="Auto",
+        enable_search=False,
+    )
+
+    assert isinstance(result, dict)
+    assert result.get("error") == "Timeout after 300s"
+
+
+def test_query_agent_timeout_returns_tool_error(monkeypatch):
+    llm = HybridLLM()
+
+    def _timeout_post(url, json=None, timeout=None):
+        raise requests.exceptions.Timeout("timed out")
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _timeout_post)
+
+    result = llm.query_agent(
+        provider="LM Studio",
+        backend_model="local-model",
+        prompt="prompt",
+    )
+
+    assert result == '[TOOL: ERROR | reason="LLM Timeout after 300s"]'
