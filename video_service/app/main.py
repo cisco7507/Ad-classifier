@@ -40,7 +40,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
-from video_service.core.logging_setup import configure_logging
+from video_service.core.logging_setup import (
+    configure_logging,
+    get_recent_log_lines,
+    subscribe_log_stream,
+)
 configure_logging()
 
 from video_service.db.database import get_db, init_db
@@ -906,6 +910,38 @@ async def stream_job_events(req: Request, job_id: str):
             await asyncio.sleep(0.5)
 
     return EventSourceResponse(event_generator())
+
+
+@app.get("/admin/logs/stream", tags=["admin"], response_model=None)
+async def stream_admin_logs(req: Request):
+    queue, unsubscribe = subscribe_log_stream(max_queue_size=1000)
+
+    async def event_generator() -> AsyncGenerator[dict[str, str], None]:
+        try:
+            recent_lines = get_recent_log_lines(limit=200)
+            yield {
+                "event": "bootstrap",
+                "data": json.dumps({"lines": recent_lines}),
+            }
+
+            while True:
+                if await req.is_disconnected():
+                    break
+                try:
+                    line = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield {"event": "log", "data": json.dumps({"line": line})}
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": "{}"}
+        finally:
+            unsubscribe()
+
+    return EventSourceResponse(event_generator())
+
+
+@app.get("/admin/logs/recent", tags=["admin"])
+def admin_recent_logs(limit: int = 200):
+    bounded_limit = max(1, min(limit, 1000))
+    return {"lines": get_recent_log_lines(limit=bounded_limit)}
 
 
 @app.delete("/jobs/{job_id}", tags=["jobs"])

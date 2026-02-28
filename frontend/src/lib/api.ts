@@ -5,9 +5,9 @@
 
 import axios, { AxiosError } from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-export const api = axios.create({ baseURL, timeout: 15000 });
+export const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -272,7 +272,7 @@ function mergeAnalytics(responses: AnalyticsData[]): AnalyticsData {
 
 function parseError(err: unknown): string {
   if (err instanceof AxiosError) {
-    if (!err.response) return `Network error — cannot reach ${baseURL}`;
+    if (!err.response) return `Network error — cannot reach ${API_BASE_URL}`;
     const detail = err.response.data?.detail;
     return detail ? String(detail) : `HTTP ${err.response.status}: ${err.response.statusText}`;
   }
@@ -308,7 +308,7 @@ export const deleteJobsBulk   = async (jobIds: string[]) => {
 export const submitUrls       = (data: unknown) => safe(() => api.post('/jobs/by-urls', data).then(r => r.data));
 export const submitFilePath   = (data: unknown) => safe(() => api.post('/jobs/by-filepath', data).then(r => r.data));
 export const submitFolderPath = (data: unknown) => safe(() => api.post('/jobs/by-folder', data).then(r => r.data));
-export const getJobVideoUrl   = (jobId: string): string => `${baseURL}/jobs/${jobId}/video`;
+export const getJobVideoUrl   = (jobId: string): string => `${API_BASE_URL}/jobs/${jobId}/video`;
 
 export async function getClusterAnalytics(): Promise<AnalyticsData> {
   const cluster = await getClusterNodes();

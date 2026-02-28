@@ -1,8 +1,12 @@
 import logging
 import os
+import asyncio
+import threading
 from pathlib import Path
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from collections import deque
+from typing import Callable
 
 _job_id_var: ContextVar[str] = ContextVar("job_id", default="-")
 _stage_var: ContextVar[str] = ContextVar("stage", default="-")
@@ -11,6 +15,7 @@ _stage_detail_var: ContextVar[str] = ContextVar("stage_detail", default="-")
 _configured = False
 _env_loaded = False
 _debug_enabled = False
+_memory_handler: "MemoryListHandler | None" = None
 
 _NOISY_LOGGERS = (
     "uvicorn",
@@ -45,6 +50,81 @@ _FORCE_ERROR_LOGGERS = (
 )
 
 
+class MemoryListHandler(logging.Handler):
+    def __init__(self, max_lines: int = 1000):
+        super().__init__()
+        self._lines: deque[str] = deque(maxlen=max_lines)
+        self._lines_lock = threading.Lock()
+        self._subscribers: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Queue[str]]] = {}
+        self._subscribers_lock = threading.Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+
+        with self._lines_lock:
+            self._lines.append(line)
+        self._publish(line)
+
+    def recent(self, limit: int = 200) -> list[str]:
+        bounded_limit = max(1, int(limit))
+        with self._lines_lock:
+            lines = list(self._lines)
+        return lines[-bounded_limit:]
+
+    def subscribe(
+        self,
+        max_queue_size: int = 1000,
+    ) -> tuple[asyncio.Queue[str], Callable[[], None]]:
+        loop = asyncio.get_running_loop()
+        # Initialize the queue bound to the current request's event loop
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=max(1, max_queue_size))
+        token = id(queue)
+        with self._subscribers_lock:
+            self._subscribers[token] = (loop, queue)
+
+        def unsubscribe() -> None:
+            with self._subscribers_lock:
+                self._subscribers.pop(token, None)
+
+        return queue, unsubscribe
+
+    @staticmethod
+    def _queue_put_latest(queue: asyncio.Queue[str], line: str) -> None:
+        if queue.full():
+            try:
+                queue.get_nowait()
+            except Exception:
+                pass
+        try:
+            queue.put_nowait(line)
+        except Exception:
+            pass
+
+    def _publish(self, line: str) -> None:
+        with self._subscribers_lock:
+            subscribers = list(self._subscribers.items())
+
+        stale_tokens: list[int] = []
+        for token, (loop, queue) in subscribers:
+            try:
+                # We specifically MUST use the queue from within its bound loop thread 
+                # or asyncio throws RuntimeError in Python 3.10+
+                loop.call_soon_threadsafe(self._queue_put_latest, queue, line)
+            except (RuntimeError, Exception) as e:
+                import sys
+                print(f"DEBUG: Dropping log subscriber due to: {e}", file=sys.stderr)
+                stale_tokens.append(token)
+
+        if stale_tokens:
+            with self._subscribers_lock:
+                for token in stale_tokens:
+                    self._subscribers.pop(token, None)
+
+
 class ContextEnricherFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.job_id = _job_id_var.get() or "-"
@@ -68,7 +148,7 @@ class NoisyLibraryFilter(logging.Filter):
 
 
 def configure_logging(force: bool = False) -> None:
-    global _configured, _env_loaded, _debug_enabled
+    global _configured, _env_loaded, _debug_enabled, _memory_handler
     if _configured and not force:
         return
 
@@ -91,15 +171,21 @@ def configure_logging(force: bool = False) -> None:
 
     fmt = "%(asctime)s %(levelname)-8s job_id=%(job_id)s stage=%(stage)s %(name)s %(message)s"
     datefmt = "%Y-%m-%dT%H:%M:%S"
+    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
 
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(level=level, format=fmt, datefmt=datefmt)
     else:
         root.setLevel(level)
-        formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
         for handler in root.handlers:
             handler.setFormatter(formatter)
+
+    if _memory_handler is None:
+        _memory_handler = MemoryListHandler(max_lines=1000)
+    if _memory_handler not in root.handlers:
+        root.addHandler(_memory_handler)
+    _memory_handler.setFormatter(formatter)
 
     context_filter = ContextEnricherFilter()
     noisy_filter = NoisyLibraryFilter()
@@ -146,6 +232,21 @@ def configure_logging(force: bool = False) -> None:
             noisy_logger.addHandler(hard_handler)
 
     _configured = True
+
+
+def get_recent_log_lines(limit: int = 200) -> list[str]:
+    if _memory_handler is None:
+        return []
+    return _memory_handler.recent(limit=limit)
+
+
+def subscribe_log_stream(
+    max_queue_size: int = 1000,
+) -> tuple[asyncio.Queue[str], Callable[[], None]]:
+    if _memory_handler is None:
+        configure_logging()
+    assert _memory_handler is not None
+    return _memory_handler.subscribe(max_queue_size=max_queue_size)
 
 
 def set_job_context(job_id: str) -> Token:

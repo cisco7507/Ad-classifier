@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import transformers.utils.logging as hf_logging
 
 import pytest
@@ -128,3 +129,26 @@ def test_configure_logging_repo_env_overrides_shell_log_level(monkeypatch, tmp_p
 
     logging_setup.configure_logging(force=True)
     assert logging.getLogger().level == logging.INFO
+
+
+def test_memory_log_buffer_and_subscription(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
+
+    logging_setup.configure_logging(force=True)
+    async def _verify() -> None:
+        queue, unsubscribe = logging_setup.subscribe_log_stream(max_queue_size=10)
+        try:
+            logger = logging.getLogger("tests.live-debug-panel")
+            logger.info("live-debug-panel smoke log")
+
+            line = await asyncio.wait_for(queue.get(), timeout=1.0)
+            assert "live-debug-panel smoke log" in line
+
+            recent = logging_setup.get_recent_log_lines(limit=20)
+            assert any("live-debug-panel smoke log" in item for item in recent)
+        finally:
+            unsubscribe()
+
+    asyncio.run(_verify())

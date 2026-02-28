@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayersIcon, BarChartIcon, ComponentInstanceIcon } from '@radix-ui/react-icons';
+import { LayersIcon, BarChartIcon, ComponentInstanceIcon, CodeIcon } from '@radix-ui/react-icons';
 import { cn } from '../lib/utils';
+import { DebugConsole } from './DebugConsole';
 
 export function Layout() {
   const location = useLocation();
+  const [debugConsoleOpen, setDebugConsoleOpen] = useState(false);
 
   const navItems = [
     { name: 'Overview', path: '/', icon: LayersIcon },
@@ -45,6 +48,15 @@ export function Layout() {
         <main className="p-8 max-w-7xl mx-auto min-h-full">
           <Outlet />
         </main>
+        <button
+          type="button"
+          onClick={() => setDebugConsoleOpen((current) => !current)}
+          className="fixed bottom-6 right-6 z-50 inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-100 shadow-lg hover:bg-slate-800"
+        >
+          <CodeIcon className="h-4 w-4" />
+          Terminal
+        </button>
+        <DebugConsole open={debugConsoleOpen} onClose={() => setDebugConsoleOpen(false)} />
       </div>
     </div>
   );
