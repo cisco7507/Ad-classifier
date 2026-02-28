@@ -76,8 +76,8 @@ def _recover_stale_jobs() -> int:
             conn.execute(
                 f"""
                 UPDATE jobs
-                SET status = 'queued',
-                    stage = 'queued',
+                SET status = 're-queued',
+                    stage = 're-queued',
                     stage_detail = 'recovered by watchdog (stale timeout)',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id IN ({placeholders})
@@ -91,7 +91,7 @@ def _recover_stale_jobs() -> int:
                 SELECT id
                 FROM jobs
                 WHERE id IN ({placeholders})
-                  AND status = 'queued'
+                  AND status = 're-queued'
                   AND stage_detail = 'recovered by watchdog (stale timeout)'
                 """,
                 tuple(job_ids),
@@ -105,8 +105,9 @@ def _recover_stale_jobs() -> int:
                 )
 
     logger.info(
-        "stale_recovery: reset %d stale processing jobs to queued",
+        "stale_recovery: reset %d stale processing jobs to re-queued job_ids=%s",
         len(recovered_ids),
+        recovered_ids,
     )
     return len(recovered_ids)
 

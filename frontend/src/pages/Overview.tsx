@@ -77,7 +77,7 @@ export function Overview() {
   }, []);
 
   const processing = jobs.filter(j => j.status === 'processing').length;
-  const queued     = jobs.filter(j => j.status === 'queued').length;
+  const queued     = jobs.filter(j => j.status === 'queued' || j.status === 're-queued').length;
   const completed  = jobs.filter(j => j.status === 'completed').length;
   const failed     = jobs.filter(j => j.status === 'failed').length;
   const offlineNodes = nodes ? Object.values(nodes.status).filter(v => !v).length : 0;

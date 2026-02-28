@@ -15,6 +15,7 @@ import re
 import logging
 import traceback
 import multiprocessing
+import threading
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -350,6 +351,37 @@ def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 1
             time.sleep(0.05 * attempt)
 
 
+def _start_job_heartbeat(
+    job_id: str,
+    stop_event: threading.Event,
+    *,
+    interval_seconds: float = 60.0,
+) -> threading.Thread:
+    """Refresh jobs.updated_at while a long-running job is executing."""
+
+    def _heartbeat_loop() -> None:
+        while not stop_event.wait(interval_seconds):
+            try:
+                _execute_job_update_with_retry(
+                    "UPDATE jobs SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (job_id,),
+                    attempts=5,
+                )
+                logger.debug("job_heartbeat: refreshed updated_at")
+            except sqlite3.OperationalError as exc:
+                logger.debug("job_heartbeat_db_locked: %s", exc)
+            except Exception as exc:
+                logger.warning("job_heartbeat_failed: %s", exc)
+
+    thread = threading.Thread(
+        target=_heartbeat_loop,
+        name=f"job-heartbeat-{_sanitize_job_id(job_id)}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _set_stage(
     job_id: str,
     stage: str,
@@ -391,12 +423,22 @@ def _stage_callback(job_id: str):
 def claim_and_process_job() -> bool:
     job_token = None
     claim_conn = None
+    heartbeat_stop_event: threading.Event | None = None
+    heartbeat_thread: threading.Thread | None = None
     try:
         claim_conn = get_db()
         cur = claim_conn.cursor()
         claim_conn.execute("BEGIN IMMEDIATE")
 
-        cur.execute("SELECT * FROM jobs WHERE status = 'queued' LIMIT 1")
+        cur.execute(
+            """
+            SELECT *
+            FROM jobs
+            WHERE status IN ('queued', 're-queued')
+            ORDER BY updated_at ASC
+            LIMIT 1
+            """
+        )
         row = cur.fetchone()
 
         if not row:
@@ -412,6 +454,8 @@ def claim_and_process_job() -> bool:
         claim_conn.close()
         claim_conn = None
         processing_start = time.monotonic()
+        heartbeat_stop_event = threading.Event()
+        heartbeat_thread = _start_job_heartbeat(job_id, heartbeat_stop_event, interval_seconds=60.0)
 
         job_token = set_job_context(job_id)
         set_stage_context("claim", "worker claimed job")
@@ -523,6 +567,10 @@ def claim_and_process_job() -> bool:
         logger.error("worker_lock_error: %s", exc)
         return False
     finally:
+        if heartbeat_stop_event is not None:
+            heartbeat_stop_event.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=1.0)
         if claim_conn is not None:
             claim_conn.close()
         reset_stage_context()

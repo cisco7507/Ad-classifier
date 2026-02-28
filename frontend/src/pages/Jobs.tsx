@@ -140,7 +140,13 @@ export function Jobs() {
   };
 
   const filteredJobs = jobs.filter((j) => {
-    if (statusFilter !== 'all' && j.status !== statusFilter) return false;
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'queued') {
+        if (j.status !== 'queued' && j.status !== 're-queued') return false;
+      } else if (j.status !== statusFilter) {
+        return false;
+      }
+    }
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -379,6 +385,7 @@ export function Jobs() {
             <select value={statusFilter} onChange={(e) => handleStatusFilterChange(e.target.value)} className="py-1.5 px-3 text-xs bg-gray-50 border border-gray-200 rounded text-gray-700 font-medium tracking-wide">
               <option value="all">ALL STATUSES</option>
               <option value="queued">QUEUED</option>
+              <option value="re-queued">RE-QUEUED</option>
               <option value="processing">PROCESSING</option>
               <option value="completed">COMPLETED</option>
               <option value="failed">FAILED</option>
@@ -465,14 +472,25 @@ export function Jobs() {
                   <td className="px-6 py-4 text-xs text-gray-700">{job.brand || '—'}</td>
                   <td className="px-6 py-4 text-xs text-gray-700">{job.category || '—'}</td>
                   <td className="px-6 py-4">
+                    {(() => {
+                      const statusClass = job.status === 'completed'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : job.status === 'failed'
+                          ? 'bg-red-50 text-red-700 border-red-200'
+                          : job.status === 'processing'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse'
+                            : job.status === 're-queued'
+                              ? 'bg-orange-50 text-orange-700 border-orange-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200';
+                      const statusText = job.status === 're-queued' ? 'waiting (recovered)' : job.status;
+                      return (
                     <span className={`px-2 py-1 rounded inline-flex text-[10px] font-bold tracking-wider uppercase border ${
-                      job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                      job.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                      job.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
-                      'bg-amber-50 text-amber-700 border-amber-200'
+                      statusClass
                     }`}>
-                      {job.status}
+                      {statusText}
                     </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.mode || '—'}</td>
                   <td className="px-6 py-4 text-[10px] uppercase font-bold tracking-widest text-gray-500">{job.stage || '—'}</td>

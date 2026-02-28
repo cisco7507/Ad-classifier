@@ -773,14 +773,25 @@ export function JobDetail() {
                 {job.mode === 'agent' ? <MagicWandIcon className="text-primary-500" /> : <FileTextIcon className="text-primary-500" />}
                 {job.mode.charAt(0).toUpperCase() + job.mode.slice(1)} Job
               </h1>
+              {(() => {
+                const statusClass = job.status === 'completed'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : job.status === 'failed'
+                    ? 'bg-red-50 text-red-700 border-red-200'
+                    : job.status === 'processing'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse'
+                      : job.status === 're-queued'
+                        ? 'bg-orange-50 text-orange-700 border-orange-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200';
+                const statusLabel = job.status === 're-queued' ? 'waiting (recovered)' : job.status;
+                return (
               <span className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border backdrop-blur-md ${
-                job.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                job.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' :
-                job.status === 'processing' ? 'bg-blue-50 text-blue-700 border-blue-200 animate-pulse' :
-                'bg-amber-50 text-amber-700 border-amber-200'
+                statusClass
               }`}>
-                {job.status} {job.status === 'processing' && `${progressPercent}%`}
+                {statusLabel} {job.status === 'processing' && `${progressPercent}%`}
               </span>
+                );
+              })()}
             </div>
 
             <div className="flex flex-wrap gap-2">
