@@ -4,6 +4,7 @@ import yt_dlp
 from typing import Any
 from PIL import Image
 from video_service.core.utils import logger
+from video_service.core.abort import is_job_aborted
 
 def get_stream_url(video_url: str) -> str:
     if os.path.exists(video_url): return video_url
@@ -164,7 +165,7 @@ def _maybe_extend_tail_frames(
         return original_frames
 
 
-def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only") -> tuple[list[dict[str, Any]], Any]:
+def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only", job_id: str | None = None) -> tuple[list[dict[str, Any]], Any]:
     cap = cv2.VideoCapture(get_stream_url(url))
     frames: list[dict[str, Any]] = []
     if not cap.isOpened():
@@ -197,6 +198,10 @@ def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only") -> tuple
         frame_type = "tail"
 
     for t in range(start, total, step):
+        if job_id and is_job_aborted(job_id):
+            logger.info("abort_frame_extraction: job_id=%s time=%.2fs frame=%d type=pipeline", job_id, t/fps, t)
+            break
+        
         cap.set(cv2.CAP_PROP_POS_FRAMES, t)
         ret, fr = cap.read()
         if ret: 
@@ -213,7 +218,7 @@ def extract_frames_for_pipeline(url: str, scan_mode: str = "Tail Only") -> tuple
 
     return frames, cap
 
-def extract_frames_for_agent(url: str) -> tuple[list[dict[str, Any]], Any]:
+def extract_frames_for_agent(url: str, job_id: str | None = None) -> tuple[list[dict[str, Any]], Any]:
     cap = cv2.VideoCapture(get_stream_url(url))
     frames: list[dict[str, Any]] = []
     if not cap.isOpened():
@@ -225,6 +230,10 @@ def extract_frames_for_agent(url: str) -> tuple[list[dict[str, Any]], Any]:
         return frames, cap
 
     for t in range(0, total, int(fps*2)):
+        if job_id and is_job_aborted(job_id):
+            logger.info("abort_frame_extraction: job_id=%s time=%.2fs frame=%d type=agent", job_id, t/fps, t)
+            break
+        
         cap.set(cv2.CAP_PROP_POS_FRAMES, t)
         ret, fr = cap.read()
         if ret: 

@@ -70,6 +70,7 @@ from video_service.core.security import (
     MAX_UPLOAD_BYTES, MAX_UPLOAD_MB,
 )
 from video_service.core.cleanup import start_cleanup_thread
+from video_service.core.abort import mark_job_aborted
 
 logger = logging.getLogger(__name__)
 
@@ -1627,6 +1628,7 @@ async def delete_job(req: Request, job_id: str):
     with closing(get_db()) as conn:
         with conn:
             conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    mark_job_aborted(job_id)
     logger.info("job_deleted: job_id=%s", job_id)
     return {"status": "deleted"}
 
@@ -1645,6 +1647,7 @@ async def bulk_delete_jobs(body: BulkDeleteRequest):
             for job_id in body.job_ids:
                 cursor = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
                 deleted += cursor.rowcount
+                mark_job_aborted(job_id)
 
     logger.info("bulk_delete: requested=%d deleted=%d", len(body.job_ids), deleted)
     return {"status": "deleted", "requested": len(body.job_ids), "deleted": deleted}

@@ -9,7 +9,9 @@ import multiprocessing
 import os
 import threading
 import time
+from typing import Any
 from logging.handlers import QueueHandler, QueueListener
+from multiprocessing.managers import SyncManager
 
 from video_service.core.concurrency import get_worker_processes_config
 
@@ -20,6 +22,8 @@ _monitor_thread: threading.Thread | None = None
 _shutdown_event = threading.Event()
 _log_queue: multiprocessing.Queue | None = None
 _log_listener: QueueListener | None = None
+_abort_manager: SyncManager | None = None
+_abort_dict: Any | None = None
 
 
 def _parse_embed_workers() -> bool:
@@ -27,7 +31,7 @@ def _parse_embed_workers() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-def _worker_child_main(index: int, log_queue: multiprocessing.Queue) -> None:
+def _worker_child_main(index: int, log_queue: multiprocessing.Queue, abort_dict: Any) -> None:
     # 1. Clear out any existing handlers inherited from the fork
     root = logging.getLogger()
     if root.handlers:
@@ -41,6 +45,9 @@ def _worker_child_main(index: int, log_queue: multiprocessing.Queue) -> None:
     root.setLevel(logging.INFO)
 
     # Lazy import keeps worker ML deps out of API parent process.
+    from video_service.core.abort import init_abort_state
+    init_abort_state(abort_dict)
+
     from video_service.workers.worker import _run_single_worker
 
     logger.info("embedded_worker_start: index=%d pid=%d", index, os.getpid())
@@ -48,10 +55,10 @@ def _worker_child_main(index: int, log_queue: multiprocessing.Queue) -> None:
 
 
 def _spawn_child(index: int) -> multiprocessing.Process:
-    global _log_queue
+    global _log_queue, _abort_dict
     proc = multiprocessing.Process(
         target=_worker_child_main,
-        kwargs={"index": index, "log_queue": _log_queue},
+        kwargs={"index": index, "log_queue": _log_queue, "abort_dict": _abort_dict},
         name=f"embedded-worker-{index}",
         daemon=False,
     )
@@ -108,7 +115,7 @@ def start() -> int:
 
     _shutdown_event.clear()
     
-    global _log_queue, _log_listener
+    global _log_queue, _log_listener, _abort_manager, _abort_dict
     if _log_queue is None:
         _log_queue = multiprocessing.Queue()
         # The parent process listens to the queue and passes records physical 
@@ -116,6 +123,13 @@ def start() -> int:
         parent_handlers = logging.getLogger().handlers
         _log_listener = QueueListener(_log_queue, *parent_handlers, respect_handler_level=True)
         _log_listener.start()
+
+    if _abort_manager is None:
+        _abort_manager = multiprocessing.Manager()
+        _abort_dict = _abort_manager.dict()
+        
+        from video_service.core.abort import init_abort_state
+        init_abort_state(_abort_dict)
 
     for index in range(1, process_count + 1):
         proc = _spawn_child(index)
@@ -162,6 +176,12 @@ def shutdown() -> None:
     if _log_queue:
         _log_queue.close()
         _log_queue = None
+        
+    global _abort_manager, _abort_dict
+    if _abort_manager:
+        _abort_manager.shutdown()
+        _abort_manager = None
+        _abort_dict = None
         
     logger.info("embedded_workers: all workers stopped")
 

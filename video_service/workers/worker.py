@@ -44,6 +44,7 @@ from video_service.core.concurrency import (
 )
 from video_service.core.device import get_diagnostics, DEVICE
 from video_service.core.benchmarking import evaluate_benchmark_suite
+from video_service.core.abort import clear_aborted_job
 
 logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(os.environ.get("ARTIFACTS_DIR", "/tmp/video_service_artifacts"))
@@ -422,6 +423,7 @@ def _stage_callback(job_id: str):
 
 
 def claim_and_process_job() -> bool:
+    job_id = None
     job_token = None
     claim_conn = None
     heartbeat_stop_event: threading.Event | None = None
@@ -588,6 +590,8 @@ def claim_and_process_job() -> bool:
         logger.error("worker_lock_error: %s", exc)
         return False
     finally:
+        if job_id:
+            clear_aborted_job(job_id)
         if heartbeat_stop_event is not None:
             heartbeat_stop_event.set()
         if heartbeat_thread is not None:

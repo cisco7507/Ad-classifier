@@ -72,13 +72,13 @@ def process_single_video(
         if stage_callback:
             stage_callback("ingest", "validating and preparing input")
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
-        frames, cap = extract_frames_for_pipeline(url, scan_mode=sm)
+        frames, cap = extract_frames_for_pipeline(url, scan_mode=sm, job_id=job_id)
         if cap and cap.isOpened():
             cap.release()
         
         if not frames: 
             logger.warning(f"[{url}] Extraction yielded no frames.")
-            return {}, "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty", "none", None]
+            return {}, [], "Err", "No frames", [], [url, "Err", "", "Err", 0, "Empty", "none", None]
 
         if stage_callback:
             extracted_mode = "full video" if frames[0].get("type") == "scene" else "tail only"

@@ -77,7 +77,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     monkeypatch.setattr(
         pipeline_module,
         "extract_frames_for_pipeline",
-        lambda _url, scan_mode="Tail Only": ([{"image": object(), "ocr_image": object(), "time": 1.5}], None),
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5}], None),
     )
     monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
     monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())

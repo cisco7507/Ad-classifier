@@ -20,7 +20,7 @@ def test_run_agent_job_accepts_intermediate_six_field_agent_outputs(monkeypatch)
     monkeypatch.setattr(
         agent_module,
         "extract_frames_for_agent",
-        lambda url: ([{"ocr_image": object(), "image": object(), "time": 0.0}], None),
+        lambda url, **kwargs: ([{"ocr_image": object(), "image": object(), "time": 0.0}], None),
     )
 
     class _DummyOCR:

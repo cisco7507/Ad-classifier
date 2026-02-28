@@ -39,7 +39,7 @@ class _FakeProcess:
 
 
 class _FakeThread:
-    def __init__(self, *, target, daemon, name):
+    def __init__(self, target=None, daemon=None, name=None, args=(), kwargs=None):
         self.target = target
         self.daemon = daemon
         self.name = name

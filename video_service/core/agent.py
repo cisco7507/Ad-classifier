@@ -284,7 +284,7 @@ def run_agent_job(
         try:
             if stage_callback:
                 stage_callback("frame_extract", "extracting frames for agent mode")
-            frames, cap = extract_frames_for_agent(url)
+            frames, cap = extract_frames_for_agent(url, job_id=job_id)
             if cap and cap.isOpened():
                 cap.release()
             gallery = [(f["ocr_image"], f"{f['time']}s") for f in frames]

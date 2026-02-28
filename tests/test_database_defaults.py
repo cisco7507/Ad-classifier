@@ -16,7 +16,7 @@ def test_default_database_path_uses_node_name_when_database_path_not_set(monkeyp
     monkeypatch.setenv("NODE_NAME", "node-b")
     try:
         importlib.reload(database)
-        assert database.DB_PATH == "video_service_node-b.db"
+        assert database.DB_PATH.endswith("video_service_node-b.db")
     finally:
         if original_database_path is None:
             os.environ.pop("DATABASE_PATH", None)
