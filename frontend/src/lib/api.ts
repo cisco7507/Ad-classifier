@@ -186,11 +186,18 @@ export interface SystemProfile {
 }
 
 export interface BenchmarkTruth {
+  test_id: string;
   truth_id: string;
+  suite_id?: string;
   name: string;
+  source_url?: string;
   video_url: string;
   expected_ocr_text: string;
   expected_categories: string[];
+  expected_category?: string;
+  expected_brand?: string;
+  expected_confidence?: number | null;
+  expected_reasoning?: string;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -200,13 +207,22 @@ export interface BenchmarkSuiteSummary {
   suite_id: string;
   truth_id: string;
   truth_name?: string;
+  name?: string;
+  description?: string;
   status: string;
   total_jobs: number;
   completed_jobs: number;
   failed_jobs: number;
+  test_count?: number;
   evaluated_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface BenchmarkSuiteDetail extends BenchmarkSuiteSummary {
+  video_url?: string;
+  matrix: Record<string, unknown>;
+  tests: BenchmarkTruth[];
 }
 
 export interface BenchmarkPoint {
@@ -495,8 +511,28 @@ export const runBenchmarkSuite = (data: unknown) =>
   safe(() => api.post('/api/benchmark/run', data).then((r) => r.data));
 export const getBenchmarkSuites = () =>
   safe(() => api.get<{ suites: BenchmarkSuiteSummary[] }>('/api/benchmark/suites').then((r) => r.data));
+export const getBenchmarkSuite = (suiteId: string) =>
+  safe(() => api.get<BenchmarkSuiteDetail>(`/api/benchmark/suites/${suiteId}`).then((r) => r.data));
 export const getBenchmarkSuiteResults = (suiteId: string) =>
   safe(() => api.get<BenchmarkSuiteResults>(`/api/benchmark/suites/${suiteId}/results`).then((r) => r.data));
+export const updateBenchmarkSuite = (suiteId: string, data: { name: string; description: string }) =>
+  safe(() => api.put<BenchmarkSuiteSummary>(`/benchmarks/suites/${suiteId}`, data).then((r) => r.data));
+export const deleteBenchmarkSuite = (suiteId: string) =>
+  safe(() => api.delete(`/benchmarks/suites/${suiteId}`).then((r) => r.data));
+export const updateBenchmarkTest = (
+  testId: string,
+  data: {
+    source_url?: string;
+    expected_category?: string;
+    expected_brand?: string;
+    expected_confidence?: number | null;
+    expected_reasoning?: string;
+    expected_ocr_text?: string;
+    expected_categories?: string[];
+  },
+) => safe(() => api.put<BenchmarkTruth>(`/benchmarks/tests/${testId}`, data).then((r) => r.data));
+export const deleteBenchmarkTest = (testId: string) =>
+  safe(() => api.delete(`/benchmarks/tests/${testId}`).then((r) => r.data));
 export const getJobVideoUrl   = (jobId: string): string => `${API_BASE_URL}/jobs/${jobId}/video`;
 
 export async function getClusterAnalytics(): Promise<AnalyticsData> {

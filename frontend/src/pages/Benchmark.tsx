@@ -1,21 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 import {
   ExclamationTriangleIcon,
+  Pencil2Icon,
   RocketIcon,
+  TrashIcon,
   UpdateIcon,
 } from '@radix-ui/react-icons';
 import {
   createBenchmarkTruth,
+  deleteBenchmarkSuite,
+  deleteBenchmarkTest,
+  getBenchmarkSuite,
   getBenchmarkSuiteResults,
   getBenchmarkSuites,
   getBenchmarkTruths,
   getSystemProfile,
   runBenchmarkSuite,
+  updateBenchmarkSuite,
+  updateBenchmarkTest,
 } from '../lib/api';
 import type {
   BenchmarkPoint,
+  BenchmarkSuiteDetail,
   BenchmarkSuiteResults,
   BenchmarkSuiteSummary,
   BenchmarkTruth,
@@ -40,11 +49,47 @@ function safePercent(value: number | null | undefined): string {
   return `${value.toFixed(1)}%`;
 }
 
+function truncate(text: string | null | undefined, max = 80): string {
+  const value = String(text || '');
+  if (!value) return '—';
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+interface ModalShellProps {
+  title: string;
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+function ModalShell({ title, open, onClose, children }: ModalShellProps) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-950 p-4 text-slate-100 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-semibold">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-900"
+          >
+            Close
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function Benchmark() {
   const [profile, setProfile] = useState<SystemProfile | null>(null);
   const [truths, setTruths] = useState<BenchmarkTruth[]>([]);
   const [suites, setSuites] = useState<BenchmarkSuiteSummary[]>([]);
   const [selectedSuiteId, setSelectedSuiteId] = useState('');
+  const [suiteDetail, setSuiteDetail] = useState<BenchmarkSuiteDetail | null>(null);
   const [suiteResults, setSuiteResults] = useState<BenchmarkSuiteResults | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -54,8 +99,26 @@ export function Benchmark() {
   const [truthVideoUrl, setTruthVideoUrl] = useState('');
   const [truthExpectedOcr, setTruthExpectedOcr] = useState('');
   const [truthCategories, setTruthCategories] = useState('');
+  const [truthExpectedBrand, setTruthExpectedBrand] = useState('');
+  const [truthExpectedCategory, setTruthExpectedCategory] = useState('');
+  const [truthExpectedConfidence, setTruthExpectedConfidence] = useState('');
+  const [truthExpectedReasoning, setTruthExpectedReasoning] = useState('');
   const [runTruthId, setRunTruthId] = useState('');
   const [runCategories, setRunCategories] = useState('');
+
+  const [suiteModalOpen, setSuiteModalOpen] = useState(false);
+  const [suiteModalId, setSuiteModalId] = useState('');
+  const [suiteModalName, setSuiteModalName] = useState('');
+  const [suiteModalDescription, setSuiteModalDescription] = useState('');
+
+  const [testModalOpen, setTestModalOpen] = useState(false);
+  const [testModalId, setTestModalId] = useState('');
+  const [testModalSourceUrl, setTestModalSourceUrl] = useState('');
+  const [testModalExpectedCategory, setTestModalExpectedCategory] = useState('');
+  const [testModalExpectedBrand, setTestModalExpectedBrand] = useState('');
+  const [testModalExpectedConfidence, setTestModalExpectedConfidence] = useState('');
+  const [testModalExpectedReasoning, setTestModalExpectedReasoning] = useState('');
+  const [testModalExpectedOcr, setTestModalExpectedOcr] = useState('');
 
   const fetchBaseData = async () => {
     const [profilePayload, truthPayload, suitePayload] = await Promise.all([
@@ -66,6 +129,7 @@ export function Benchmark() {
     setProfile(profilePayload);
     setTruths(truthPayload.truths || []);
     setSuites(suitePayload.suites || []);
+
     if (!selectedSuiteId && suitePayload.suites?.length) {
       setSelectedSuiteId(suitePayload.suites[0].suite_id);
     }
@@ -74,8 +138,23 @@ export function Benchmark() {
     }
   };
 
+  const refreshSelectedSuite = async (suiteId: string) => {
+    if (!suiteId) {
+      setSuiteDetail(null);
+      setSuiteResults(null);
+      return;
+    }
+    const [detail, results] = await Promise.all([
+      getBenchmarkSuite(suiteId),
+      getBenchmarkSuiteResults(suiteId),
+    ]);
+    setSuiteDetail(detail);
+    setSuiteResults(results);
+  };
+
   useEffect(() => {
     let cancelled = false;
+
     const tick = async () => {
       try {
         await fetchBaseData();
@@ -86,10 +165,12 @@ export function Benchmark() {
         if (!cancelled) setLoading(false);
       }
     };
+
     void tick();
     const interval = setInterval(() => {
       void tick();
     }, 15000);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -97,27 +178,27 @@ export function Benchmark() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSuiteId) {
-      setSuiteResults(null);
-      return;
-    }
     let cancelled = false;
-    const refreshResults = async () => {
+
+    const refresh = async () => {
+      if (!selectedSuiteId) {
+        setSuiteDetail(null);
+        setSuiteResults(null);
+        return;
+      }
       try {
-        const results = await getBenchmarkSuiteResults(selectedSuiteId);
-        if (cancelled) return;
-        setSuiteResults(results);
-        const runningSuite = results.status === 'running';
-        if (!runningSuite) return;
+        await refreshSelectedSuite(selectedSuiteId);
       } catch (err: any) {
-        if (cancelled) return;
-        setError(err?.message || 'Failed to load benchmark results');
+        if (!cancelled) setError(err?.message || 'Failed to load benchmark suite');
       }
     };
-    void refreshResults();
+
+    void refresh();
     const interval = setInterval(() => {
-      void refreshResults();
+      if (!selectedSuiteId) return;
+      void refresh();
     }, 4000);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -201,6 +282,10 @@ export function Benchmark() {
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean),
+        expected_brand: truthExpectedBrand.trim(),
+        expected_category: truthExpectedCategory.trim(),
+        expected_confidence: truthExpectedConfidence.trim() ? Number(truthExpectedConfidence) : null,
+        expected_reasoning: truthExpectedReasoning,
       });
       const truthPayload = await getBenchmarkTruths();
       setTruths(truthPayload.truths || []);
@@ -236,9 +321,114 @@ export function Benchmark() {
     }
   };
 
+  const handleOpenSuiteModal = (suite: BenchmarkSuiteSummary) => {
+    setSuiteModalId(suite.suite_id);
+    setSuiteModalName((suite.name || '').trim() || `Suite ${suite.suite_id}`);
+    setSuiteModalDescription(suite.description || '');
+    setSuiteModalOpen(true);
+  };
+
+  const handleSaveSuite = async () => {
+    if (!suiteModalId) return;
+    setRunning(true);
+    try {
+      await updateBenchmarkSuite(suiteModalId, {
+        name: suiteModalName.trim(),
+        description: suiteModalDescription.trim(),
+      });
+      await fetchBaseData();
+      if (selectedSuiteId === suiteModalId) {
+        await refreshSelectedSuite(suiteModalId);
+      }
+      setSuiteModalOpen(false);
+      setError('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update suite');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleDeleteSuite = async (suite: BenchmarkSuiteSummary) => {
+    const confirmed = window.confirm(`Delete suite ${suite.suite_id}? This will delete its benchmark tests and jobs.`);
+    if (!confirmed) return;
+    setRunning(true);
+    try {
+      await deleteBenchmarkSuite(suite.suite_id);
+      const payload = await getBenchmarkSuites();
+      const nextSuites = payload.suites || [];
+      setSuites(nextSuites);
+      if (selectedSuiteId === suite.suite_id) {
+        setSelectedSuiteId(nextSuites[0]?.suite_id || '');
+      }
+      setError('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete suite');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleOpenTestModal = (test: BenchmarkTruth) => {
+    setTestModalId(test.test_id || test.truth_id);
+    setTestModalSourceUrl(test.source_url || test.video_url || '');
+    setTestModalExpectedCategory(test.expected_category || test.expected_categories?.[0] || '');
+    setTestModalExpectedBrand(test.expected_brand || '');
+    setTestModalExpectedConfidence(
+      test.expected_confidence == null || Number.isNaN(test.expected_confidence)
+        ? ''
+        : String(test.expected_confidence),
+    );
+    setTestModalExpectedReasoning(test.expected_reasoning || '');
+    setTestModalExpectedOcr(test.expected_ocr_text || '');
+    setTestModalOpen(true);
+  };
+
+  const handleSaveTest = async () => {
+    if (!testModalId) return;
+    setRunning(true);
+    try {
+      await updateBenchmarkTest(testModalId, {
+        source_url: testModalSourceUrl.trim(),
+        expected_category: testModalExpectedCategory.trim(),
+        expected_brand: testModalExpectedBrand.trim(),
+        expected_confidence: testModalExpectedConfidence.trim() ? Number(testModalExpectedConfidence) : null,
+        expected_reasoning: testModalExpectedReasoning,
+        expected_ocr_text: testModalExpectedOcr,
+      });
+      if (selectedSuiteId) {
+        await refreshSelectedSuite(selectedSuiteId);
+      }
+      setTestModalOpen(false);
+      setError('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update benchmark test');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleDeleteTest = async (test: BenchmarkTruth) => {
+    const id = test.test_id || test.truth_id;
+    const confirmed = window.confirm(`Delete test ${id}?`);
+    if (!confirmed) return;
+    setRunning(true);
+    try {
+      await deleteBenchmarkTest(id);
+      if (selectedSuiteId) {
+        await refreshSelectedSuite(selectedSuiteId);
+      }
+      setError('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete benchmark test');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="p-8 text-gray-500 flex items-center gap-2 animate-pulse">
+      <div className="flex items-center gap-2 p-8 text-gray-500 animate-pulse">
         <UpdateIcon className="animate-spin" /> Loading benchmark tools…
       </div>
     );
@@ -247,33 +437,35 @@ export function Benchmark() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center gap-2">
-        <RocketIcon className="w-6 h-6 text-primary-600" />
-        <h2 className="text-3xl font-bold tracking-tight text-gray-900">Benchmarking</h2>
+        <RocketIcon className="h-6 w-6 text-cyan-500" />
+        <h2 className="text-3xl font-bold tracking-tight text-slate-100">Benchmarking</h2>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-center gap-3">
-          <ExclamationTriangleIcon className="w-4 h-4" />
+        <div className="flex items-center gap-3 rounded-lg border border-red-900 bg-red-950/40 p-4 text-red-300">
+          <ExclamationTriangleIcon className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
       )}
 
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100">
-        <div className="flex items-center justify-between mb-3">
+      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-slate-100">
+        <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Host Hardware Profile</h3>
           <span className="text-[11px] text-slate-400">Detected at {profile?.timestamp || '—'}</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
           <div className="rounded border border-slate-800 bg-slate-900 p-2">CPU (logical): {profile?.hardware.cpu_count_logical ?? '—'}</div>
           <div className="rounded border border-slate-800 bg-slate-900 p-2">RAM: {formatGbFromMb(profile?.hardware.total_ram_mb)}</div>
           <div className="rounded border border-slate-800 bg-slate-900 p-2">Accelerator: {profile?.hardware.accelerator || 'cpu'}</div>
           <div className="rounded border border-slate-800 bg-slate-900 p-2">VRAM: {profile?.hardware.total_vram_mb ?? '—'} MB</div>
         </div>
-        <div className="text-[11px] text-slate-500 mt-2">VRAM falls back to host RAM estimate when accelerator-specific telemetry is unavailable.</div>
         {(profile?.warnings || []).length > 0 && (
           <div className="mt-3 space-y-2">
             {profile!.warnings.map((warning, idx) => (
-              <div key={`${warning.model}-${idx}`} className="rounded border border-amber-700/40 bg-amber-900/20 p-2 text-amber-200 text-xs">
+              <div
+                key={`${warning.model}-${idx}`}
+                className="rounded border border-amber-700/40 bg-amber-900/20 p-2 text-xs text-amber-200"
+              >
                 {warning.message}
               </div>
             ))}
@@ -281,49 +473,75 @@ export function Benchmark() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
-          <h3 className="text-sm font-semibold text-gray-800">Create Golden Video Truth</h3>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-100">Create Golden Video Truth</h3>
           <input
             value={truthName}
             onChange={(event) => setTruthName(event.target.value)}
             placeholder="Truth set name"
-            className="w-full h-10 px-3 text-sm border border-gray-200 rounded"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
           />
           <input
             value={truthVideoUrl}
             onChange={(event) => setTruthVideoUrl(event.target.value)}
             placeholder="Video URL or absolute server path"
-            className="w-full h-10 px-3 text-sm border border-gray-200 rounded"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+          />
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <input
+              value={truthExpectedBrand}
+              onChange={(event) => setTruthExpectedBrand(event.target.value)}
+              placeholder="Expected brand"
+              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            />
+            <input
+              value={truthExpectedCategory}
+              onChange={(event) => setTruthExpectedCategory(event.target.value)}
+              placeholder="Expected category"
+              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            />
+          </div>
+          <input
+            value={truthExpectedConfidence}
+            onChange={(event) => setTruthExpectedConfidence(event.target.value)}
+            placeholder="Expected confidence (0..1)"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
           />
           <textarea
             value={truthCategories}
             onChange={(event) => setTruthCategories(event.target.value)}
             placeholder="Expected categories (comma separated)"
-            className="w-full h-20 px-3 py-2 text-sm border border-gray-200 rounded"
+            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
           />
           <textarea
             value={truthExpectedOcr}
             onChange={(event) => setTruthExpectedOcr(event.target.value)}
             placeholder="Expected OCR corpus"
-            className="w-full h-20 px-3 py-2 text-sm border border-gray-200 rounded"
+            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+          />
+          <textarea
+            value={truthExpectedReasoning}
+            onChange={(event) => setTruthExpectedReasoning(event.target.value)}
+            placeholder="Expected reasoning"
+            className="h-20 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
           />
           <button
             type="button"
             disabled={createTruthDisabled}
             onClick={handleCreateTruth}
-            className="h-10 px-4 rounded bg-primary-600 text-white text-sm font-semibold disabled:opacity-50"
+            className="h-10 rounded bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
             Create Truth
           </button>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
-          <h3 className="text-sm font-semibold text-gray-800">Run Benchmark Suite</h3>
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-100">Run Benchmark Suite</h3>
           <select
             value={runTruthId}
             onChange={(event) => setRunTruthId(event.target.value)}
-            className="w-full h-10 px-3 text-sm border border-gray-200 rounded"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
           >
             <option value="">Select Golden Truth</option>
             {truths.map((truth) => (
@@ -336,48 +554,179 @@ export function Benchmark() {
             value={runCategories}
             onChange={(event) => setRunCategories(event.target.value)}
             placeholder="Optional categories override"
-            className="w-full h-10 px-3 text-sm border border-gray-200 rounded"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
           />
           <button
             type="button"
             disabled={runDisabled}
             onClick={handleRunSuite}
-            className="h-10 px-4 rounded bg-emerald-600 text-white text-sm font-semibold disabled:opacity-50"
+            className="h-10 rounded bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
             Launch Cartesian Benchmark
           </button>
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-slate-400">
             Benchmarks enqueue permutations across scan strategy, OCR engine/mode, and provider-model combinations.
           </div>
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
+      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-800">Benchmark Suites</h3>
+          <h3 className="text-sm font-semibold text-slate-100">Benchmark Suites</h3>
           <select
             value={selectedSuiteId}
             onChange={(event) => setSelectedSuiteId(event.target.value)}
-            className="h-9 px-2 text-xs border border-gray-200 rounded"
+            className="h-9 rounded border border-slate-700 bg-slate-900 px-2 text-xs text-slate-100"
           >
             <option value="">Select suite</option>
             {suites.map((suite) => (
               <option key={suite.suite_id} value={suite.suite_id}>
-                {suite.suite_id} · {suite.truth_name || suite.truth_id}
+                {suite.name || suite.suite_id}
               </option>
             ))}
           </select>
         </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-xs text-slate-200">
+            <thead className="text-slate-400">
+              <tr>
+                <th className="px-2 py-2">Suite</th>
+                <th className="px-2 py-2">Description</th>
+                <th className="px-2 py-2">Status</th>
+                <th className="px-2 py-2">Tests</th>
+                <th className="px-2 py-2">Jobs</th>
+                <th className="px-2 py-2">Updated</th>
+                <th className="px-2 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {suites.map((suite) => {
+                const active = suite.suite_id === selectedSuiteId;
+                return (
+                  <tr
+                    key={suite.suite_id}
+                    className={`border-t border-slate-800 ${active ? 'bg-cyan-900/20' : 'bg-transparent'}`}
+                  >
+                    <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSuiteId(suite.suite_id)}
+                        className="text-left text-cyan-300 hover:underline"
+                      >
+                        {suite.name || suite.suite_id}
+                      </button>
+                    </td>
+                    <td className="px-2 py-2 text-slate-400" title={suite.description || ''}>
+                      {truncate(suite.description, 70)}
+                    </td>
+                    <td className="px-2 py-2">{suite.status}</td>
+                    <td className="px-2 py-2">{suite.test_count ?? 0}</td>
+                    <td className="px-2 py-2">{suite.completed_jobs}/{suite.total_jobs}</td>
+                    <td className="px-2 py-2 text-slate-400">{truncate(suite.updated_at, 22)}</td>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSuiteModal(suite)}
+                          className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-900"
+                        >
+                          <Pencil2Icon /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteSuite(suite)}
+                          className="inline-flex items-center gap-1 rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/30"
+                        >
+                          <TrashIcon /> Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {suites.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-2 py-3 text-slate-500">No benchmark suites available.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        {suiteResults ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <div className="rounded border border-gray-200 p-2">Status: {suiteResults.status}</div>
-            <div className="rounded border border-gray-200 p-2">Total: {suiteResults.total_jobs}</div>
-            <div className="rounded border border-gray-200 p-2">Completed: {suiteResults.completed_jobs}</div>
-            <div className="rounded border border-gray-200 p-2">Failed: {suiteResults.failed_jobs}</div>
-          </div>
+      <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950 p-4 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-100">Suite Detail</h3>
+        {suiteDetail ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 text-sm text-slate-200 md:grid-cols-4">
+              <div className="rounded border border-slate-800 bg-slate-900 p-2">Status: {suiteDetail.status}</div>
+              <div className="rounded border border-slate-800 bg-slate-900 p-2">Total: {suiteDetail.total_jobs}</div>
+              <div className="rounded border border-slate-800 bg-slate-900 p-2">Completed: {suiteDetail.completed_jobs}</div>
+              <div className="rounded border border-slate-800 bg-slate-900 p-2">Failed: {suiteDetail.failed_jobs}</div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1000px] text-left text-xs text-slate-200">
+                <thead className="text-slate-400">
+                  <tr>
+                    <th className="px-2 py-2">Test ID</th>
+                    <th className="px-2 py-2">Source URL</th>
+                    <th className="px-2 py-2">Expected Category</th>
+                    <th className="px-2 py-2">Expected Brand</th>
+                    <th className="px-2 py-2">Expected Confidence</th>
+                    <th className="px-2 py-2">Expected Reasoning</th>
+                    <th className="px-2 py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(suiteDetail.tests || []).map((test) => {
+                    const id = test.test_id || test.truth_id;
+                    return (
+                      <tr key={id} className="border-t border-slate-800">
+                        <td className="px-2 py-2">{id}</td>
+                        <td className="px-2 py-2 text-slate-400" title={test.source_url || test.video_url}>
+                          {truncate(test.source_url || test.video_url, 54)}
+                        </td>
+                        <td className="px-2 py-2" title={test.expected_category || test.expected_categories?.join(', ')}>
+                          {truncate(test.expected_category || test.expected_categories?.[0], 48)}
+                        </td>
+                        <td className="px-2 py-2">{truncate(test.expected_brand, 36)}</td>
+                        <td className="px-2 py-2">{test.expected_confidence ?? '—'}</td>
+                        <td className="px-2 py-2" title={test.expected_reasoning || ''}>
+                          {truncate(test.expected_reasoning, 72)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenTestModal(test)}
+                              className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-200 hover:bg-slate-900"
+                            >
+                              <Pencil2Icon /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleDeleteTest(test)}
+                              className="inline-flex items-center gap-1 rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/30"
+                            >
+                              <TrashIcon /> Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {(suiteDetail.tests || []).length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-2 py-3 text-slate-500">No benchmark tests assigned to this suite.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
-          <div className="text-sm text-gray-500">Select a suite to inspect benchmark scatter results.</div>
+          <div className="text-sm text-slate-500">Select a suite to inspect its golden tests.</div>
         )}
       </div>
 
@@ -392,6 +741,84 @@ export function Benchmark() {
         </div>
         <ReactECharts option={scatterOption} style={{ height: 460, width: '100%' }} notMerge lazyUpdate />
       </div>
+
+      <ModalShell title="Edit Benchmark Suite" open={suiteModalOpen} onClose={() => setSuiteModalOpen(false)}>
+        <div className="space-y-3">
+          <input
+            value={suiteModalName}
+            onChange={(event) => setSuiteModalName(event.target.value)}
+            placeholder="Suite title"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+          />
+          <textarea
+            value={suiteModalDescription}
+            onChange={(event) => setSuiteModalDescription(event.target.value)}
+            placeholder="Suite description"
+            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void handleSaveSuite()}
+              className="h-9 rounded bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Save Suite
+            </button>
+          </div>
+        </div>
+      </ModalShell>
+
+      <ModalShell title="Edit Benchmark Test" open={testModalOpen} onClose={() => setTestModalOpen(false)}>
+        <div className="space-y-3">
+          <input
+            value={testModalSourceUrl}
+            onChange={(event) => setTestModalSourceUrl(event.target.value)}
+            placeholder="Source URL"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+          />
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <input
+              value={testModalExpectedCategory}
+              onChange={(event) => setTestModalExpectedCategory(event.target.value)}
+              placeholder="Expected category"
+              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            />
+            <input
+              value={testModalExpectedBrand}
+              onChange={(event) => setTestModalExpectedBrand(event.target.value)}
+              placeholder="Expected brand"
+              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            />
+          </div>
+          <input
+            value={testModalExpectedConfidence}
+            onChange={(event) => setTestModalExpectedConfidence(event.target.value)}
+            placeholder="Expected confidence (0..1)"
+            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+          />
+          <textarea
+            value={testModalExpectedReasoning}
+            onChange={(event) => setTestModalExpectedReasoning(event.target.value)}
+            placeholder="Expected reasoning"
+            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+          />
+          <textarea
+            value={testModalExpectedOcr}
+            onChange={(event) => setTestModalExpectedOcr(event.target.value)}
+            placeholder="Expected OCR corpus"
+            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void handleSaveTest()}
+              className="h-9 rounded bg-cyan-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Save Test
+            </button>
+          </div>
+        </div>
+      </ModalShell>
     </div>
   );
 }

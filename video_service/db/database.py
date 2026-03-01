@@ -87,9 +87,14 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS benchmark_truth (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    suite_id TEXT DEFAULT '',
                     video_url TEXT NOT NULL,
                     expected_ocr_text TEXT DEFAULT '',
                     expected_categories_json TEXT DEFAULT '[]',
+                    expected_brand TEXT DEFAULT '',
+                    expected_category TEXT DEFAULT '',
+                    expected_confidence REAL,
+                    expected_reasoning TEXT DEFAULT '',
                     metadata_json TEXT DEFAULT '{}',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -102,6 +107,8 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS benchmark_suites (
                     id TEXT PRIMARY KEY,
                     truth_id TEXT NOT NULL,
+                    name TEXT DEFAULT '',
+                    description TEXT DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'queued',
                     matrix_json TEXT DEFAULT '{}',
                     created_by TEXT DEFAULT 'api',
@@ -154,6 +161,30 @@ def init_db():
             if "benchmark_params_json" not in existing_cols:
                 conn.execute("ALTER TABLE jobs ADD COLUMN benchmark_params_json TEXT")
 
+            existing_truth_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(benchmark_truth)").fetchall()
+            }
+            if "suite_id" not in existing_truth_cols:
+                conn.execute("ALTER TABLE benchmark_truth ADD COLUMN suite_id TEXT DEFAULT ''")
+            if "expected_brand" not in existing_truth_cols:
+                conn.execute("ALTER TABLE benchmark_truth ADD COLUMN expected_brand TEXT DEFAULT ''")
+            if "expected_category" not in existing_truth_cols:
+                conn.execute("ALTER TABLE benchmark_truth ADD COLUMN expected_category TEXT DEFAULT ''")
+            if "expected_confidence" not in existing_truth_cols:
+                conn.execute("ALTER TABLE benchmark_truth ADD COLUMN expected_confidence REAL")
+            if "expected_reasoning" not in existing_truth_cols:
+                conn.execute("ALTER TABLE benchmark_truth ADD COLUMN expected_reasoning TEXT DEFAULT ''")
+
+            existing_suite_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(benchmark_suites)").fetchall()
+            }
+            if "name" not in existing_suite_cols:
+                conn.execute("ALTER TABLE benchmark_suites ADD COLUMN name TEXT DEFAULT ''")
+            if "description" not in existing_suite_cols:
+                conn.execute("ALTER TABLE benchmark_suites ADD COLUMN description TEXT DEFAULT ''")
+
             conn.execute("UPDATE jobs SET stage = COALESCE(stage, status, 'queued') WHERE stage IS NULL")
             conn.execute("UPDATE jobs SET stage_detail = COALESCE(stage_detail, '') WHERE stage_detail IS NULL")
             conn.execute("UPDATE jobs SET brand = COALESCE(brand, '') WHERE brand IS NULL")
@@ -162,8 +193,15 @@ def init_db():
             conn.execute("UPDATE jobs SET benchmark_suite_id = COALESCE(benchmark_suite_id, '') WHERE benchmark_suite_id IS NULL")
             conn.execute("UPDATE jobs SET benchmark_truth_id = COALESCE(benchmark_truth_id, '') WHERE benchmark_truth_id IS NULL")
             conn.execute("UPDATE jobs SET benchmark_params_json = COALESCE(benchmark_params_json, '{}') WHERE benchmark_params_json IS NULL")
+            conn.execute("UPDATE benchmark_truth SET suite_id = COALESCE(suite_id, '') WHERE suite_id IS NULL")
+            conn.execute("UPDATE benchmark_truth SET expected_brand = COALESCE(expected_brand, '') WHERE expected_brand IS NULL")
+            conn.execute("UPDATE benchmark_truth SET expected_category = COALESCE(expected_category, '') WHERE expected_category IS NULL")
+            conn.execute("UPDATE benchmark_truth SET expected_reasoning = COALESCE(expected_reasoning, '') WHERE expected_reasoning IS NULL")
+            conn.execute("UPDATE benchmark_suites SET name = COALESCE(name, '') WHERE name IS NULL")
+            conn.execute("UPDATE benchmark_suites SET description = COALESCE(description, '') WHERE description IS NULL")
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status_updated ON jobs(status, updated_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_benchmark_suite ON jobs(benchmark_suite_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_suite_truth ON benchmark_suites(truth_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_truth_suite ON benchmark_truth(suite_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_benchmark_result_suite ON benchmark_result(suite_id)")

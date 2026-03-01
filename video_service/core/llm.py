@@ -112,16 +112,19 @@ class HybridLLM:
         b64_img = self._pil_to_base64(tail_image) if tail_image else None
 
         def call_model(sys, usr, img=None):
+            prov = provider.lower()
             try:
-                if provider == "Gemini CLI": return self._clean_and_parse_json(subprocess.run(["gemini", f"{sys}\n\n{usr}"], capture_output=True, text=True).stdout)
-                elif provider == "Ollama":
-                    payload = {"model": backend_model, "prompt": f"{sys}\n\n{usr}", "stream": False, "format": "json", "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
-                    if img: payload["images"] = [img]
-                    return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=LLM_TIMEOUT_SECONDS).json().get("response", ""))
-                elif provider == "LM Studio":
+                if prov == "gemini cli": return self._clean_and_parse_json(subprocess.run(["gemini", f"{sys}\n\n{usr}"], capture_output=True, text=True).stdout)
+                elif prov == "ollama":
+                    msg = {"role": "user", "content": usr}
+                    if img: msg["images"] = [img]
+                    payload = {"model": backend_model, "messages": [{"role": "system", "content": sys}, msg], "stream": False, "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
+                    return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=LLM_TIMEOUT_SECONDS).json().get("message", {}).get("content", ""))
+                elif prov == "lm studio":
                     msgs = [{"role": "system", "content": sys}, {"role": "user", "content": usr}]
                     if img: msgs[1]["content"] = [{"type": "text", "text": usr}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}]
                     return self._clean_and_parse_json(requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=LLM_TIMEOUT_SECONDS).json().get("choices", [{}])[0].get("message", {}).get("content", ""))
+                else: return {"error": f"Unsupported provider: {provider}"}
             except requests.exceptions.Timeout:
                 logger.error(
                     "LLM provider %s timed out after %d seconds",
@@ -182,15 +185,16 @@ class HybridLLM:
         img_to_send = images[-1] if images else None
         b64_imgs = [self._pil_to_base64(img_to_send)] if (force_multimodal and img_to_send) else []
         
+        prov = provider.lower()
         try:
-            if provider == "Gemini CLI":
+            if prov == "gemini cli":
                 res = subprocess.run(["gemini", prompt], capture_output=True, text=True)
                 if res.returncode != 0 or not res.stdout.strip():
                     err = res.stderr.strip() if res.stderr else "No stderr output."
                     return f'[TOOL: ERROR | reason="Gemini CLI failed (Code {res.returncode}): {err}"]'
                 return res.stdout.strip()
                 
-            elif provider == "Ollama":
+            elif prov == "ollama":
                 payload = {"model": backend_model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                 if b64_imgs: payload["images"] = b64_imgs
                 res = requests.post(f"{OLLAMA_HOST}/api/generate", json=payload, timeout=LLM_TIMEOUT_SECONDS)
@@ -198,13 +202,16 @@ class HybridLLM:
                     return f'[TOOL: ERROR | reason="Ollama HTTP {res.status_code}: {res.text}"]'
                 return res.json().get("response", "").strip()
                 
-            elif provider == "LM Studio":
+            elif prov == "lm studio":
                 msgs = [{"role": "system", "content": "You are a ReACT Agent. Strictly follow the prompt formatting."}, {"role": "user", "content": prompt}]
                 if b64_imgs: msgs[1]["content"] = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_imgs[0]}"}}]
                 res = requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=LLM_TIMEOUT_SECONDS)
                 if res.status_code != 200:
                     return f'[TOOL: ERROR | reason="LM Studio HTTP {res.status_code}: {res.text}"]'
                 return res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                
+            else:
+                return f'[TOOL: ERROR | reason="Unsupported provider: {provider}"]'
         except requests.exceptions.Timeout:
             logger.error(
                 "LLM provider %s timed out after %d seconds",

@@ -90,6 +90,10 @@ class BenchmarkTruthCreateRequest(BaseModel):
     video_url: str
     expected_ocr_text: str = ""
     expected_categories: List[str] = Field(default_factory=list)
+    expected_brand: str = ""
+    expected_category: str = ""
+    expected_confidence: Optional[float] = None
+    expected_reasoning: str = ""
     metadata: dict = Field(default_factory=dict)
 
 
@@ -98,3 +102,18 @@ class BenchmarkRunRequest(BaseModel):
     categories: str = ""
     providers: Optional[List[str]] = None
     models: Optional[List[str]] = None
+
+
+class BenchmarkSuiteUpdateRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+class BenchmarkTestUpdateRequest(BaseModel):
+    source_url: Optional[str] = None
+    expected_category: Optional[str] = None
+    expected_brand: Optional[str] = None
+    expected_confidence: Optional[float] = None
+    expected_reasoning: Optional[str] = None
+    expected_ocr_text: Optional[str] = None
+    expected_categories: Optional[List[str]] = None

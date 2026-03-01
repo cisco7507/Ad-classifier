@@ -52,7 +52,10 @@ from video_service.db.database import get_db, init_db
 from video_service.app.models.job import (
     JobResponse, JobStatus, JobSettings,
     UrlBatchRequest, FolderRequest, FilePathRequest, BulkDeleteRequest, JobMode,
-    BenchmarkTruthCreateRequest, BenchmarkRunRequest,
+    BenchmarkTruthCreateRequest,
+    BenchmarkRunRequest,
+    BenchmarkSuiteUpdateRequest,
+    BenchmarkTestUpdateRequest,
 )
 from video_service.core.device import get_diagnostics
 from video_service.core.concurrency import get_concurrency_diagnostics
@@ -743,23 +746,103 @@ async def _resolve_benchmark_provider_models(
     return deduped
 
 
+def _safe_json_list(raw: str | None) -> list:
+    try:
+        parsed = json.loads(raw or "[]")
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _safe_json_object(raw: str | None) -> dict:
+    try:
+        parsed = json.loads(raw or "{}")
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _serialize_benchmark_truth_row(row) -> dict:
+    expected_categories = _safe_json_list(row["expected_categories_json"])
+    expected_category = str(row["expected_category"] or "").strip()
+    if expected_category and expected_category not in expected_categories:
+        expected_categories = [expected_category, *expected_categories]
+    return {
+        "test_id": row["id"],
+        "truth_id": row["id"],
+        "suite_id": row["suite_id"] or "",
+        "name": row["name"],
+        "source_url": row["video_url"],
+        "video_url": row["video_url"],
+        "expected_ocr_text": row["expected_ocr_text"] or "",
+        "expected_categories": expected_categories,
+        "expected_category": expected_category,
+        "expected_brand": row["expected_brand"] or "",
+        "expected_confidence": row["expected_confidence"],
+        "expected_reasoning": row["expected_reasoning"] or "",
+        "metadata": _safe_json_object(row["metadata_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _load_suite_tests(conn, suite_id: str, suite_truth_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+               expected_brand, expected_category, expected_confidence, expected_reasoning,
+               metadata_json, created_at, updated_at
+        FROM benchmark_truth
+        WHERE suite_id = ?
+        ORDER BY created_at ASC
+        """,
+        (suite_id,),
+    ).fetchall()
+    if rows:
+        return [_serialize_benchmark_truth_row(row) for row in rows]
+
+    if not suite_truth_id:
+        return []
+
+    row = conn.execute(
+        """
+        SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+               expected_brand, expected_category, expected_confidence, expected_reasoning,
+               metadata_json, created_at, updated_at
+        FROM benchmark_truth
+        WHERE id = ?
+        """,
+        (suite_truth_id,),
+    ).fetchone()
+    return [_serialize_benchmark_truth_row(row)] if row else []
+
+
 @app.post("/api/benchmark/truths", tags=["benchmark"])
 def create_benchmark_truth(body: BenchmarkTruthCreateRequest):
     truth_id = f"truth-{uuid.uuid4()}"
+    expected_category = str(body.expected_category or "").strip()
+    expected_categories = [c.strip() for c in (body.expected_categories or []) if c and c.strip()]
+    if expected_category and expected_category not in expected_categories:
+        expected_categories = [expected_category, *expected_categories]
     with closing(get_db()) as conn:
         with conn:
             conn.execute(
                 """
                 INSERT INTO benchmark_truth (
-                    id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                    expected_brand, expected_category, expected_confidence, expected_reasoning, metadata_json
+                ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     truth_id,
                     body.name.strip(),
                     body.video_url.strip(),
                     body.expected_ocr_text or "",
-                    json.dumps(body.expected_categories or []),
+                    json.dumps(expected_categories),
+                    body.expected_brand or "",
+                    expected_category,
+                    body.expected_confidence,
+                    body.expected_reasoning or "",
                     json.dumps(body.metadata or {}),
                 ),
             )
@@ -771,26 +854,15 @@ def list_benchmark_truths():
     with closing(get_db()) as conn:
         rows = conn.execute(
             """
-            SELECT id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json, created_at, updated_at
+            SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                   expected_brand, expected_category, expected_confidence, expected_reasoning,
+                   metadata_json, created_at, updated_at
             FROM benchmark_truth
+            WHERE COALESCE(suite_id, '') = ''
             ORDER BY created_at DESC
             """
         ).fetchall()
-    payload = []
-    for row in rows:
-        payload.append(
-            {
-                "truth_id": row["id"],
-                "name": row["name"],
-                "video_url": row["video_url"],
-                "expected_ocr_text": row["expected_ocr_text"] or "",
-                "expected_categories": json.loads(row["expected_categories_json"] or "[]"),
-                "metadata": json.loads(row["metadata_json"] or "{}"),
-                "created_at": row["created_at"],
-                "updated_at": row["updated_at"],
-            }
-        )
-    return {"truths": payload}
+    return {"truths": [_serialize_benchmark_truth_row(row) for row in rows]}
 
 
 @app.get("/api/benchmark/truths/{truth_id}", tags=["benchmark"])
@@ -798,7 +870,9 @@ def get_benchmark_truth(truth_id: str):
     with closing(get_db()) as conn:
         row = conn.execute(
             """
-            SELECT id, name, video_url, expected_ocr_text, expected_categories_json, metadata_json, created_at, updated_at
+            SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                   expected_brand, expected_category, expected_confidence, expected_reasoning,
+                   metadata_json, created_at, updated_at
             FROM benchmark_truth
             WHERE id = ?
             """,
@@ -806,23 +880,19 @@ def get_benchmark_truth(truth_id: str):
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Benchmark truth not found")
-    return {
-        "truth_id": row["id"],
-        "name": row["name"],
-        "video_url": row["video_url"],
-        "expected_ocr_text": row["expected_ocr_text"] or "",
-        "expected_categories": json.loads(row["expected_categories_json"] or "[]"),
-        "metadata": json.loads(row["metadata_json"] or "{}"),
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
+    return _serialize_benchmark_truth_row(row)
 
 
 @app.post("/api/benchmark/run", tags=["benchmark"])
 async def run_benchmark_suite(body: BenchmarkRunRequest):
     with closing(get_db()) as conn:
         truth = conn.execute(
-            "SELECT id, name, video_url FROM benchmark_truth WHERE id = ?",
+            """
+            SELECT id, name, video_url, expected_ocr_text, expected_categories_json,
+                   expected_brand, expected_category, expected_confidence, expected_reasoning, metadata_json
+            FROM benchmark_truth
+            WHERE id = ?
+            """,
             (body.truth_id,),
         ).fetchone()
     if not truth:
@@ -855,6 +925,9 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
                     )
 
     suite_id = f"suite-{uuid.uuid4()}"
+    suite_name = f"Suite for {truth['name']}"
+    suite_description = f"Generated from truth {truth['id']}"
+    suite_truth_id = f"test-{uuid.uuid4()}"
     matrix_payload = {
         "scan_strategy": scan_options,
         "ocr_engine": ocr_engines,
@@ -868,16 +941,39 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
             conn.execute(
                 """
                 INSERT INTO benchmark_suites (
-                    id, truth_id, status, matrix_json, created_by, total_jobs, completed_jobs, failed_jobs
-                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
+                    id, truth_id, name, description, status, matrix_json, created_by, total_jobs, completed_jobs, failed_jobs
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                 """,
                 (
                     suite_id,
-                    truth["id"],
+                    suite_truth_id,
+                    suite_name,
+                    suite_description,
                     "running",
                     json.dumps(matrix_payload),
                     "api",
                     len(permutations),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO benchmark_truth (
+                    id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                    expected_brand, expected_category, expected_confidence, expected_reasoning, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    suite_truth_id,
+                    truth["name"],
+                    suite_id,
+                    truth["video_url"],
+                    truth["expected_ocr_text"] or "",
+                    truth["expected_categories_json"] or "[]",
+                    truth["expected_brand"] or "",
+                    truth["expected_category"] or "",
+                    truth["expected_confidence"],
+                    truth["expected_reasoning"] or "",
+                    truth["metadata_json"] or "{}",
                 ),
             )
 
@@ -902,7 +998,7 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
             settings,
             url=truth["video_url"],
             benchmark_suite_id=suite_id,
-            benchmark_truth_id=truth["id"],
+            benchmark_truth_id=suite_truth_id,
             benchmark_params=permutation,
         )
         benchmark_jobs.append(
@@ -915,13 +1011,14 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
     logger.info(
         "benchmark_suite_started: suite_id=%s truth_id=%s jobs=%d",
         suite_id,
-        truth["id"],
+        suite_truth_id,
         len(benchmark_jobs),
     )
 
     return {
         "suite_id": suite_id,
-        "truth_id": truth["id"],
+        "truth_id": suite_truth_id,
+        "source_truth_id": truth["id"],
         "jobs_enqueued": len(benchmark_jobs),
         "matrix": matrix_payload,
         "jobs": benchmark_jobs,
@@ -933,8 +1030,13 @@ def list_benchmark_suites():
     with closing(get_db()) as conn:
         rows = conn.execute(
             """
-            SELECT s.id, s.truth_id, s.status, s.total_jobs, s.completed_jobs, s.failed_jobs,
-                   s.evaluated_at, s.created_at, s.updated_at, t.name as truth_name
+            SELECT s.id, s.truth_id, s.name, s.description, s.status, s.total_jobs, s.completed_jobs, s.failed_jobs,
+                   s.evaluated_at, s.created_at, s.updated_at, t.name as truth_name,
+                   (
+                     SELECT COUNT(*)
+                     FROM benchmark_truth bt
+                     WHERE bt.suite_id = s.id OR bt.id = s.truth_id
+                   ) AS test_count
             FROM benchmark_suites s
             LEFT JOIN benchmark_truth t ON t.id = s.truth_id
             ORDER BY s.created_at DESC
@@ -946,10 +1048,13 @@ def list_benchmark_suites():
                 "suite_id": row["id"],
                 "truth_id": row["truth_id"],
                 "truth_name": row["truth_name"],
+                "name": row["name"] or "",
+                "description": row["description"] or "",
                 "status": row["status"],
                 "total_jobs": row["total_jobs"],
                 "completed_jobs": row["completed_jobs"],
                 "failed_jobs": row["failed_jobs"],
+                "test_count": row["test_count"] or 0,
                 "evaluated_at": row["evaluated_at"],
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -971,6 +1076,7 @@ def get_benchmark_suite(suite_id: str):
             """,
             (suite_id,),
         ).fetchone()
+        tests = _load_suite_tests(conn, suite_id, row["truth_id"] if row else "")
     if not row:
         raise HTTPException(status_code=404, detail="Benchmark suite not found")
     return {
@@ -978,8 +1084,56 @@ def get_benchmark_suite(suite_id: str):
         "truth_id": row["truth_id"],
         "truth_name": row["truth_name"],
         "video_url": row["video_url"],
+        "name": row["name"] or "",
+        "description": row["description"] or "",
         "status": row["status"],
         "matrix": json.loads(row["matrix_json"] or "{}"),
+        "total_jobs": row["total_jobs"],
+        "completed_jobs": row["completed_jobs"],
+        "failed_jobs": row["failed_jobs"],
+        "tests": tests,
+        "test_count": len(tests),
+        "evaluated_at": row["evaluated_at"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+@app.put("/benchmarks/suites/{suite_id}", tags=["benchmark"])
+def update_benchmark_suite(suite_id: str, body: BenchmarkSuiteUpdateRequest):
+    with closing(get_db()) as conn:
+        with conn:
+            existing = conn.execute(
+                "SELECT id FROM benchmark_suites WHERE id = ?",
+                (suite_id,),
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Benchmark suite not found")
+            conn.execute(
+                """
+                UPDATE benchmark_suites
+                SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (body.name.strip(), body.description.strip(), suite_id),
+            )
+        row = conn.execute(
+            """
+            SELECT s.id, s.truth_id, s.name, s.description, s.status, s.total_jobs, s.completed_jobs, s.failed_jobs,
+                   s.evaluated_at, s.created_at, s.updated_at, t.name as truth_name
+            FROM benchmark_suites s
+            LEFT JOIN benchmark_truth t ON t.id = s.truth_id
+            WHERE s.id = ?
+            """,
+            (suite_id,),
+        ).fetchone()
+    return {
+        "suite_id": row["id"],
+        "truth_id": row["truth_id"],
+        "truth_name": row["truth_name"],
+        "name": row["name"] or "",
+        "description": row["description"] or "",
+        "status": row["status"],
         "total_jobs": row["total_jobs"],
         "completed_jobs": row["completed_jobs"],
         "failed_jobs": row["failed_jobs"],
@@ -987,6 +1141,159 @@ def get_benchmark_suite(suite_id: str):
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+@app.delete("/benchmarks/suites/{suite_id}", tags=["benchmark"])
+def delete_benchmark_suite(suite_id: str):
+    with closing(get_db()) as conn:
+        with conn:
+            suite = conn.execute(
+                "SELECT id, truth_id FROM benchmark_suites WHERE id = ?",
+                (suite_id,),
+            ).fetchone()
+            if not suite:
+                raise HTTPException(status_code=404, detail="Benchmark suite not found")
+
+            deleted_results = conn.execute(
+                "DELETE FROM benchmark_result WHERE suite_id = ?",
+                (suite_id,),
+            ).rowcount
+            deleted_jobs = conn.execute(
+                "DELETE FROM jobs WHERE benchmark_suite_id = ?",
+                (suite_id,),
+            ).rowcount
+            deleted_tests = conn.execute(
+                "DELETE FROM benchmark_truth WHERE suite_id = ? OR id = ?",
+                (suite_id, suite["truth_id"] or ""),
+            ).rowcount
+            conn.execute(
+                "DELETE FROM benchmark_suites WHERE id = ?",
+                (suite_id,),
+            )
+
+    return {
+        "status": "deleted",
+        "suite_id": suite_id,
+        "deleted_tests": deleted_tests,
+        "deleted_jobs": deleted_jobs,
+        "deleted_results": deleted_results,
+    }
+
+
+@app.put("/benchmarks/tests/{test_id}", tags=["benchmark"])
+def update_benchmark_test(test_id: str, body: BenchmarkTestUpdateRequest):
+    with closing(get_db()) as conn:
+        with conn:
+            row = conn.execute(
+                """
+                SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                       expected_brand, expected_category, expected_confidence, expected_reasoning,
+                       metadata_json, created_at, updated_at
+                FROM benchmark_truth
+                WHERE id = ?
+                """,
+                (test_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Benchmark test not found")
+
+            expected_categories = _safe_json_list(row["expected_categories_json"])
+            if body.expected_categories is not None:
+                expected_categories = [c.strip() for c in body.expected_categories if c and c.strip()]
+            expected_category = (
+                body.expected_category.strip()
+                if isinstance(body.expected_category, str)
+                else str(row["expected_category"] or "").strip()
+            )
+            if expected_category:
+                expected_categories = [c for c in expected_categories if c != expected_category]
+                expected_categories = [expected_category, *expected_categories]
+
+            conn.execute(
+                """
+                UPDATE benchmark_truth
+                SET video_url = ?,
+                    expected_ocr_text = ?,
+                    expected_categories_json = ?,
+                    expected_brand = ?,
+                    expected_category = ?,
+                    expected_confidence = ?,
+                    expected_reasoning = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    body.source_url.strip() if isinstance(body.source_url, str) else row["video_url"],
+                    body.expected_ocr_text if body.expected_ocr_text is not None else row["expected_ocr_text"],
+                    json.dumps(expected_categories),
+                    body.expected_brand if body.expected_brand is not None else row["expected_brand"],
+                    expected_category,
+                    body.expected_confidence if body.expected_confidence is not None else row["expected_confidence"],
+                    body.expected_reasoning if body.expected_reasoning is not None else row["expected_reasoning"],
+                    test_id,
+                ),
+            )
+        updated = conn.execute(
+            """
+            SELECT id, name, suite_id, video_url, expected_ocr_text, expected_categories_json,
+                   expected_brand, expected_category, expected_confidence, expected_reasoning,
+                   metadata_json, created_at, updated_at
+            FROM benchmark_truth
+            WHERE id = ?
+            """,
+            (test_id,),
+        ).fetchone()
+    return _serialize_benchmark_truth_row(updated)
+
+
+@app.delete("/benchmarks/tests/{test_id}", tags=["benchmark"])
+def delete_benchmark_test(test_id: str):
+    with closing(get_db()) as conn:
+        with conn:
+            row = conn.execute(
+                "SELECT id, suite_id FROM benchmark_truth WHERE id = ?",
+                (test_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Benchmark test not found")
+
+            suite_id = row["suite_id"] or ""
+            conn.execute(
+                "UPDATE benchmark_suites SET truth_id = '' WHERE truth_id = ?",
+                (test_id,),
+            )
+            conn.execute(
+                "DELETE FROM benchmark_result WHERE job_id IN (SELECT id FROM jobs WHERE benchmark_truth_id = ?)",
+                (test_id,),
+            )
+            deleted_jobs = conn.execute(
+                "DELETE FROM jobs WHERE benchmark_truth_id = ?",
+                (test_id,),
+            ).rowcount
+            conn.execute(
+                "DELETE FROM benchmark_truth WHERE id = ?",
+                (test_id,),
+            )
+            if suite_id:
+                conn.execute(
+                    """
+                    UPDATE benchmark_suites
+                    SET total_jobs = (
+                        SELECT COUNT(*) FROM jobs WHERE benchmark_suite_id = ?
+                    ),
+                    completed_jobs = (
+                        SELECT COUNT(*) FROM jobs WHERE benchmark_suite_id = ? AND status = 'completed'
+                    ),
+                    failed_jobs = (
+                        SELECT COUNT(*) FROM jobs WHERE benchmark_suite_id = ? AND status = 'failed'
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (suite_id, suite_id, suite_id, suite_id),
+                )
+
+    return {"status": "deleted", "test_id": test_id, "suite_id": suite_id, "deleted_jobs": deleted_jobs}
 
 
 @app.get("/api/benchmark/suites/{suite_id}/results", tags=["benchmark"])
