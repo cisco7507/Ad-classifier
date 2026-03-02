@@ -18,7 +18,8 @@ class JobSettings(BaseModel):
     enable_search: bool = True
     enable_web_search: Optional[bool] = None
     enable_agentic_search: Optional[bool] = None
-    enable_vision: bool = True
+    enable_vision_board: bool = True
+    enable_llm_frame: bool = True
     context_size: int = 8192
 
     @model_validator(mode="before")
@@ -30,6 +31,9 @@ class JobSettings(BaseModel):
         enable_search = data.get("enable_search")
         enable_web_search = data.get("enable_web_search")
         enable_agentic_search = data.get("enable_agentic_search")
+        enable_vision_board = data.get("enable_vision_board")
+        enable_llm_frame = data.get("enable_llm_frame")
+        legacy_enable_vision = data.get("enable_vision")
 
         if enable_search is None:
             if enable_web_search is not None:
@@ -40,6 +44,18 @@ class JobSettings(BaseModel):
             data["enable_web_search"] = bool(data.get("enable_search", True))
         if enable_agentic_search is None:
             data["enable_agentic_search"] = bool(data.get("enable_search", True))
+
+        # Deprecated legacy alias:
+        # `enable_vision` drove both behaviors before the split.
+        if enable_vision_board is None and legacy_enable_vision is not None:
+            data["enable_vision_board"] = bool(legacy_enable_vision)
+        if enable_llm_frame is None and legacy_enable_vision is not None:
+            data["enable_llm_frame"] = bool(legacy_enable_vision)
+
+        if data.get("enable_vision_board") is None:
+            data["enable_vision_board"] = True
+        if data.get("enable_llm_frame") is None:
+            data["enable_llm_frame"] = True
         return data
 
 class JobSettingsForm(JobSettings):

@@ -29,7 +29,8 @@ export function Jobs() {
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
   const [ocrMode, setOcrMode] = useState('🚀 Fast');
   const [scanMode, setScanMode] = useState('Tail Only');
-  const [enableVision, setEnableVision] = useState(true);
+  const [enableVisionBoard, setEnableVisionBoard] = useState(true);
+  const [enableLlmFrame, setEnableLlmFrame] = useState(true);
   const [enableWebSearch, setEnableWebSearch] = useState(true);
   const [contextSize, setContextSize] = useState(8192);
 
@@ -96,7 +97,8 @@ export function Jobs() {
       override: false,
       enable_search: enableWebSearch,
       enable_web_search: enableWebSearch,
-      enable_vision: enableVision,
+      enable_vision_board: enableVisionBoard,
+      enable_llm_frame: enableLlmFrame,
       context_size: contextSize,
     }),
     [
@@ -107,7 +109,8 @@ export function Jobs() {
       ocrMode,
       scanMode,
       enableWebSearch,
-      enableVision,
+      enableVisionBoard,
+      enableLlmFrame,
       contextSize,
     ]
   );
@@ -297,9 +300,16 @@ export function Jobs() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Vision</label>
-              <select value={enableVision ? 'true' : 'false'} onChange={(e) => setEnableVision(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
-                <option value="true">Enabled</option>
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">Vision Board</label>
+              <select value={enableVisionBoard ? 'true' : 'false'} onChange={(e) => setEnableVisionBoard(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
+                <option value="true">📸 Generate Vision Board (SigLIP/OpenCLIP)</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wider font-semibold text-gray-400">LLM Keyframe</label>
+              <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className="w-full h-8 text-xs bg-white border border-gray-200 rounded px-2 text-gray-700">
+                <option value="true">🧠 Send Keyframe to LLM</option>
                 <option value="false">Disabled</option>
               </select>
             </div>

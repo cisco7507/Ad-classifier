@@ -28,7 +28,9 @@ export interface JobSettings {
   enable_search: boolean;
   enable_web_search?: boolean;
   enable_agentic_search?: boolean;
-  enable_vision: boolean;
+  enable_vision_board: boolean;
+  enable_llm_frame: boolean;
+  enable_vision?: boolean;
   context_size:  number;
 }
 

@@ -83,12 +83,24 @@ class AdClassifierAgent:
         ocr_mode,
         allow_override,
         enable_search,
-        enable_vision,
-        context_size,
+        enable_vision_board=None,
+        enable_llm_frame=None,
+        context_size=8192,
         job_id=None,
         ocr_summary="",
         stage_callback=None,
+        enable_vision=None,  # Deprecated alias
     ):
+        if enable_vision is not None:
+            if enable_vision_board is None:
+                enable_vision_board = bool(enable_vision)
+            if enable_llm_frame is None:
+                enable_llm_frame = bool(enable_vision)
+        if enable_vision_board is None:
+            enable_vision_board = True
+        if enable_llm_frame is None:
+            enable_llm_frame = True
+
         memory_log = "Initial State: I am investigating a chronological storyboard of scenes extracted from an ad.\n"
         pil_images = [get_pil_image(f) for f in frames_data]
         yield memory_log, "Unknown", "Unknown", "", "N/A", "Agent is thinking...", "pending", None
@@ -105,7 +117,7 @@ class AdClassifierAgent:
                 protocol_steps.append(f"{step_num}. You MUST use [TOOL: SEARCH] at least once to fact-check the brand name or slogan found in the OCR before you are allowed to finish.")
                 step_num += 1
                 
-            vision_tool_available = enable_vision and _ensure_react_vision_ready()
+            vision_tool_available = enable_vision_board and _ensure_react_vision_ready()
             if vision_tool_available:
                 tools_list.append('- [TOOL: VISION] (Use to check the visual probability against our official industry categories)')
                 examples_list.append('[TOOL: VISION]')
@@ -145,7 +157,14 @@ Current Memory:
             
             if stage_callback:
                 stage_callback("llm", f"calling provider={provider.lower()} model={model}")
-            response = llm_engine.query_agent(provider, model, system_prompt, images=pil_images, force_multimodal=enable_vision, context_size=context_size)
+            response = llm_engine.query_agent(
+                provider,
+                model,
+                system_prompt,
+                images=pil_images,
+                force_multimodal=enable_llm_frame,
+                context_size=context_size,
+            )
             
             if not response:
                 response = "[TOOL: ERROR | reason=\"LLM returned absolute empty string. Check backend.\"]"
@@ -196,7 +215,7 @@ Current Memory:
                     observation = "Observation: " + (" | ".join(all_findings) if all_findings else "No text found.")
                     
                 elif tool_name == "VISION":
-                    if not enable_vision:
+                    if not enable_vision_board:
                         observation = "Observation: Formatting ERROR. The VISION tool is disabled by user settings. Proceed without it."
                     elif _ensure_react_vision_ready():
                         siglip_model, siglip_processor = _get_siglip_handles()
@@ -265,11 +284,23 @@ def run_agent_job(
     override,
     sm,
     enable_search,
-    enable_vision,
-    ctx,
+    enable_vision_board=None,
+    enable_llm_frame=None,
+    ctx=8192,
     job_id=None,
     stage_callback=None,
+    enable_vision=None,  # Deprecated alias
 ):
+    if enable_vision is not None:
+        if enable_vision_board is None:
+            enable_vision_board = bool(enable_vision)
+        if enable_llm_frame is None:
+            enable_llm_frame = bool(enable_vision)
+    if enable_vision_board is None:
+        enable_vision_board = True
+    if enable_llm_frame is None:
+        enable_llm_frame = True
+
     if stage_callback:
         stage_callback("ingest", "resolving input sources")
     urls_list = resolve_urls(src, urls, fldr)
@@ -296,7 +327,7 @@ def run_agent_job(
                 if txt:
                     ocr_chunks.append(txt)
             ocr_summary = " ".join(ocr_chunks)[:600]
-            if stage_callback and enable_vision:
+            if stage_callback and enable_vision_board:
                 stage_callback("vision", "vision enabled; evaluating category cues")
             
             for agent_output in agent.run(
@@ -308,7 +339,8 @@ def run_agent_job(
                 om,
                 override,
                 enable_search,
-                enable_vision,
+                enable_vision_board,
+                enable_llm_frame,
                 ctx,
                 job_id=job_id,
                 ocr_summary=ocr_summary,
