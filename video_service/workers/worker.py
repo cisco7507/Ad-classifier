@@ -77,6 +77,22 @@ def _resolve_enable_web_search(settings: dict) -> bool:
     return bool(settings.get("enable_search", False))
 
 
+def _resolve_enable_vision_board(settings: dict) -> bool:
+    if "enable_vision_board" in settings:
+        return bool(settings.get("enable_vision_board"))
+    if "enable_vision" in settings:
+        return bool(settings.get("enable_vision"))
+    return True
+
+
+def _resolve_enable_llm_frame(settings: dict) -> bool:
+    if "enable_llm_frame" in settings:
+        return bool(settings.get("enable_llm_frame"))
+    if "enable_vision" in settings:
+        return bool(settings.get("enable_vision"))
+    return True
+
+
 def _build_default_artifacts(job_id: str) -> dict:
     return {
         "latest_frames": [],
@@ -606,6 +622,8 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
     enable_web_search = _resolve_enable_web_search(settings)
+    enable_vision_board = _resolve_enable_vision_board(settings)
+    enable_llm_frame = _resolve_enable_llm_frame(settings)
     pipeline_threads = get_pipeline_threads_per_job()
     generator = run_pipeline_job(
         job_id=job_id,
@@ -620,7 +638,8 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
         override=settings.get("override", False),
         sm=settings.get("scan_mode", "Tail Only"),
         enable_search=enable_web_search,
-        enable_vision=settings.get("enable_vision", False),
+        enable_vision_board=enable_vision_board,
+        enable_llm_frame=enable_llm_frame,
         ctx=settings.get("context_size", 8192),
         workers=pipeline_threads,
         stage_callback=stage_cb,
@@ -670,6 +689,8 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
     stage_cb = _stage_callback(job_id)
     stage_cb("ingest", "validating input parameters")
     enable_web_search = _resolve_enable_web_search(settings)
+    enable_vision_board = _resolve_enable_vision_board(settings)
+    enable_llm_frame = _resolve_enable_llm_frame(settings)
     generator = run_agent_job(
         job_id=job_id,
         src="Web URLs",
@@ -683,7 +704,8 @@ def _run_agent(job_id: str, url: str, settings: dict) -> tuple[str | None, list[
         override=settings.get("override", False),
         sm=settings.get("scan_mode", "Tail Only"),
         enable_search=enable_web_search,
-        enable_vision=settings.get("enable_vision", False),
+        enable_vision_board=enable_vision_board,
+        enable_llm_frame=enable_llm_frame,
         ctx=settings.get("context_size", 8192),
         stage_callback=stage_cb,
     )

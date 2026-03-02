@@ -63,11 +63,23 @@ def process_single_video(
     override,
     sm,
     enable_search,
-    enable_vision,
-    ctx,
+    enable_vision_board=None,
+    enable_llm_frame=None,
+    ctx=8192,
     job_id=None,
     stage_callback=None,
+    enable_vision=None,  # Deprecated alias
 ):
+    if enable_vision is not None:
+        if enable_vision_board is None:
+            enable_vision_board = bool(enable_vision)
+        if enable_llm_frame is None:
+            enable_llm_frame = bool(enable_vision)
+    if enable_vision_board is None:
+        enable_vision_board = True
+    if enable_llm_frame is None:
+        enable_llm_frame = True
+
     try:
         if stage_callback:
             stage_callback("ingest", "validating and preparing input")
@@ -191,7 +203,7 @@ def process_single_video(
 
         sorted_vision: dict[str, float] = {}
         per_frame_vision: list[dict[str, object]] = []
-        if enable_vision:
+        if enable_vision_board:
             parallel_t0 = time.time()
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                 vision_future = pool.submit(_do_vision)
@@ -203,8 +215,18 @@ def process_single_video(
             ocr_text = _do_ocr()
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
-        tail_image = get_pil_image(frames[-1]) if enable_vision else frames[-1]["image"]
-        res = llm_engine.query_pipeline(p, m, ocr_text, categories, tail_image, override, enable_search, enable_vision, ctx)
+        tail_image = get_pil_image(frames[-1]) if enable_llm_frame else None
+        res = llm_engine.query_pipeline(
+            p,
+            m,
+            ocr_text,
+            categories,
+            tail_image,
+            override,
+            enable_search,
+            enable_llm_frame,
+            ctx,
+        )
         
         category_match = category_mapper.map_category(
             raw_category=res.get("category", "Unknown"),
@@ -244,12 +266,24 @@ def run_pipeline_job(
     override,
     sm,
     enable_search,
-    enable_vision,
-    ctx,
-    workers,
+    enable_vision_board=None,
+    enable_llm_frame=None,
+    ctx=8192,
+    workers=1,
     job_id=None,
     stage_callback=None,
+    enable_vision=None,  # Deprecated alias
 ):
+    if enable_vision is not None:
+        if enable_vision_board is None:
+            enable_vision_board = bool(enable_vision)
+        if enable_llm_frame is None:
+            enable_llm_frame = bool(enable_vision)
+    if enable_vision_board is None:
+        enable_vision_board = True
+    if enable_llm_frame is None:
+        enable_llm_frame = True
+
     if stage_callback:
         stage_callback("ingest", "resolving input sources")
     urls_list = resolve_urls(src, urls, fldr)
@@ -271,7 +305,8 @@ def run_pipeline_job(
                 override,
                 sm,
                 enable_search,
-                enable_vision,
+                enable_vision_board,
+                enable_llm_frame,
                 ctx,
                 job_id,
                 stage_callback,

@@ -990,7 +990,8 @@ async def run_benchmark_suite(body: BenchmarkRunRequest):
             enable_search=True,
             enable_web_search=True,
             enable_agentic_search=True,
-            enable_vision=True,
+            enable_vision_board=True,
+            enable_llm_frame=True,
             context_size=8192,
         )
         job_id = _create_job(
@@ -1515,6 +1516,27 @@ def _resolve_enable_web_search(
     return bool(enable_search)
 
 
+def _resolve_vision_flags(
+    enable_vision_board: Optional[bool],
+    enable_llm_frame: Optional[bool],
+    enable_vision_legacy: Optional[bool],
+) -> tuple[bool, bool]:
+    board = enable_vision_board
+    llm_frame = enable_llm_frame
+
+    # Backward compatibility for legacy clients still posting `enable_vision`.
+    if board is None and enable_vision_legacy is not None:
+        board = bool(enable_vision_legacy)
+    if llm_frame is None and enable_vision_legacy is not None:
+        llm_frame = bool(enable_vision_legacy)
+
+    if board is None:
+        board = True
+    if llm_frame is None:
+        llm_frame = True
+    return bool(board), bool(llm_frame)
+
+
 async def _proxy_request(request: Request, target_url: str) -> Response:
     """Forward a request to another cluster node, adding ?internal=1."""
     async with httpx.AsyncClient() as client:
@@ -1619,13 +1641,20 @@ def _parse_settings(
     enable_search: bool = Form(False),
     enable_web_search: Optional[bool] = Form(None),
     enable_agentic_search: Optional[bool] = Form(None),
-    enable_vision: bool = Form(False),
+    enable_vision_board: Optional[bool] = Form(None),
+    enable_llm_frame: Optional[bool] = Form(None),
+    enable_vision: Optional[bool] = Form(None),  # Deprecated alias
     context_size: int = Form(8192),
 ) -> JobSettings:
     resolved_search = _resolve_enable_web_search(
         enable_search=enable_search,
         enable_web_search=enable_web_search,
         enable_agentic_search=enable_agentic_search,
+    )
+    resolved_vision_board, resolved_llm_frame = _resolve_vision_flags(
+        enable_vision_board=enable_vision_board,
+        enable_llm_frame=enable_llm_frame,
+        enable_vision_legacy=enable_vision,
     )
     return JobSettings(
         categories=categories, provider=provider, model_name=model_name,
@@ -1634,7 +1663,8 @@ def _parse_settings(
         enable_search=resolved_search,
         enable_web_search=resolved_search,
         enable_agentic_search=resolved_search,
-        enable_vision=enable_vision,
+        enable_vision_board=resolved_vision_board,
+        enable_llm_frame=resolved_llm_frame,
         context_size=context_size,
     )
 
