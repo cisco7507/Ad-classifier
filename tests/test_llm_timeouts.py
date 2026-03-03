@@ -10,7 +10,7 @@ if "ddgs" not in sys.modules:
     ddgs_stub.DDGS = object
     sys.modules["ddgs"] = ddgs_stub
 
-from video_service.core.llm import HybridLLM
+from video_service.core.llm import HybridLLM, create_provider, OllamaQwenProvider
 
 pytestmark = pytest.mark.unit
 
@@ -118,3 +118,36 @@ def test_query_agent_timeout_returns_tool_error(monkeypatch):
     )
 
     assert result == '[TOOL: ERROR | reason="LLM Timeout after 300s"]'
+
+
+def test_create_provider_routes_qwen_models_to_qwen_plugin():
+    provider = create_provider("Ollama", "qwen3-vl:8b-instruct", context_size=8192)
+    assert isinstance(provider, OllamaQwenProvider)
+
+
+def test_qwen_ollama_agent_uses_chat_endpoint_and_qwen_options(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse({"message": {"content": "[TOOL: FINAL | reason=\"ok\"]"}})
+
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+    llm = HybridLLM()
+    result = llm.query_agent(
+        provider="Ollama",
+        backend_model="qwen3-vl:8b-instruct",
+        prompt="test prompt",
+    )
+
+    assert result == '[TOOL: FINAL | reason="ok"]'
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["url"].endswith("/api/chat")
+    assert call["timeout"] == 300
+    options = call["json"]["options"]
+    assert options["temperature"] == 1.0
+    assert options["top_p"] == 0.95
+    assert options["top_k"] == 20
+    assert options["presence_penalty"] == 1.5
+    assert options["repeat_penalty"] == 1.0
