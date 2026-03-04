@@ -283,8 +283,44 @@ class OpenAICompatibleProvider(BaseProvider):
             "top_p": 1.0,
             "presence_penalty": 0.0,
         }
-        if self.force_json_mode:
+        
+        raw_categories = kwargs.get("suggested_categories", "")
+        # Normalize: may arrive as a list (from run_pipeline_job) or comma-separated string
+        if isinstance(raw_categories, list):
+            categories_list = [c.strip() for c in raw_categories if isinstance(c, str) and c.strip()]
+        elif isinstance(raw_categories, str) and raw_categories.strip():
+            categories_list = [c.strip() for c in raw_categories.split(",") if c.strip()]
+        else:
+            categories_list = []
+        logger.debug("ENUM DEBUG: raw_categories=%r → categories_list=%s | force_json=%s", raw_categories, categories_list, self.force_json_mode)
+        if self.force_json_mode and categories_list:
+            if "Unknown" not in categories_list:
+                categories_list.append("Unknown")
+            
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ad_classification",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "brand": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": categories_list
+                            },
+                            "confidence": {"type": "number"},
+                            "reasoning": {"type": "string"}
+                        },
+                        "required": ["brand", "category", "confidence", "reasoning"]
+                    }
+                }
+            }
+            logger.info("JSON SCHEMA ENUM ACTIVE — %d allowed categories", len(categories_list))
+            logger.debug("JSON SCHEMA ENUM categories: %s", categories_list)
+        elif self.force_json_mode:
             payload["response_format"] = {"type": "json_object"}
+            logger.info("JSON SCHEMA ENUM INACTIVE — no suggested_categories, using plain json_object mode")
         try:
             resp = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -478,9 +514,10 @@ class ClassificationPipeline:
         include_image: bool,
         image_b64: Optional[str],
         express_mode: bool = False,
+        suggested_categories: str = "",
     ) -> dict:
         images = [image_b64] if (include_image and image_b64 and self.provider.supports_vision) else None
-        res = self.provider.generate_json(system_prompt, user_prompt, images=images)
+        res = self.provider.generate_json(system_prompt, user_prompt, images=images, suggested_categories=suggested_categories)
         logger.debug("llm_pipeline_initial_result: %s", res)
         if express_mode:
             return res if isinstance(res, dict) else {"error": "Unexpected LLM response"}
@@ -638,6 +675,7 @@ class HybridLLM:
             include_image=force_multimodal,
             image_b64=b64_img,
             express_mode=bool(express_mode),
+            suggested_categories=categories,
         )
 
     def query_agent(
