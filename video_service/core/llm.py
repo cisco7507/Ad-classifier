@@ -257,19 +257,32 @@ class OpenAICompatibleProvider(BaseProvider):
         images: Optional[list[str]] = None,
         **kwargs,
     ) -> dict:
+        json_prefix = '{\n  "brand": "'
         msgs = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
+            {"role": "assistant", "content": f"</think>\n{json_prefix}"},
         ]
         if images:
             msgs[1]["content"] = [
                 {"type": "text", "text": user_prompt},
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{images[0]}"}},
             ]
-        payload = {"model": self.backend_model, "messages": msgs, "temperature": 0.1}
+        payload = {
+            "model": self.backend_model,
+            "messages": msgs,
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "presence_penalty": 2.0,
+        }
         try:
             resp = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
-            content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp.raise_for_status()
+            content_json = resp.json()
+            raw_content = ""
+            if "choices" in content_json and len(content_json["choices"]) > 0:
+                raw_content = content_json["choices"][0].get("message", {}).get("content", "")
+            content = raw_content if "{" in raw_content else f"{json_prefix}{raw_content}"
             return _clean_and_parse_json(content)
         except requests.exceptions.Timeout:
             logger.error(
