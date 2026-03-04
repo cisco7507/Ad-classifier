@@ -16,6 +16,7 @@ from video_service.core.utils import logger
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS", "300"))
+OPENAI_COMPAT_URL = os.environ.get("OPENAI_COMPAT_URL", "http://localhost:1234/v1/chat/completions")
 
 class SearchManager:
     def __init__(self):
@@ -121,9 +122,37 @@ class HybridLLM:
                     payload = {"model": backend_model, "messages": [{"role": "system", "content": sys}, msg], "stream": False, "options": {"temperature": 0.1, "num_ctx": int(context_size)}}
                     return self._clean_and_parse_json(requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=LLM_TIMEOUT_SECONDS).json().get("message", {}).get("content", ""))
                 elif prov == "lm studio":
-                    msgs = [{"role": "system", "content": sys}, {"role": "user", "content": usr}]
-                    if img: msgs[1]["content"] = [{"type": "text", "text": usr}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}}]
-                    return self._clean_and_parse_json(requests.post("http://localhost:1234/v1/chat/completions", json={"model": backend_model, "messages": msgs, "temperature": 0.1}, timeout=LLM_TIMEOUT_SECONDS).json().get("choices", [{}])[0].get("message", {}).get("content", ""))
+                    json_prefix = '{\n  "brand": "'
+                    msgs = [
+                        {"role": "system", "content": sys},
+                        {"role": "user", "content": usr},
+                        {"role": "assistant", "content": f"</think>\n{json_prefix}"},
+                    ]
+                    if img:
+                        msgs[1]["content"] = [
+                            {"type": "text", "text": usr},
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img}"}},
+                        ]
+                    payload = {
+                        "model": backend_model,
+                        "messages": msgs,
+                        "temperature": 0.0,
+                        "top_p": 1.0,
+                        "presence_penalty": 2.0,
+                    }
+                    resp = requests.post(
+                        OPENAI_COMPAT_URL,
+                        json=payload,
+                        timeout=LLM_TIMEOUT_SECONDS,
+                    )
+                    resp.raise_for_status()
+
+                    content_json = resp.json()
+                    raw_content = ""
+                    if "choices" in content_json and len(content_json["choices"]) > 0:
+                        raw_content = content_json["choices"][0].get("message", {}).get("content", "")
+                    content = raw_content if "{" in raw_content else f"{json_prefix}{raw_content}"
+                    return self._clean_and_parse_json(content)
                 else: return {"error": f"Unsupported provider: {provider}"}
             except requests.exceptions.Timeout:
                 logger.error(
