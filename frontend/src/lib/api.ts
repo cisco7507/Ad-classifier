@@ -537,14 +537,14 @@ export const deleteBenchmarkTruth = (truthId: string) =>
 export const getBenchmarkModels = async (): Promise<ModelCombo[]> => {
   const combos: ModelCombo[] = [];
   try {
-    const res = await api.get<{ models: { name: string }[] }>('/api/models/ollama');
-    for (const m of res.data?.models || []) {
+    const res = await api.get<{ name: string }[]>('/ollama/models');
+    for (const m of res.data || []) {
       if (m.name) combos.push({ provider: 'Ollama', model: m.name, key: `Ollama::${m.name}` });
     }
   } catch { /* no Ollama */ }
   try {
-    const res = await api.get<{ models: { name?: string; id?: string }[] }>('/api/models/llama-server');
-    for (const m of res.data?.models || []) {
+    const res = await api.get<{ name?: string; id?: string }[]>('/llama-server/models');
+    for (const m of res.data || []) {
       const name = m.name || m.id || '';
       if (name) combos.push({ provider: 'Llama Server', model: name, key: `Llama Server::${name}` });
     }
