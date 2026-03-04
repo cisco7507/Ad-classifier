@@ -119,6 +119,8 @@ class BenchmarkRunRequest(BaseModel):
     categories: str = ""
     providers: Optional[List[str]] = None
     models: Optional[List[str]] = None
+    # Explicit (provider, model) pairs — bypasses Cartesian auto-resolve when set
+    model_combos: Optional[List[dict]] = None
 
 
 class BenchmarkSuiteUpdateRequest(BaseModel):

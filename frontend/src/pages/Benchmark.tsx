@@ -13,6 +13,8 @@ import {
   createBenchmarkTruth,
   deleteBenchmarkSuite,
   deleteBenchmarkTest,
+  deleteBenchmarkTruth,
+  getBenchmarkModels,
   getBenchmarkSuite,
   getBenchmarkSuiteResults,
   getBenchmarkSuites,
@@ -28,6 +30,7 @@ import type {
   BenchmarkSuiteResults,
   BenchmarkSuiteSummary,
   BenchmarkTruth,
+  ModelCombo,
   SystemProfile,
 } from '../lib/api';
 
@@ -54,6 +57,111 @@ function truncate(text: string | null | undefined, max = 80): string {
   if (!value) return '—';
   if (value.length <= max) return value;
   return `${value.slice(0, Math.max(0, max - 1))}…`;
+}
+
+// ── Medal helper ────────────────────────────────────────────────────────────
+function medalFor(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return `#${rank}`;
+}
+
+// ── Mini bar component ───────────────────────────────────────────────────────
+function MiniBar({ pct, color }: { pct: number; color: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="h-2 w-24 rounded-full bg-gray-100 overflow-hidden flex-shrink-0">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: color }}
+        />
+      </div>
+      <span className="text-[11px] tabular-nums text-gray-600">{pct.toFixed(1)}%</span>
+    </div>
+  );
+}
+
+// ── Performance ranking table ─────────────────────────────────────────────
+function PerformanceTable({ points }: { points: BenchmarkPoint[] }) {
+  const sorted = useMemo(
+    () =>
+      [...points]
+        .filter((p) => Number.isFinite(p.y_composite_accuracy_pct))
+        .sort((a, b) => b.y_composite_accuracy_pct - a.y_composite_accuracy_pct),
+    [points],
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <div className="text-sm text-gray-400 py-4 text-center">
+        No completed benchmark points yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[700px] text-left text-xs">
+        <thead>
+          <tr className="border-b border-gray-200">
+            <th className="px-3 py-2 text-gray-400 font-medium w-12">Rank</th>
+            <th className="px-3 py-2 text-gray-400 font-medium">Model / Config</th>
+            <th className="px-3 py-2 text-gray-400 font-medium w-24">Duration</th>
+            <th className="px-3 py-2 text-gray-400 font-medium">Composite</th>
+            <th className="px-3 py-2 text-gray-400 font-medium">Classification</th>
+            <th className="px-3 py-2 text-gray-400 font-medium">OCR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((point, i) => {
+            const rank = i + 1;
+            const isTop3 = rank <= 3;
+            const rowBg =
+              rank === 1
+                ? 'bg-amber-50'
+                : rank === 2
+                  ? 'bg-gray-50/80'
+                  : rank === 3
+                    ? 'bg-orange-50/50'
+                    : 'bg-white';
+            return (
+              <tr
+                key={point.job_id}
+                className={`border-t border-gray-100 transition-colors hover:bg-indigo-50/30 ${rowBg}`}
+              >
+                <td className="px-3 py-2.5 font-semibold text-center">
+                  <span className={`text-base ${isTop3 ? '' : 'text-gray-400 text-xs'}`}>
+                    {medalFor(rank)}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 max-w-[280px]">
+                  <span
+                    className="block truncate font-medium text-gray-800"
+                    title={point.label}
+                  >
+                    {point.label}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 tabular-nums text-gray-500">
+                  {formatSeconds(point.x_duration_seconds)}
+                </td>
+                <td className="px-3 py-2.5">
+                  <MiniBar pct={point.y_composite_accuracy_pct} color="#6366f1" />
+                </td>
+                <td className="px-3 py-2.5">
+                  <MiniBar pct={(point.classification_accuracy || 0) * 100} color="#10b981" />
+                </td>
+                <td className="px-3 py-2.5">
+                  <MiniBar pct={(point.ocr_accuracy || 0) * 100} color="#f59e0b" />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 interface ModalShellProps {
@@ -106,6 +214,10 @@ export function Benchmark() {
   const [runTruthId, setRunTruthId] = useState('');
   const [runCategories, setRunCategories] = useState('');
 
+  // Model multi-select
+  const [availableModels, setAvailableModels] = useState<ModelCombo[]>([]);
+  const [selectedModelKeys, setSelectedModelKeys] = useState<Set<string>>(new Set());
+
   const [suiteModalOpen, setSuiteModalOpen] = useState(false);
   const [suiteModalId, setSuiteModalId] = useState('');
   const [suiteModalName, setSuiteModalName] = useState('');
@@ -151,6 +263,14 @@ export function Benchmark() {
     setSuiteDetail(detail);
     setSuiteResults(results);
   };
+
+  // Load available models for selector
+  useEffect(() => {
+    getBenchmarkModels().then((combos) => {
+      setAvailableModels(combos);
+      setSelectedModelKeys(new Set(combos.map((c) => c.key)));
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -303,9 +423,15 @@ export function Benchmark() {
   const handleRunSuite = async () => {
     setRunning(true);
     try {
+      // Build explicit model_combos from the selected chips
+      const selectedCombos = availableModels
+        .filter((m) => selectedModelKeys.has(m.key))
+        .map((m) => ({ provider: m.provider, model: m.model }));
+
       const result = await runBenchmarkSuite({
         truth_id: runTruthId,
         categories: runCategories,
+        ...(selectedCombos.length > 0 ? { model_combos: selectedCombos } : {}),
       });
       const suiteId = String(result?.suite_id || '');
       if (suiteId) {
@@ -316,6 +442,27 @@ export function Benchmark() {
       setError('');
     } catch (err: any) {
       setError(err?.message || 'Failed to start benchmark suite');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // Feature 1: delete truth from Run Suite panel
+  const handleDeleteTruth = async (truth: BenchmarkTruth) => {
+    const confirmed = window.confirm(`Delete golden truth "${truth.name || truth.truth_id}"?`);
+    if (!confirmed) return;
+    setRunning(true);
+    try {
+      await deleteBenchmarkTruth(truth.truth_id);
+      const payload = await getBenchmarkTruths();
+      const next = payload.truths || [];
+      setTruths(next);
+      if (runTruthId === truth.truth_id) {
+        setRunTruthId(next[0]?.truth_id || '');
+      }
+      setError('');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete truth');
     } finally {
       setRunning(false);
     }
@@ -426,6 +573,22 @@ export function Benchmark() {
     }
   };
 
+  // Model chip toggle
+  const toggleModel = (key: string) => {
+    setSelectedModelKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const selectAllModels = () => setSelectedModelKeys(new Set(availableModels.map((m) => m.key)));
+  const clearAllModels = () => setSelectedModelKeys(new Set());
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 p-8 text-gray-500 animate-pulse">
@@ -474,6 +637,7 @@ export function Benchmark() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {/* Create Golden Video Truth */}
         <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900">Create Golden Video Truth</h3>
           <input
@@ -536,20 +700,125 @@ export function Benchmark() {
           </button>
         </div>
 
+        {/* Run Benchmark Suite */}
         <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900">Run Benchmark Suite</h3>
-          <select
-            value={runTruthId}
-            onChange={(event) => setRunTruthId(event.target.value)}
-            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
-          >
-            <option value="">Select Golden Truth</option>
-            {truths.map((truth) => (
-              <option key={truth.truth_id} value={truth.truth_id}>
-                {truth.name}
-              </option>
-            ))}
-          </select>
+
+          {/* ── Feature 1: Deletable truth list ────────────────────────────── */}
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-gray-500">Select Golden Truth</p>
+            {truths.length === 0 ? (
+              <div className="rounded border border-dashed border-gray-300 py-3 text-center text-xs text-gray-400">
+                No golden truths yet — create one on the left.
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto rounded border border-gray-200">
+                {truths.map((truth) => {
+                  const isSelected = runTruthId === truth.truth_id;
+                  return (
+                    <div
+                      key={truth.truth_id}
+                      className={`flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
+                        isSelected
+                          ? 'bg-primary-50 border-l-2 border-primary-500'
+                          : 'hover:bg-gray-50 border-l-2 border-transparent'
+                      }`}
+                      onClick={() => setRunTruthId(truth.truth_id)}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`h-2 w-2 rounded-full flex-shrink-0 ${
+                            isSelected ? 'bg-primary-500' : 'bg-gray-300'
+                          }`}
+                        />
+                        <span
+                          className={`text-sm truncate ${
+                            isSelected ? 'font-semibold text-primary-700' : 'text-gray-700'
+                          }`}
+                          title={truth.name}
+                        >
+                          {truth.name || truth.truth_id}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteTruth(truth);
+                        }}
+                        disabled={running}
+                        className="ml-2 flex-shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors disabled:opacity-40"
+                        title="Delete this truth"
+                      >
+                        <TrashIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ── Feature 2: Model multi-select chips ────────────────────────── */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <p className="text-xs font-medium text-gray-500">Competing Models</p>
+              {availableModels.length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={selectAllModels}
+                    className="text-[11px] text-primary-600 hover:underline"
+                  >
+                    All
+                  </button>
+                  <span className="text-gray-300">|</span>
+                  <button
+                    type="button"
+                    onClick={clearAllModels}
+                    className="text-[11px] text-gray-400 hover:underline"
+                  >
+                    None
+                  </button>
+                </div>
+              )}
+            </div>
+            {availableModels.length === 0 ? (
+              <div className="rounded border border-dashed border-gray-300 py-3 text-center text-xs text-gray-400">
+                No models detected — all available will be used.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {availableModels.map((combo) => {
+                  const active = selectedModelKeys.has(combo.key);
+                  return (
+                    <button
+                      key={combo.key}
+                      type="button"
+                      onClick={() => toggleModel(combo.key)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                        active
+                          ? 'border-primary-400 bg-primary-50 text-primary-700 shadow-sm'
+                          : 'border-gray-300 bg-white text-gray-400 hover:border-gray-400'
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-primary-500' : 'bg-gray-300'}`}
+                      />
+                      <span className="font-normal text-gray-500">{combo.provider}</span>
+                      <span className="font-semibold">{combo.model}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {availableModels.length > 0 && (
+              <p className="mt-1.5 text-[11px] text-gray-400">
+                {selectedModelKeys.size} of {availableModels.length} selected — only these will run
+              </p>
+            )}
+          </div>
+
           <input
             value={runCategories}
             onChange={(event) => setRunCategories(event.target.value)}
@@ -562,14 +831,15 @@ export function Benchmark() {
             onClick={handleRunSuite}
             className="h-10 rounded bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
-            Launch Cartesian Benchmark
+            Launch Benchmark
           </button>
           <div className="text-xs text-gray-500">
-            Benchmarks enqueue permutations across scan strategy, OCR engine/mode, and provider-model combinations.
+            Runs permutations across scan strategy, OCR engine/mode, and the selected models above.
           </div>
         </div>
       </div>
 
+      {/* Benchmark Suites table */}
       <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-gray-900">Benchmark Suites</h3>
@@ -654,6 +924,7 @@ export function Benchmark() {
         </div>
       </div>
 
+      {/* Suite Detail */}
       <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
         <h3 className="text-sm font-semibold text-gray-900">Suite Detail</h3>
         {suiteDetail ? (
@@ -730,6 +1001,7 @@ export function Benchmark() {
         )}
       </div>
 
+      {/* ── Scatter chart + Feature 3: Performance ranking table ─────────── */}
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
@@ -740,6 +1012,21 @@ export function Benchmark() {
           </p>
         </div>
         <ReactECharts option={scatterOption} style={{ height: 460, width: '100%' }} notMerge lazyUpdate />
+
+        {/* Performance ranking table */}
+        {(suiteResults?.points || []).length > 0 && (
+          <div className="mt-6">
+            <div className="mb-3 flex items-center gap-2">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
+                Performance Ranking
+              </h3>
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                {suiteResults!.points.length} runs
+              </span>
+            </div>
+            <PerformanceTable points={suiteResults!.points} />
+          </div>
+        )}
       </div>
 
       <ModalShell title="Edit Benchmark Suite" open={suiteModalOpen} onClose={() => setSuiteModalOpen(false)}>
@@ -774,39 +1061,39 @@ export function Benchmark() {
             value={testModalSourceUrl}
             onChange={(event) => setTestModalSourceUrl(event.target.value)}
             placeholder="Source URL"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <input
               value={testModalExpectedCategory}
               onChange={(event) => setTestModalExpectedCategory(event.target.value)}
               placeholder="Expected category"
-              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
             />
             <input
               value={testModalExpectedBrand}
               onChange={(event) => setTestModalExpectedBrand(event.target.value)}
               placeholder="Expected brand"
-              className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+              className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
             />
           </div>
           <input
             value={testModalExpectedConfidence}
             onChange={(event) => setTestModalExpectedConfidence(event.target.value)}
             placeholder="Expected confidence (0..1)"
-            className="h-10 w-full rounded border border-slate-700 bg-slate-900 px-3 text-sm text-slate-100"
+            className="h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={testModalExpectedReasoning}
             onChange={(event) => setTestModalExpectedReasoning(event.target.value)}
             placeholder="Expected reasoning"
-            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-24 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <textarea
             value={testModalExpectedOcr}
             onChange={(event) => setTestModalExpectedOcr(event.target.value)}
             placeholder="Expected OCR corpus"
-            className="h-24 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+            className="h-24 w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none"
           />
           <div className="flex justify-end">
             <button
