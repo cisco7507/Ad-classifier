@@ -77,7 +77,6 @@ def process_single_video(
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
-    siglip_variant="v1",
 ):
     if enable_vision is not None:
         if enable_vision_board is None:
@@ -134,12 +133,8 @@ def process_single_video(
             logger.debug("[%s] parallel_task_start: vision", url)
             try:
                 ready, reason = category_mapper.ensure_vision_text_features()
-                variant_result = categories_runtime._ensure_siglip_variant_loaded(siglip_variant)
-                if variant_result is not None:
-                    siglip_model, siglip_processor = variant_result
-                else:
-                    siglip_model = categories_runtime.siglip_model
-                    siglip_processor = categories_runtime.siglip_processor
+                siglip_model = categories_runtime.siglip_model
+                siglip_processor = categories_runtime.siglip_processor
                 if not ready or siglip_model is None or siglip_processor is None:
                     if stage_callback:
                         stage_callback("vision", f"vision skipped; {reason}")
@@ -325,7 +320,6 @@ def run_pipeline_job(
     job_id=None,
     stage_callback=None,
     enable_vision=None,  # Deprecated alias
-    siglip_variant="v1",
 ):
     if enable_vision is not None:
         if enable_vision_board is None:
@@ -364,8 +358,6 @@ def run_pipeline_job(
                 express_mode,
                 job_id,
                 stage_callback,
-                None,  # enable_vision deprecated alias
-                siglip_variant,
             ): u
             for u in urls_list
         }
