@@ -139,6 +139,14 @@ def _ocr_roi_enabled(engine_name: str) -> bool:
     return engine_name == "EasyOCR" and raw not in {"0", "false", "no", "off"}
 
 
+def _ocr_skip_no_roi_enabled(engine_name: str, scan_mode: str) -> bool:
+    raw = os.environ.get("OCR_SKIP_NO_ROI_FRAMES", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    mode = (scan_mode or "").strip().lower()
+    return engine_name == "EasyOCR" and mode not in {"full video", "full scan"}
+
+
 def _extract_ocr_focus_region(frame_bgr: np.ndarray) -> tuple[np.ndarray, bool]:
     height, width = frame_bgr.shape[:2]
     if height < 120 or width < 120:
@@ -395,6 +403,7 @@ def process_single_video(
                 roi_hits = 0
                 roi_fallbacks = 0
                 early_stop_skipped = 0
+                no_roi_skipped = 0
                 early_stop_active = _ocr_early_stop_enabled(sm)
                 last_index = len(ocr_frames) - 1
                 idx = 0
@@ -402,8 +411,33 @@ def process_single_video(
                     frame = ocr_frames[idx]
                     ocr_image = frame["ocr_image"]
                     raw_text = ""
-                    if _ocr_roi_enabled(oe) and isinstance(ocr_image, np.ndarray):
+                    is_last_frame = idx == last_index
+                    roi_image = ocr_image
+                    roi_used = False
+                    roi_detection_applicable = (
+                        isinstance(ocr_image, np.ndarray)
+                        and ocr_image.shape[0] >= 120
+                        and ocr_image.shape[1] >= 120
+                    )
+                    roi_capable = roi_detection_applicable and (
+                        _ocr_roi_enabled(oe) or _ocr_skip_no_roi_enabled(oe, sm)
+                    )
+                    if roi_capable:
                         roi_image, roi_used = _extract_ocr_focus_region(ocr_image)
+                    if (
+                        _ocr_skip_no_roi_enabled(oe, sm)
+                        and not is_last_frame
+                        and roi_capable
+                        and not roi_used
+                    ):
+                        no_roi_skipped += 1
+                        logger.debug(
+                            "ocr_no_roi_skip: frame at %.1fs no plausible text region detected",
+                            frame["time"],
+                        )
+                        idx += 1
+                        continue
+                    if _ocr_roi_enabled(oe) and isinstance(ocr_image, np.ndarray):
                         if roi_used:
                             roi_hits += 1
                             logger.debug(
@@ -425,7 +459,6 @@ def process_single_video(
                     else:
                         raw_text = ocr_manager.extract_text(oe, ocr_image, om)
                     normalized = _normalize_ocr(raw_text)
-                    is_last_frame = idx == last_index
                     if (
                         prev_normalized is not None
                         and not is_last_frame
@@ -458,10 +491,11 @@ def process_single_video(
                         continue
                     idx += 1
                 logger.info(
-                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d early_stop_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
+                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d no_roi_skipped=%d early_stop_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
                     len(ocr_lines),
                     skipped_count,
                     visually_skipped_count,
+                    no_roi_skipped,
                     early_stop_skipped,
                     roi_hits,
                     roi_fallbacks,

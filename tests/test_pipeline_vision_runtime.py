@@ -392,3 +392,76 @@ def test_pipeline_tail_ocr_stops_early_after_strong_signal_but_keeps_last_frame(
     )
 
     assert ocr_calls == [10, 40]
+
+
+def test_pipeline_tail_easyocr_skips_nonfinal_frame_when_no_text_roi(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    ocr_calls: list[int] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            marker = int(np.count_nonzero(image))
+            ocr_calls.append(marker)
+            return "brand signal"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    blank = np.zeros((240, 320, 3), dtype=np.uint8)
+    text_frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    cv2.putText(text_frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
+    frames = [
+        {"image": object(), "ocr_image": blank, "time": 27.0, "type": "tail"},
+        {"image": object(), "ocr_image": text_frame, "time": 29.4, "type": "tail"},
+    ]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(
+        pipeline_module,
+        "_select_frames_for_ocr",
+        lambda incoming_frames: (incoming_frames, 0),
+    )
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-ocr-no-roi-1",
+    )
+
+    assert len(ocr_calls) == 1
+    assert ocr_calls[0] > 0
