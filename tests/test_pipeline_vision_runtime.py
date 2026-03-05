@@ -50,7 +50,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
             return _DummyInputs({"pixel_values": torch.tensor([[1.0, 1.0, 1.0]])})
 
     class _DummyModel:
-        logit_scale = torch.tensor(0.0)
+        logit_scale = torch.tensor(2.0)
         logit_bias = torch.tensor(0.0)
 
         @staticmethod
@@ -538,3 +538,235 @@ def test_pipeline_logs_ocr_call_metrics(monkeypatch, caplog):
     assert "ocr_calls=2" in summary_logs[-1]
     assert "ocr_elapsed_ms=" in summary_logs[-1]
     assert "avg_ocr_ms=" in summary_logs[-1]
+
+
+def test_pipeline_skips_ocr_when_multimodal_tail_is_high_confidence(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One", "Category Two"]
+        vision_text_features = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+        )
+
+        @staticmethod
+        def ensure_vision_text_features():
+            return True, "ready"
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyInputs(dict):
+        def to(self, _device):
+            return self
+
+    class _DummyProcessor:
+        def __call__(self, **kwargs):
+            images = kwargs.get("images", [])
+            count = max(1, len(images))
+            return _DummyInputs(
+                {"pixel_values": torch.ones((count, 3), dtype=torch.float32)}
+            )
+
+    class _DummyModel:
+        logit_scale = torch.tensor(2.0)
+        logit_bias = torch.tensor(0.0)
+
+        @staticmethod
+        def get_image_features(**kwargs):
+            count = int(kwargs["pixel_values"].shape[0])
+
+            class _Output:
+                pooler_output = torch.tensor(
+                    [[2.0, 0.1, 0.0]] * count,
+                    dtype=torch.float32,
+                )
+
+            return _Output()
+
+    ocr_calls: list[str] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            ocr_calls.append("called")
+            return "ocr should be skipped"
+
+    llm_calls: list[str] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            llm_calls.append(args[2])
+            return {
+                "brand": "Brand X",
+                "category": "Category One",
+                "confidence": 0.95,
+                "reasoning": "strong visual evidence",
+            }
+
+    frame = np.zeros((96, 128, 3), dtype=np.uint8)
+    frames = [
+        {"image": None, "ocr_image": frame.copy(), "time": 27.0 + i, "type": "tail"}
+        for i in range(2)
+    ]
+
+    monkeypatch.setenv("OCR_SKIP_HIGH_CONFIDENCE", "true")
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(pipeline_module, "_select_frames_for_ocr", lambda incoming: ([incoming[-1]], 1))
+    monkeypatch.setattr(pipeline_module, "_frame_quality_allows_ocr_skip", lambda _frame: (True, "ok"))
+    monkeypatch.setattr(pipeline_module.categories_runtime, "siglip_model", _DummyModel())
+    monkeypatch.setattr(
+        pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
+    )
+
+    _, _, ocr_text, _, _, row = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=True,
+        ctx=8192,
+        job_id="job-ocr-skip-1",
+    )
+
+    assert ocr_calls == []
+    assert llm_calls == [""]
+    assert ocr_text == ""
+    assert row[1] == "Brand X"
+    assert row[2] == "101"
+
+
+def test_pipeline_runs_ocr_when_multimodal_tail_confidence_is_too_low(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One", "Category Two"]
+        vision_text_features = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=torch.float32
+        )
+
+        @staticmethod
+        def ensure_vision_text_features():
+            return True, "ready"
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyInputs(dict):
+        def to(self, _device):
+            return self
+
+    class _DummyProcessor:
+        def __call__(self, **kwargs):
+            images = kwargs.get("images", [])
+            count = max(1, len(images))
+            return _DummyInputs(
+                {"pixel_values": torch.ones((count, 3), dtype=torch.float32)}
+            )
+
+    class _DummyModel:
+        logit_scale = torch.tensor(2.0)
+        logit_bias = torch.tensor(0.0)
+
+        @staticmethod
+        def get_image_features(**kwargs):
+            count = int(kwargs["pixel_values"].shape[0])
+
+            class _Output:
+                pooler_output = torch.tensor(
+                    [[2.0, 0.1, 0.0]] * count,
+                    dtype=torch.float32,
+                )
+
+            return _Output()
+
+    ocr_calls: list[str] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            ocr_calls.append("called")
+            return "ocr fallback"
+
+    llm_calls: list[str] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            llm_calls.append(args[2])
+            if args[2] == "":
+                return {
+                    "brand": "Brand X",
+                    "category": "Category One",
+                    "confidence": 0.40,
+                    "reasoning": "not enough confidence",
+                }
+            return {
+                "brand": "Brand X",
+                "category": "Category One",
+                "confidence": 0.95,
+                "reasoning": "ocr backed",
+            }
+
+    frame = np.zeros((96, 128, 3), dtype=np.uint8)
+    frames = [
+        {"image": None, "ocr_image": frame.copy(), "time": 27.0 + i, "type": "tail"}
+        for i in range(2)
+    ]
+
+    monkeypatch.setenv("OCR_SKIP_HIGH_CONFIDENCE", "true")
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+    monkeypatch.setattr(pipeline_module, "_select_frames_for_ocr", lambda incoming: ([incoming[-1]], 1))
+    monkeypatch.setattr(pipeline_module, "_frame_quality_allows_ocr_skip", lambda _frame: (True, "ok"))
+    monkeypatch.setattr(pipeline_module.categories_runtime, "siglip_model", _DummyModel())
+    monkeypatch.setattr(
+        pipeline_module.categories_runtime, "siglip_processor", _DummyProcessor()
+    )
+
+    _, _, ocr_text, _, _, row = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=True,
+        ctx=8192,
+        job_id="job-ocr-skip-2",
+    )
+
+    assert ocr_calls == ["called"]
+    assert llm_calls == ["", "ocr fallback"]
+    assert ocr_text == "ocr fallback"
+    assert row[1] == "Brand X"

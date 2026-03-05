@@ -18,7 +18,7 @@ from video_service.core.video_io import (
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
 from video_service.core.ocr import ocr_manager
-from video_service.core.llm import llm_engine
+from video_service.core.llm import llm_engine, create_provider
 
 RESULT_COLUMNS = [
     "URL / Path",
@@ -272,6 +272,133 @@ def _ocr_text_is_strong_for_early_stop(text: str) -> bool:
     return has_domain_like_token or has_multi_token_signal or has_single_long_token
 
 
+def _ocr_skip_high_confidence_enabled(
+    scan_mode: str,
+    provider: str,
+    backend_model: str,
+    enable_search: bool,
+    enable_vision_board: bool,
+    enable_llm_frame: bool,
+    express_mode: bool,
+    context_size: int,
+) -> bool:
+    raw = os.environ.get("OCR_SKIP_HIGH_CONFIDENCE", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode or enable_search or not enable_vision_board or not enable_llm_frame:
+        return False
+    mode = (scan_mode or "").strip().lower()
+    if mode in {"full video", "full scan"}:
+        return False
+    try:
+        return bool(
+            create_provider(provider, backend_model, context_size=int(context_size)).supports_vision
+        )
+    except Exception as exc:
+        logger.debug("ocr_skip_disabled provider_init_failed=%s", exc)
+        return False
+
+
+def _resolve_ocr_skip_confidence_threshold() -> float:
+    raw = os.environ.get("OCR_SKIP_CONFIDENCE_THRESHOLD", "0.90")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_skip_confidence_threshold value=%r fallback=0.90", raw)
+        return 0.90
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_ocr_skip_vision_score_threshold() -> float:
+    raw = os.environ.get("OCR_SKIP_VISION_SCORE_THRESHOLD", "0.80")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_skip_vision_score_threshold value=%r fallback=0.80", raw)
+        return 0.80
+    return max(0.0, min(1.0, value))
+
+
+def _frame_quality_allows_ocr_skip(frame_bgr: np.ndarray) -> tuple[bool, str]:
+    if not isinstance(frame_bgr, np.ndarray) or frame_bgr.size == 0:
+        return False, "invalid_frame"
+
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    brightness = float(gray.mean())
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    min_brightness = float(os.environ.get("OCR_SKIP_MIN_BRIGHTNESS", "20"))
+    min_sharpness = float(os.environ.get("OCR_SKIP_MIN_SHARPNESS", "40"))
+
+    if brightness < min_brightness:
+        return False, f"brightness={brightness:.1f}<min={min_brightness:.1f}"
+    if sharpness < min_sharpness:
+        return False, f"sharpness={sharpness:.1f}<min={min_sharpness:.1f}"
+    return True, f"brightness={brightness:.1f} sharpness={sharpness:.1f}"
+
+
+def _vision_allows_ocr_skip(
+    sorted_vision: dict[str, float],
+    per_frame_vision: list[dict[str, object]],
+) -> tuple[bool, str, str]:
+    if not sorted_vision or not per_frame_vision:
+        return False, "", "vision_unavailable"
+
+    top_category, top_score = next(iter(sorted_vision.items()))
+    threshold = _resolve_ocr_skip_vision_score_threshold()
+    if float(top_score) < threshold:
+        return False, top_category, f"top_score={float(top_score):.4f}<threshold={threshold:.2f}"
+
+    recent_frames = per_frame_vision[-2:] if len(per_frame_vision) >= 2 else per_frame_vision[-1:]
+    for frame_info in recent_frames:
+        frame_category = str(frame_info.get("top_category", ""))
+        frame_score = float(frame_info.get("top_score", 0.0))
+        if frame_category != top_category:
+            return False, top_category, "recent_frame_category_mismatch"
+        if frame_score < threshold:
+            return False, top_category, f"recent_frame_score={frame_score:.4f}<threshold={threshold:.2f}"
+
+    return True, top_category, "ready"
+
+
+def _llm_result_allows_ocr_skip(
+    llm_result: dict[str, object],
+    expected_category: str,
+    job_id: str | None,
+) -> tuple[bool, str]:
+    if not isinstance(llm_result, dict):
+        return False, "invalid_llm_result"
+
+    brand = str(llm_result.get("brand", "") or "").strip()
+    category = str(llm_result.get("category", "") or "").strip()
+    if brand.lower() in {"", "unknown", "none", "n/a"}:
+        return False, "brand_missing"
+    if not category:
+        return False, "category_missing"
+
+    confidence_raw = llm_result.get("confidence", 0.0)
+    try:
+        confidence = float(confidence_raw)
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    threshold = _resolve_ocr_skip_confidence_threshold()
+    if confidence < threshold:
+        return False, f"confidence={confidence:.2f}<threshold={threshold:.2f}"
+
+    category_match = category_mapper.map_category(
+        raw_category=category,
+        job_id=job_id,
+        suggested_categories_text="",
+        predicted_brand=brand,
+        ocr_summary="",
+    )
+    canonical_category = str(category_match.get("canonical_category", "") or "")
+    if canonical_category != expected_category:
+        return False, f"vision_category={expected_category!r} llm_category={canonical_category!r}"
+
+    return True, f"confidence={confidence:.2f} canonical_category={canonical_category!r}"
+
+
 def process_single_video(
     url,
     categories,
@@ -305,6 +432,7 @@ def process_single_video(
             stage_callback("ingest", "validating and preparing input")
         logger.info(f"[{url}] === STARTING PIPELINE WORKER ===")
         express_mode = bool(express_mode)
+        send_llm_frame = bool(enable_llm_frame or express_mode)
         if express_mode:
             if stage_callback:
                 stage_callback("frame_extract", "express mode enabled; extracting static tail frame")
@@ -404,13 +532,19 @@ def process_single_video(
                 logger.error("[%s] vision task failed: %s", url, exc, exc_info=True)
                 raise
 
-        def _do_ocr() -> str:
+        def _do_ocr(
+            prepared_frames: list[dict[str, object]] | None = None,
+            visually_skipped_count: int | None = None,
+        ) -> str:
             logger.debug("[%s] parallel_task_start: ocr", url)
             try:
                 if stage_callback:
                     stage_callback("ocr", f"ocr engine={oe.lower()}")
                 dedup_threshold = _resolve_ocr_dedup_threshold()
-                ocr_frames, visually_skipped_count = _select_frames_for_ocr(frames)
+                if prepared_frames is None or visually_skipped_count is None:
+                    ocr_frames, visually_skipped_count = _select_frames_for_ocr(frames)
+                else:
+                    ocr_frames = prepared_frames
                 ocr_lines: list[str] = []
                 prev_normalized: str | None = None
                 skipped_count = 0
@@ -540,6 +674,7 @@ def process_single_video(
 
         sorted_vision: dict[str, float] = {}
         per_frame_vision: list[dict[str, object]] = []
+        res: dict[str, object] | None = None
         if express_mode:
             if stage_callback:
                 stage_callback("ocr", "express mode enabled; OCR bypassed")
@@ -547,7 +682,85 @@ def process_single_video(
             if enable_vision_board:
                 sorted_vision, per_frame_vision = _do_vision()
         else:
-            if enable_vision_board:
+            skip_gate_active = _ocr_skip_high_confidence_enabled(
+                scan_mode=sm,
+                provider=p,
+                backend_model=m,
+                enable_search=bool(enable_search),
+                enable_vision_board=bool(enable_vision_board),
+                enable_llm_frame=send_llm_frame,
+                express_mode=express_mode,
+                context_size=ctx,
+            )
+            skip_candidate_frames: list[dict[str, object]] | None = None
+            skip_candidate_visual_skipped = 0
+            if skip_gate_active:
+                skip_candidate_frames, skip_candidate_visual_skipped = _select_frames_for_ocr(frames)
+                if len(skip_candidate_frames) != 1:
+                    logger.debug(
+                        "[%s] ocr_skip_disabled reason=selected_frames_%d",
+                        url,
+                        len(skip_candidate_frames),
+                    )
+                    skip_gate_active = False
+
+            if skip_gate_active and enable_vision_board:
+                sorted_vision, per_frame_vision = _do_vision()
+                frame_ok, frame_reason = _frame_quality_allows_ocr_skip(
+                    skip_candidate_frames[-1]["ocr_image"] if skip_candidate_frames else frames[-1]["ocr_image"]
+                )
+                vision_ok, expected_category, vision_reason = _vision_allows_ocr_skip(
+                    sorted_vision,
+                    per_frame_vision,
+                )
+                if frame_ok and vision_ok:
+                    if stage_callback:
+                        stage_callback("llm", f"evaluating provider={p.lower()} model={m} for OCR skip")
+                    tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
+                    prelim_res = llm_engine.query_pipeline(
+                        p,
+                        m,
+                        "",
+                        tail_image,
+                        override,
+                        False,
+                        send_llm_frame,
+                        ctx,
+                        express_mode=False,
+                    )
+                    llm_ok, llm_reason = _llm_result_allows_ocr_skip(
+                        prelim_res,
+                        expected_category,
+                        job_id,
+                    )
+                    if llm_ok:
+                        if stage_callback:
+                            stage_callback("ocr", "skipped; high-confidence multimodal result")
+                        logger.info(
+                            "[%s] ocr_skip_accepted expected_category=%s %s",
+                            url,
+                            expected_category,
+                            llm_reason,
+                        )
+                        ocr_text = ""
+                        res = prelim_res
+                    else:
+                        logger.info(
+                            "[%s] ocr_skip_rejected llm=%s frame=%s vision=%s",
+                            url,
+                            llm_reason,
+                            frame_reason,
+                            vision_reason,
+                        )
+                else:
+                    logger.info(
+                        "[%s] ocr_skip_rejected frame=%s vision=%s",
+                        url,
+                        frame_reason,
+                        vision_reason,
+                    )
+
+            if res is None and enable_vision_board and not skip_gate_active:
                 parallel_t0 = time.time()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
                     vision_future = pool.submit(_do_vision)
@@ -555,23 +768,25 @@ def process_single_video(
                     ocr_text = ocr_future.result()
                     sorted_vision, per_frame_vision = vision_future.result()
                 logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)
-            else:
+            elif res is None and enable_vision_board:
+                ocr_text = _do_ocr(skip_candidate_frames, skip_candidate_visual_skipped)
+            elif res is None:
                 ocr_text = _do_ocr()
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
-        send_llm_frame = bool(enable_llm_frame or express_mode)
-        tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
-        res = llm_engine.query_pipeline(
-            p,
-            m,
-            ocr_text,
-            tail_image,
-            override,
-            enable_search,
-            send_llm_frame,
-            ctx,
-            express_mode=express_mode,
-        )
+        if res is None:
+            tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
+            res = llm_engine.query_pipeline(
+                p,
+                m,
+                ocr_text,
+                tail_image,
+                override,
+                enable_search,
+                send_llm_frame,
+                ctx,
+                express_mode=express_mode,
+            )
         
         category_match = category_mapper.map_category(
             raw_category=res.get("category", "Unknown"),
