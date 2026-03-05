@@ -124,6 +124,20 @@ def _select_frames_for_ocr(frames: list[dict[str, object]]) -> tuple[list[dict[s
         selected.append(frame)
         last_selected = frame
 
+    if len(selected) == 2:
+        first_image = selected[0].get("ocr_image")
+        last_image = selected[1].get("ocr_image")
+        if isinstance(first_image, np.ndarray) and isinstance(last_image, np.ndarray):
+            if _frames_visually_similar(first_image, last_image, similarity_threshold):
+                skipped += 1
+                logger.debug(
+                    "ocr_frame_prefilter_collapse: dropping earlier representative at %.1fs in favor of last frame %.1fs threshold=%.3f",
+                    float(selected[0].get("time", 0.0)),
+                    float(selected[1].get("time", 0.0)),
+                    similarity_threshold,
+                )
+                selected = [selected[1]]
+
     logger.info(
         "ocr_frame_prefilter: selected=%d skipped=%d total_frames=%d threshold=%.3f",
         len(selected),

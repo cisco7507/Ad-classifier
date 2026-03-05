@@ -241,7 +241,8 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
         job_id="job-ocr-prefilter-1",
     )
 
-    assert len(ocr_calls) == 2
+    assert len(ocr_calls) == 1
+    assert ocr_calls == [200.0]
 
 
 def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
