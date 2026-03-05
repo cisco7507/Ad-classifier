@@ -1,6 +1,7 @@
 import sys
 import types
 
+import cv2
 import numpy as np
 import pytest
 import torch
@@ -240,3 +241,81 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
     )
 
     assert len(ocr_calls) == 2
+
+
+def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    cv2.putText(frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.putText(frame, "SAVE MORE", (52, 214), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 3, cv2.LINE_AA)
+
+    roi, used = pipeline_module._extract_ocr_focus_region(frame)
+
+    assert used is True
+    assert roi.shape[0] < frame.shape[0]
+    assert roi.shape[1] < frame.shape[1]
+
+
+def test_pipeline_easyocr_roi_falls_back_to_full_frame_when_crop_text_is_weak(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    ocr_shapes: list[tuple[int, int]] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            ocr_shapes.append(tuple(image.shape[:2]))
+            return "" if len(ocr_shapes) == 1 else "brand signal"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Raw Category",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    cv2.putText(frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.putText(frame, "SAVE MORE", (52, 214), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 3, cv2.LINE_AA)
+    frames = [{"image": object(), "ocr_image": frame, "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-ocr-roi-1",
+    )
+
+    assert len(ocr_shapes) == 2
+    assert ocr_shapes[0][0] < frame.shape[0]
+    assert ocr_shapes[0][1] < frame.shape[1]
+    assert ocr_shapes[1] == frame.shape[:2]

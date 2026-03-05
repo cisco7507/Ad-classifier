@@ -134,6 +134,91 @@ def _select_frames_for_ocr(frames: list[dict[str, object]]) -> tuple[list[dict[s
     return selected, skipped
 
 
+def _ocr_roi_enabled(engine_name: str) -> bool:
+    raw = os.environ.get("OCR_ROI_FIRST", "true").strip().lower()
+    return engine_name == "EasyOCR" and raw not in {"0", "false", "no", "off"}
+
+
+def _extract_ocr_focus_region(frame_bgr: np.ndarray) -> tuple[np.ndarray, bool]:
+    height, width = frame_bgr.shape[:2]
+    if height < 120 or width < 120:
+        return frame_bgr, False
+
+    scale = min(1.0, 640.0 / float(max(height, width)))
+    if scale < 1.0:
+        work = cv2.resize(frame_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    else:
+        work = frame_bgr
+
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_x = cv2.convertScaleAbs(grad_x)
+    blurred = cv2.GaussianBlur(grad_x, (3, 3), 0)
+    thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(15, work.shape[1] // 12), max(3, work.shape[0] // 40)),
+    )
+    connected = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    connected = cv2.dilate(connected, None, iterations=1)
+
+    contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return frame_bgr, False
+
+    min_area = float(work.shape[0] * work.shape[1]) * 0.002
+    candidate_boxes: list[tuple[int, int, int, int]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        area = float(w * h)
+        if area < min_area:
+            continue
+        if w / max(h, 1) < 1.2:
+            continue
+        candidate_boxes.append((x, y, x + w, y + h))
+
+    if not candidate_boxes:
+        return frame_bgr, False
+
+    x1 = min(box[0] for box in candidate_boxes)
+    y1 = min(box[1] for box in candidate_boxes)
+    x2 = max(box[2] for box in candidate_boxes)
+    y2 = max(box[3] for box in candidate_boxes)
+
+    pad_x = max(8, int((x2 - x1) * 0.08))
+    pad_y = max(8, int((y2 - y1) * 0.12))
+    x1 = max(0, x1 - pad_x)
+    y1 = max(0, y1 - pad_y)
+    x2 = min(work.shape[1], x2 + pad_x)
+    y2 = min(work.shape[0], y2 + pad_y)
+
+    if scale < 1.0:
+        x1 = int(x1 / scale)
+        y1 = int(y1 / scale)
+        x2 = int(x2 / scale)
+        y2 = int(y2 / scale)
+
+    x1 = max(0, min(width - 1, x1))
+    y1 = max(0, min(height - 1, y1))
+    x2 = max(x1 + 1, min(width, x2))
+    y2 = max(y1 + 1, min(height, y2))
+
+    roi_area_ratio = ((x2 - x1) * (y2 - y1)) / float(width * height)
+    if roi_area_ratio <= 0.03 or roi_area_ratio >= 0.9:
+        return frame_bgr, False
+
+    return frame_bgr[y1:y2, x1:x2], True
+
+
+def _ocr_text_has_signal(text: str) -> bool:
+    cleaned = re.sub(r"\[HUGE\]", " ", text or "", flags=re.IGNORECASE)
+    tokens = re.findall(r"[a-z0-9.]{2,}", cleaned.lower())
+    if not tokens:
+        return False
+    return len("".join(tokens)) >= 4
+
+
 def process_single_video(
     url,
     categories,
@@ -276,9 +361,34 @@ def process_single_video(
                 ocr_lines: list[str] = []
                 prev_normalized: str | None = None
                 skipped_count = 0
+                roi_hits = 0
+                roi_fallbacks = 0
                 last_index = len(ocr_frames) - 1
                 for idx, frame in enumerate(ocr_frames):
-                    raw_text = ocr_manager.extract_text(oe, frame["ocr_image"], om)
+                    ocr_image = frame["ocr_image"]
+                    raw_text = ""
+                    if _ocr_roi_enabled(oe) and isinstance(ocr_image, np.ndarray):
+                        roi_image, roi_used = _extract_ocr_focus_region(ocr_image)
+                        if roi_used:
+                            roi_hits += 1
+                            logger.debug(
+                                "ocr_roi_first: frame at %.1fs roi_shape=%s full_shape=%s",
+                                frame["time"],
+                                tuple(roi_image.shape[:2]),
+                                tuple(ocr_image.shape[:2]),
+                            )
+                            raw_text = ocr_manager.extract_text(oe, roi_image, om)
+                            if not _ocr_text_has_signal(raw_text):
+                                roi_fallbacks += 1
+                                logger.debug(
+                                    "ocr_roi_fallback: frame at %.1fs weak roi text, retrying full frame",
+                                    frame["time"],
+                                )
+                                raw_text = ocr_manager.extract_text(oe, ocr_image, om)
+                        else:
+                            raw_text = ocr_manager.extract_text(oe, ocr_image, om)
+                    else:
+                        raw_text = ocr_manager.extract_text(oe, ocr_image, om)
                     normalized = _normalize_ocr(raw_text)
                     is_last_frame = idx == last_index
                     if (
@@ -297,10 +407,12 @@ def process_single_video(
                     ocr_lines.append(raw_text)
                     prev_normalized = normalized
                 logger.info(
-                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d ocr_frames=%d total_frames=%d threshold=%.2f",
+                    "ocr_dedup: processed=%d text_skipped=%d visual_skipped=%d roi_hits=%d roi_fallbacks=%d ocr_frames=%d total_frames=%d threshold=%.2f",
                     len(ocr_lines),
                     skipped_count,
                     visually_skipped_count,
+                    roi_hits,
+                    roi_fallbacks,
                     len(ocr_frames),
                     len(frames),
                     dedup_threshold,
