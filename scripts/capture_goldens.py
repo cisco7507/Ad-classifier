@@ -97,10 +97,9 @@ def capture_fixture(fixture: dict, force: bool = False) -> dict:
     full_ocr_text = "\n".join([f"[{l['time_seconds']:.1f}s] {l['text']}" for l in ocr_lines])
 
     # --- LLM pipeline ---
-    cat_list = [c.strip() for c in s["categories"].split(",") if c.strip()]
     res = llm_engine.query_pipeline(
         s["provider"], s["model_name"],
-        full_ocr_text, cat_list,
+        full_ocr_text,
         frames[-1]["image"],
         s["override"], s["enable_search"], s["enable_vision"], s["context_size"]
     )

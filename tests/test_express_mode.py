@@ -37,8 +37,8 @@ def test_process_single_video_express_mode_bypasses_ocr(monkeypatch):
     class _DummyLLM:
         @staticmethod
         def query_pipeline(*args, **kwargs):
-            captured["force_multimodal"] = args[7]
-            captured["tail_image"] = args[4]
+            captured["force_multimodal"] = args[6]
+            captured["tail_image"] = args[3]
             captured["ocr_text"] = args[2]
             captured["express_mode"] = kwargs.get("express_mode")
             return {
@@ -92,4 +92,3 @@ def test_process_single_video_express_mode_bypasses_ocr(monkeypatch):
     assert captured["express_mode"] is True
     assert captured["force_multimodal"] is True
     assert captured["tail_image"] is not None
-
