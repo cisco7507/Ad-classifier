@@ -117,7 +117,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
     assert any(stage == "vision" for stage, _ in stages)
 
 
-def test_pipeline_skips_prompt_categories_for_forced_json_providers(monkeypatch):
+def test_pipeline_passes_canonical_fallback_categories_to_llm(monkeypatch):
     class _DummyMapper:
         categories = ["Category One", "Category Two"]
 
@@ -173,5 +173,5 @@ def test_pipeline_skips_prompt_categories_for_forced_json_providers(monkeypatch)
     )
 
     assert len(llm_calls) == 1
-    assert llm_calls[0]["kwargs"]["skip_prompt_categories"] is True
-    assert llm_calls[0]["args"][3] == ["Category One", "Category Two"]
+    assert llm_calls[0]["args"][2] == "sample ocr"
+    assert len(llm_calls[0]["args"]) == 8

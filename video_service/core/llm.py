@@ -283,20 +283,8 @@ class OpenAICompatibleProvider(BaseProvider):
             "top_p": 1.0,
             "presence_penalty": 0.0,
         }
-        
-        raw_categories = kwargs.get("suggested_categories", "")
-        # Normalize: may arrive as a list (from run_pipeline_job) or comma-separated string
-        if isinstance(raw_categories, list):
-            categories_list = [c.strip() for c in raw_categories if isinstance(c, str) and c.strip()]
-        elif isinstance(raw_categories, str) and raw_categories.strip():
-            categories_list = [c.strip() for c in raw_categories.split(",") if c.strip()]
-        else:
-            categories_list = []
-        logger.debug("ENUM DEBUG: raw_categories=%r → categories_list=%s | force_json=%s", raw_categories, categories_list, self.force_json_mode)
-        if self.force_json_mode and categories_list:
-            if "Unknown" not in categories_list:
-                categories_list.append("Unknown")
-            
+
+        if self.force_json_mode:
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
@@ -305,22 +293,15 @@ class OpenAICompatibleProvider(BaseProvider):
                         "type": "object",
                         "properties": {
                             "brand": {"type": "string"},
-                            "category": {
-                                "type": "string",
-                                "enum": categories_list
-                            },
+                            "category": {"type": "string"},
                             "confidence": {"type": "number"},
-                            "reasoning": {"type": "string"}
+                            "reasoning": {"type": "string"},
                         },
-                        "required": ["brand", "category", "confidence", "reasoning"]
-                    }
-                }
+                        "required": ["brand", "category", "confidence", "reasoning"],
+                    },
+                },
             }
-            logger.info("JSON SCHEMA ENUM ACTIVE — %d allowed categories", len(categories_list))
-            logger.debug("JSON SCHEMA ENUM categories: %s", categories_list)
-        elif self.force_json_mode:
-            payload["response_format"] = {"type": "json_object"}
-            logger.info("JSON SCHEMA ENUM INACTIVE — no suggested_categories, using plain json_object mode")
+            logger.info("JSON schema structured output active (no enum constraint)")
         try:
             resp = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
             resp.raise_for_status()
@@ -514,10 +495,9 @@ class ClassificationPipeline:
         include_image: bool,
         image_b64: Optional[str],
         express_mode: bool = False,
-        suggested_categories: str = "",
     ) -> dict:
         images = [image_b64] if (include_image and image_b64 and self.provider.supports_vision) else None
-        res = self.provider.generate_json(system_prompt, user_prompt, images=images, suggested_categories=suggested_categories)
+        res = self.provider.generate_json(system_prompt, user_prompt, images=images)
         logger.debug("llm_pipeline_initial_result: %s", res)
         if express_mode:
             return res if isinstance(res, dict) else {"error": "Unexpected LLM response"}
@@ -624,37 +604,23 @@ class HybridLLM:
         provider,
         backend_model,
         text,
-        categories,
         tail_image=None,
         override=False,
         enable_search=False,
         force_multimodal=False,
         context_size=8192,
         express_mode=False,
-        skip_prompt_categories=False,
     ):
-        provider_name = str(provider or "").strip().lower()
-        skip_prompt_categories = skip_prompt_categories or provider_name in {
-            "llama server",
-            "llama-server",
-            "lm studio",
-            "openai compatible",
-            "openai-compatible",
-        }
         if express_mode:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
                 "Your goal is to categorize video advertisements by examining the final frame of the commercial and using your vast internal knowledge of companies, slogans, and industries. "
                 "Rely on Internal Brand Knowledge: You know every major brand, their parent companies, and their marketing styles. Use this internal database as your absolute primary source of truth. "
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
-                "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. "
+                "Determine the most appropriate product or service category. If Override Allowed is True, you may generate a professional category when the ad does not fit neatly into a standard industry label. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
-            user_prompt = (
-                f"Override: {override}"
-                if skip_prompt_categories
-                else f"Categories: {categories}\nOverride: {override}"
-            )
+            user_prompt = f"Override: {override}"
         else:
             system_prompt = (
                 "You are a Senior Marketing Analyst and Global Brand Expert. "
@@ -664,14 +630,10 @@ class HybridLLM:
                 "IMPORTANT — Bilingual Content: The ads you analyze may be in English OR French (or a mix of both). French words and phrases are NOT OCR errors — they are legitimate content. Use them to identify brands, products, and categories just as you would English text. "
                 "(e.g., if OCR says 'Strbcks' or 'Star bucks co', you know the true brand is 'Starbucks'. But if OCR says 'Économisez avec Desjardins' or 'Assurance auto', those are valid French — do NOT treat them as typos). "
                 "IGNORE TIMESTAMPS: The OCR and Scene data text will be prefixed with bracketed timestamps like '[71.7s]' or '[12.5s]'. THESE ARE NOT PART OF THE AD. Do NOT use these numbers to identify brands or products (e.g. do not guess 'Boeing 717' just because you see '[71.7s]'). Ignore them completely. "
-                "Determine Category: Pick from 'Suggested Categories' or generate a professional tag if Override Allowed is True. "
+                "Determine the most appropriate product or service category. If Override Allowed is True, you may generate a professional category when the ad does not fit neatly into a standard industry label. "
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
-            user_prompt = (
-                f'Override: {override}\nOCR Text: "{text}"'
-                if skip_prompt_categories
-                else f'Categories: {categories}\nOverride: {override}\nOCR Text: "{text}"'
-            )
+            user_prompt = f'Override: {override}\nOCR Text: "{text}"'
         b64_img = self._pil_to_base64(tail_image) if tail_image else None
 
         try:
@@ -692,7 +654,6 @@ class HybridLLM:
             include_image=force_multimodal,
             image_b64=b64_img,
             express_mode=bool(express_mode),
-            suggested_categories=categories,
         )
 
     def query_agent(

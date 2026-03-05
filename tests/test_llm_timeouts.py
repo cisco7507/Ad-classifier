@@ -50,14 +50,12 @@ def test_query_pipeline_uses_timeout_300_for_remote_calls(monkeypatch):
         provider="Ollama",
         backend_model="qwen3-vl:8b-instruct",
         text="sample",
-        categories="Auto",
         enable_search=False,
     )
     llm.query_pipeline(
         provider="LM Studio",
         backend_model="local-model",
         text="sample",
-        categories="Auto",
         enable_search=False,
     )
 
@@ -104,7 +102,6 @@ def test_query_pipeline_timeout_returns_structured_error(monkeypatch):
         provider="Ollama",
         backend_model="qwen3-vl:8b-instruct",
         text="sample",
-        categories="Auto",
         enable_search=False,
     )
 
@@ -168,7 +165,7 @@ def test_qwen_ollama_agent_uses_chat_endpoint_and_qwen_options(monkeypatch):
     assert options["repeat_penalty"] == 1.0
 
 
-def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeypatch):
+def test_lm_studio_pipeline_uses_structure_only_json_schema(monkeypatch):
     calls: list[dict] = []
 
     def _fake_post(url, json=None, timeout=None):
@@ -192,7 +189,6 @@ def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeyp
         provider="LM Studio",
         backend_model="local-model",
         text="sample",
-        categories="Auto",
         enable_search=False,
     )
 
@@ -209,11 +205,11 @@ def test_lm_studio_pipeline_uses_assistant_prefill_and_reconstructs_json(monkeyp
     assert call["json"]["top_p"] == 1.0
     assert call["json"]["presence_penalty"] == 0.0
     assert call["json"]["response_format"]["type"] == "json_schema"
-    enum_values = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]["enum"]
-    assert enum_values == ["Auto", "Unknown"]
+    category_schema = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]
+    assert category_schema == {"type": "string"}
 
 
-def test_llama_server_pipeline_omits_prompt_categories_but_keeps_schema_enum(monkeypatch):
+def test_llama_server_pipeline_omits_prompt_categories_and_uses_structure_only_schema(monkeypatch):
     calls: list[dict] = []
 
     def _fake_post(url, json=None, timeout=None):
@@ -237,9 +233,7 @@ def test_llama_server_pipeline_omits_prompt_categories_but_keeps_schema_enum(mon
         provider="llama-server",
         backend_model="unsloth/Qwen3.5-4B-GGUF",
         text="sample",
-        categories="Beer",
         enable_search=False,
-        skip_prompt_categories=True,
     )
 
     assert result["brand"] == "Heineken"
@@ -248,11 +242,11 @@ def test_llama_server_pipeline_omits_prompt_categories_but_keeps_schema_enum(mon
     assert call["url"].endswith("/v1/chat/completions")
     assert "Categories:" not in call["json"]["messages"][1]["content"]
     assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
-    enum_values = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]["enum"]
-    assert enum_values == ["Beer", "Unknown"]
+    category_schema = call["json"]["response_format"]["json_schema"]["schema"]["properties"]["category"]
+    assert category_schema == {"type": "string"}
 
 
-def test_ollama_pipeline_keeps_categories_in_prompt_and_sends_no_schema(monkeypatch):
+def test_ollama_pipeline_omits_categories_from_prompt_and_sends_no_schema(monkeypatch):
     calls: list[dict] = []
 
     def _fake_post(url, json=None, timeout=None):
@@ -268,7 +262,6 @@ def test_ollama_pipeline_keeps_categories_in_prompt_and_sends_no_schema(monkeypa
         provider="Ollama",
         backend_model="qwen3-vl:8b-instruct",
         text="sample",
-        categories="Auto",
         enable_search=False,
     )
 
@@ -276,5 +269,6 @@ def test_ollama_pipeline_keeps_categories_in_prompt_and_sends_no_schema(monkeypa
     assert len(calls) == 1
     call = calls[0]
     assert call["url"].endswith("/api/chat")
-    assert "Categories: Auto" in call["json"]["messages"][1]["content"]
+    assert "Categories:" not in call["json"]["messages"][1]["content"]
+    assert 'OCR Text: "sample"' in call["json"]["messages"][1]["content"]
     assert "response_format" not in call["json"]

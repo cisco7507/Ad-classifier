@@ -257,30 +257,16 @@ def process_single_video(
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
         send_llm_frame = bool(enable_llm_frame or express_mode)
         tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
-        # Fall back to category_mapper.categories (from categories.csv) when user
-        # did not supply explicit categories.  This ensures both the LLM prompt and
-        # the JSON Schema enum constraint receive the canonical category list.
-        effective_categories = categories if categories else category_mapper.categories
-        provider_name = (p or "").strip().lower()
-        skip_prompt_categories = provider_name in {
-            "llama server",
-            "llama-server",
-            "lm studio",
-            "openai compatible",
-            "openai-compatible",
-        }
         res = llm_engine.query_pipeline(
             p,
             m,
             ocr_text,
-            effective_categories,
             tail_image,
             override,
             enable_search,
             send_llm_frame,
             ctx,
             express_mode=express_mode,
-            skip_prompt_categories=skip_prompt_categories,
         )
         
         category_match = category_mapper.map_category(
