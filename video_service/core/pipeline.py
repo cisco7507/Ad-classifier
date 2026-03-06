@@ -12,6 +12,7 @@ from video_service.core.video_io import (
     extract_express_brand_frame,
     extract_frames_for_pipeline,
     extract_middle_frame,
+    extract_tail_rescue_frames,
     get_pil_image,
     resolve_urls,
 )
@@ -256,6 +257,111 @@ def _resolve_ocr_early_stop_min_chars() -> int:
     except (TypeError, ValueError):
         logger.warning("invalid_ocr_early_stop_min_chars value=%r fallback=12", raw)
         return 12
+
+
+def _ocr_edge_rescue_enabled(scan_mode: str, express_mode: bool) -> bool:
+    raw = os.environ.get("OCR_EDGE_RESCUE_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode:
+        return False
+    mode = (scan_mode or "").strip().lower()
+    return mode not in {"full video", "full scan"}
+
+
+def _express_rescue_enabled() -> bool:
+    raw = os.environ.get("EXPRESS_RESCUE_ENABLED", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _extended_tail_rescue_enabled() -> bool:
+    raw = os.environ.get("OCR_EXTENDED_TAIL_RESCUE_ENABLED", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _full_video_rescue_enabled() -> bool:
+    raw = os.environ.get("OCR_FULL_VIDEO_RESCUE_ENABLED", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _resolve_extended_tail_window_seconds() -> int:
+    raw = os.environ.get("OCR_EXTENDED_TAIL_WINDOW_SECONDS", "30")
+    try:
+        return max(10, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_extended_tail_window_seconds value=%r fallback=30", raw)
+        return 30
+
+
+def _resolve_extended_tail_step_seconds() -> float:
+    raw = os.environ.get("OCR_EXTENDED_TAIL_STEP_SECONDS", "2.0")
+    try:
+        return max(0.5, float(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_extended_tail_step_seconds value=%r fallback=2.0", raw)
+        return 2.0
+
+
+def _resolve_full_video_rescue_max_frames() -> int:
+    raw = os.environ.get("OCR_FULL_VIDEO_RESCUE_MAX_FRAMES", "24")
+    try:
+        return max(4, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_full_video_rescue_max_frames value=%r fallback=24", raw)
+        return 24
+
+
+def _resolve_rescue_ocr_mode(engine_name: str, current_mode: str) -> str:
+    if engine_name == "EasyOCR":
+        return "🧠 Detailed"
+    return current_mode
+
+
+def _limit_rescue_frames(frames: list[dict[str, object]], max_frames: int) -> list[dict[str, object]]:
+    if len(frames) <= max_frames:
+        return frames
+    indices = np.linspace(0, len(frames) - 1, num=max_frames, dtype=int)
+    unique_indices: list[int] = []
+    seen: set[int] = set()
+    for idx in indices.tolist():
+        if idx not in seen:
+            unique_indices.append(idx)
+            seen.add(idx)
+    return [frames[idx] for idx in unique_indices]
+
+
+def _llm_result_is_blank(res: dict[str, object] | None) -> tuple[bool, str]:
+    if not isinstance(res, dict):
+        return True, "non_dict_response"
+    brand = str(res.get("brand", "") or "").strip().lower()
+    category = str(res.get("category", "") or "").strip().lower()
+    confidence = float(res.get("confidence", 0.0) or 0.0)
+    blank_brand = brand in {"", "unknown", "none", "n/a", "err"}
+    blank_category = category in {"", "unknown", "none", "n/a", "err"}
+    if blank_brand and blank_category:
+        return True, "blank_brand_and_category"
+    if blank_brand:
+        return True, "blank_brand"
+    if blank_category:
+        return True, "blank_category"
+    if confidence <= 0.0:
+        return True, "zero_confidence"
+    return False, "ok"
+
+
+def _should_run_ocr_edge_rescue(
+    scan_mode: str,
+    express_mode: bool,
+    ocr_text: str,
+    res: dict[str, object] | None,
+) -> tuple[bool, str]:
+    if not _ocr_edge_rescue_enabled(scan_mode, express_mode):
+        return False, "disabled"
+    has_signal = _ocr_text_has_signal(ocr_text)
+    blank_result, blank_reason = _llm_result_is_blank(res)
+    if has_signal or not blank_result:
+        return False, "initial_result_usable"
+    return True, blank_reason
 
 
 def _ocr_text_is_strong_for_early_stop(text: str) -> bool:
@@ -547,16 +653,30 @@ def process_single_video(
         def _do_ocr(
             prepared_frames: list[dict[str, object]] | None = None,
             visually_skipped_count: int | None = None,
+            rescue_profile: bool = False,
+            ocr_mode_override: str | None = None,
         ) -> str:
             logger.debug("[%s] parallel_task_start: ocr", url)
             try:
                 if stage_callback:
-                    stage_callback("ocr", f"ocr engine={oe.lower()}")
+                    detail = f"ocr engine={oe.lower()}"
+                    if rescue_profile:
+                        detail += " rescue profile"
+                    stage_callback("ocr", detail)
+                effective_ocr_mode = ocr_mode_override or om
                 dedup_threshold = _resolve_ocr_dedup_threshold()
                 if prepared_frames is None or visually_skipped_count is None:
                     ocr_frames, visually_skipped_count = _select_frames_for_ocr(frames)
                 else:
                     ocr_frames = prepared_frames
+                    visually_skipped_count = int(visually_skipped_count)
+                if rescue_profile:
+                    logger.info(
+                        "[%s] ocr_rescue_profile: frames=%d mode=%s",
+                        url,
+                        len(ocr_frames),
+                        effective_ocr_mode,
+                    )
                 ocr_lines: list[str] = []
                 prev_normalized: str | None = None
                 skipped_count = 0
@@ -566,7 +686,7 @@ def process_single_video(
                 no_roi_skipped = 0
                 ocr_call_count = 0
                 ocr_elapsed_seconds = 0.0
-                early_stop_active = _ocr_early_stop_enabled(sm)
+                early_stop_active = _ocr_early_stop_enabled(sm) and not rescue_profile
                 last_index = len(ocr_frames) - 1
                 idx = 0
 
@@ -574,7 +694,7 @@ def process_single_video(
                     nonlocal ocr_call_count, ocr_elapsed_seconds
                     started_at = time.perf_counter()
                     try:
-                        return ocr_manager.extract_text(oe, target_image, om)
+                        return ocr_manager.extract_text(oe, target_image, effective_ocr_mode)
                     finally:
                         ocr_call_count += 1
                         ocr_elapsed_seconds += time.perf_counter() - started_at
@@ -592,12 +712,13 @@ def process_single_video(
                         and ocr_image.shape[1] >= 120
                     )
                     roi_capable = roi_detection_applicable and (
-                        _ocr_roi_enabled(oe) or _ocr_skip_no_roi_enabled(oe, sm)
+                        _ocr_roi_enabled(oe) or (_ocr_skip_no_roi_enabled(oe, sm) and not rescue_profile)
                     )
                     if roi_capable:
                         roi_image, roi_used = _extract_ocr_focus_region(ocr_image)
                     if (
                         _ocr_skip_no_roi_enabled(oe, sm)
+                        and not rescue_profile
                         and not is_last_frame
                         and roi_capable
                         and not roi_used
@@ -799,6 +920,95 @@ def process_single_video(
                 ctx,
                 express_mode=express_mode,
             )
+
+        rescue_needed, rescue_reason = _should_run_ocr_edge_rescue(
+            scan_mode=sm,
+            express_mode=express_mode,
+            ocr_text=ocr_text,
+            res=res,
+        )
+        if rescue_needed:
+            logger.info("[%s] ocr_rescue_triggered reason=%s", url, rescue_reason)
+            if stage_callback:
+                stage_callback("ocr", f"rescue triggered; reason={rescue_reason}")
+            rescue_frames, rescue_cap = extract_tail_rescue_frames(url, job_id=job_id)
+            if rescue_cap and rescue_cap.isOpened():
+                rescue_cap.release()
+
+            if rescue_frames:
+                if stage_callback:
+                    stage_callback("frame_extract", f"rescue extracted {len(rescue_frames)} frames (extended tail)")
+                rescue_mode = "🧠 Detailed" if oe == "EasyOCR" else om
+                rescue_ocr_text = _do_ocr(
+                    prepared_frames=rescue_frames,
+                    visually_skipped_count=0,
+                    rescue_profile=True,
+                    ocr_mode_override=rescue_mode,
+                )
+                rescue_tail_image = get_pil_image(rescue_frames[-1]) if send_llm_frame else None
+                rescue_accepted = False
+
+                if _ocr_text_has_signal(rescue_ocr_text):
+                    if stage_callback:
+                        stage_callback("llm", f"retrying after OCR rescue provider={p.lower()} model={m}")
+                    rescue_res = llm_engine.query_pipeline(
+                        p,
+                        m,
+                        rescue_ocr_text,
+                        rescue_tail_image,
+                        override,
+                        enable_search,
+                        send_llm_frame,
+                        ctx,
+                        express_mode=False,
+                    )
+                    rescue_blank, rescue_blank_reason = _llm_result_is_blank(rescue_res)
+                    if not rescue_blank:
+                        logger.info("[%s] ocr_rescue_accepted path=ocr_text", url)
+                        frames = rescue_frames
+                        ocr_text = rescue_ocr_text
+                        res = rescue_res
+                        rescue_accepted = True
+                        if enable_vision_board:
+                            sorted_vision, per_frame_vision = _do_vision()
+                    else:
+                        logger.info(
+                            "[%s] ocr_rescue_rejected path=ocr_text reason=%s",
+                            url,
+                            rescue_blank_reason,
+                        )
+
+                if not rescue_accepted and rescue_tail_image is not None:
+                    if stage_callback:
+                        stage_callback("llm", f"retrying image-first rescue provider={p.lower()} model={m}")
+                    image_res = llm_engine.query_pipeline(
+                        p,
+                        m,
+                        "",
+                        rescue_tail_image,
+                        override,
+                        False,
+                        send_llm_frame,
+                        ctx,
+                        express_mode=True,
+                    )
+                    image_blank, image_blank_reason = _llm_result_is_blank(image_res)
+                    if not image_blank:
+                        logger.info("[%s] ocr_rescue_accepted path=image_first", url)
+                        frames = rescue_frames
+                        if _ocr_text_has_signal(rescue_ocr_text):
+                            ocr_text = rescue_ocr_text
+                        res = image_res
+                        if enable_vision_board:
+                            sorted_vision, per_frame_vision = _do_vision()
+                    else:
+                        logger.info(
+                            "[%s] ocr_rescue_rejected path=image_first reason=%s",
+                            url,
+                            image_blank_reason,
+                        )
+            else:
+                logger.info("[%s] ocr_rescue_skipped reason=no_rescue_frames", url)
         
         category_match = category_mapper.map_category(
             raw_category=res.get("category", "Unknown"),

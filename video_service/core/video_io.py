@@ -256,6 +256,95 @@ def extract_frames_for_agent(url: str, job_id: str | None = None) -> tuple[list[
     return frames, cap
 
 
+def extract_tail_rescue_frames(
+    url: str,
+    lookback_seconds: int | None = None,
+    step_seconds: float | None = None,
+    min_brightness: float | None = None,
+    job_id: str | None = None,
+) -> tuple[list[dict[str, Any]], Any]:
+    cap = cv2.VideoCapture(get_stream_url(url))
+    frames: list[dict[str, Any]] = []
+    if not cap.isOpened():
+        return frames, cap
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if fps <= 0 or total <= 0:
+        return frames, cap
+
+    duration = total / fps
+    rescue_window = max(4, lookback_seconds or _parse_int_env("OCR_RESCUE_TAIL_WINDOW_SECONDS", 12))
+    rescue_step = max(0.5, step_seconds or _parse_float_env("OCR_RESCUE_TAIL_STEP_SECONDS", 1.0))
+    brightness_floor = max(0.0, min_brightness if min_brightness is not None else _parse_float_env("OCR_RESCUE_MIN_BRIGHTNESS", 5.0))
+
+    start_sec = max(0.0, duration - rescue_window)
+    current_sec = start_sec
+    sampled = 0
+    dark_skipped = 0
+    brightest_frame: tuple[float, Any, float] | None = None
+
+    while current_sec <= max(start_sec, duration - 0.05):
+        if job_id and is_job_aborted(job_id):
+            logger.info("abort_frame_extraction: job_id=%s time=%.2fs type=tail_rescue", job_id, current_sec)
+            break
+
+        cap.set(cv2.CAP_PROP_POS_MSEC, current_sec * 1000.0)
+        ret, fr = cap.read()
+        sampled += 1
+        if not ret:
+            current_sec += rescue_step
+            continue
+
+        gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
+        brightness = float(cv2.mean(gray)[0])
+        if brightest_frame is None or brightness > brightest_frame[2]:
+            brightest_frame = (current_sec, fr, brightness)
+
+        if brightness < brightness_floor:
+            dark_skipped += 1
+            current_sec += rescue_step
+            continue
+
+        frames.append(
+            {
+                "image": None,
+                "ocr_image": fr,
+                "time": current_sec,
+                "type": "tail_rescue",
+                "_pil_cache": None,
+            }
+        )
+        current_sec += rescue_step
+
+    if not frames and brightest_frame is not None:
+        logger.info(
+            "tail_rescue_sampling: all sampled frames were dark; using brightest frame at %.2fs brightness=%.2f",
+            brightest_frame[0],
+            brightest_frame[2],
+        )
+        frames.append(
+            {
+                "image": None,
+                "ocr_image": brightest_frame[1],
+                "time": brightest_frame[0],
+                "type": "tail_rescue",
+                "_pil_cache": None,
+            }
+        )
+
+    logger.info(
+        "tail_rescue_sampling: sampled=%d selected=%d dark_skipped=%d window=%ds step=%.2fs min_brightness=%.2f",
+        sampled,
+        len(frames),
+        dark_skipped,
+        rescue_window,
+        rescue_step,
+        brightness_floor,
+    )
+    return frames, cap
+
+
 def _cv_bgr_to_pil(frame_bgr: Any) -> Image.Image:
     return Image.fromarray(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
 

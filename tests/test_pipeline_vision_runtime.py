@@ -772,3 +772,231 @@ def test_pipeline_runs_ocr_when_multimodal_tail_confidence_is_too_low(monkeypatc
     assert llm_calls == ["", "ocr fallback"]
     assert ocr_text == "ocr fallback"
     assert row[1] == "Brand X"
+
+
+def test_pipeline_does_not_trigger_edge_rescue_when_initial_result_is_usable(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "brand signal"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Brand X",
+                "category": "Category One",
+                "confidence": 0.95,
+                "reasoning": "usable",
+            }
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+    rescue_calls: list[str] = []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: (rescue_calls.append("called"), (frames, None))[1],
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-edge-rescue-skip-1",
+    )
+
+    assert rescue_calls == []
+
+
+def test_pipeline_edge_rescue_retries_extended_tail_ocr_only_after_blank_initial_result(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    ocr_modes: list[str] = []
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            ocr_modes.append(mode)
+            marker = int(image[0, 0, 0])
+            if marker == 10:
+                return ""
+            if marker == 20:
+                return "ACME SAVE MORE"
+            return ""
+
+    llm_calls: list[tuple[str, bool]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            llm_calls.append((text, bool(kwargs.get("express_mode", False))))
+            if text == "":
+                return {
+                    "brand": "",
+                    "category": "",
+                    "confidence": 0.0,
+                    "reasoning": "blank",
+                }
+            return {
+                "brand": "Acme",
+                "category": "Category One",
+                "confidence": 0.93,
+                "reasoning": "rescued by OCR",
+            }
+
+    initial_frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+    rescue_frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 23.0, "type": "tail_rescue"}]
+    rescue_calls: list[str] = []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: (rescue_calls.append("called"), (rescue_frames, None))[1],
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-edge-rescue-1",
+    )
+
+    assert rescue_calls == ["called"]
+    assert ocr_modes == ["🚀 Fast", "🧠 Detailed"]
+    assert llm_calls == [("", False), ("ACME SAVE MORE", False)]
+    assert ocr_text == "ACME SAVE MORE"
+    assert row[1] == "Acme"
+
+
+def test_pipeline_edge_rescue_falls_back_to_image_first_when_rescue_ocr_is_blank(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return ""
+
+    llm_calls: list[tuple[str, bool]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            text = args[2]
+            express_mode = bool(kwargs.get("express_mode", False))
+            llm_calls.append((text, express_mode))
+            if express_mode:
+                return {
+                    "brand": "Visual Brand",
+                    "category": "Category One",
+                    "confidence": 0.91,
+                    "reasoning": "rescued from image",
+                }
+            return {
+                "brand": "",
+                "category": "",
+                "confidence": 0.0,
+                "reasoning": "blank",
+            }
+
+    initial_frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+    rescue_frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 20, dtype=np.uint8), "time": 23.0, "type": "tail_rescue"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (initial_frames, None),
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_tail_rescue_frames",
+        lambda _url, **kwargs: (rescue_frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, ocr_text, _, _, row, _ = pipeline_module.process_single_video(
+        url="https://example.test/ad.mp4",
+        categories=[],
+        p="Ollama",
+        m="qwen3-vl:8b-instruct",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision_board=False,
+        enable_llm_frame=True,
+        ctx=8192,
+        job_id="job-edge-rescue-image-1",
+    )
+
+    assert llm_calls == [("", False), ("", True)]
+    assert ocr_text == ""
+    assert row[1] == "Visual Brand"
