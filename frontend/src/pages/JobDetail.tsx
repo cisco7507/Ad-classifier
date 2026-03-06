@@ -340,14 +340,22 @@ function reasoningInlineClass(type: ReasoningTermType): string {
 function HelpHeading({
   label,
   help,
+  tooltipAlign = "start",
 }: {
   label: string;
   help?: string;
+  tooltipAlign?: "center" | "start" | "end";
 }) {
   return (
     <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-gray-400 font-bold">
       <span>{label}</span>
-      {help ? <HelpTooltip content={help} widthClassName="w-72" /> : null}
+      {help ? (
+        <HelpTooltip
+          content={help}
+          widthClassName="w-72"
+          align={tooltipAlign}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1064,6 +1072,8 @@ export function JobDetail() {
   const scratchboardRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const autoSelectVideoRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoPrimedRef = useRef(false);
   const firstRow = result?.[0];
   const brandText =
     typeof firstRow?.Brand === "string" ? firstRow.Brand.trim() : "";
@@ -1309,6 +1319,24 @@ export function JobDetail() {
     setExplanationError("");
     setExplanationLoading(false);
   }, [id]);
+
+  useEffect(() => {
+    videoPrimedRef.current = false;
+  }, [videoSource?.url]);
+
+  const primeVideoFirstFrame = useCallback(() => {
+    const video = videoRef.current;
+    if (!video || videoPrimedRef.current) return;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const targetTime = duration > 0 ? Math.min(0.05, Math.max(0.001, duration / 1000)) : 0.05;
+    videoPrimedRef.current = true;
+    try {
+      video.currentTime = targetTime;
+    } catch {
+      // Some browsers reject early seeks before the stream is fully ready.
+      videoPrimedRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (scratchboardRef.current) {
@@ -1942,9 +1970,13 @@ export function JobDetail() {
             {videoSource.type === "local" && (
               <div className="space-y-3">
                 <video
+                  ref={videoRef}
                   controls
-                  preload="metadata"
+                  preload="auto"
+                  playsInline
                   className="w-full max-h-[500px] rounded-lg border border-gray-300 bg-black"
+                  onLoadedMetadata={primeVideoFirstFrame}
+                  onLoadedData={primeVideoFirstFrame}
                   onError={() =>
                     setVideoError(
                       "Source video could not be streamed (missing file or unavailable).",
@@ -2016,47 +2048,47 @@ export function JobDetail() {
                   {mapperCategoryText || "No mapped category available."}
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
-                  <div
-                    title={`Mapper method: ${mapperMethodDisplay}`}
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="Method"
                       help="How the final category was chosen. For example, Embeddings means the raw category text was matched against taxonomy labels in embedding space."
                     />
-                    <div className="font-medium text-gray-800">
+                    <div
+                      className="font-medium text-gray-800"
+                      title={`Mapper method: ${mapperMethodDisplay}`}
+                    >
                       {mapperMethodDisplay}
                     </div>
                   </div>
-                  <div
-                    title={
-                      mapperScoreValue === null
-                        ? "No mapper score available."
-                        : `Mapper score: ${mapperScoreValue.toFixed(6)}`
-                    }
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="Mapper Score"
                       help="Strength of the final taxonomy match. Higher means the mapper considered the chosen canonical category a closer fit to the source label or evidence."
                     />
-                    <div className="font-mono text-cyan-700">
+                    <div
+                      className="font-mono text-cyan-700"
+                      title={
+                        mapperScoreValue === null
+                          ? "No mapper score available."
+                          : `Mapper score: ${mapperScoreValue.toFixed(6)}`
+                      }
+                    >
                       {mapperScoreDisplay}
                     </div>
                   </div>
-                  <div
-                    title={
-                      mapperConfidenceValue === null
-                        ? "No LLM confidence available."
-                        : `LLM confidence: ${mapperConfidenceValue.toFixed(6)}`
-                    }
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2"
-                  >
+                  <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
                     <HelpHeading
                       label="LLM Confidence"
                       help="The classification model's own confidence in the brand/category answer before the final taxonomy mapping step."
                     />
-                    <div className="font-mono text-gray-800">
+                    <div
+                      className="font-mono text-gray-800"
+                      title={
+                        mapperConfidenceValue === null
+                          ? "No LLM confidence available."
+                          : `LLM confidence: ${mapperConfidenceValue.toFixed(6)}`
+                      }
+                    >
                       {mapperConfidenceDisplay}
                     </div>
                   </div>
@@ -2117,6 +2149,7 @@ export function JobDetail() {
                       <HelpTooltip
                         content="A local 2D projection of the category neighborhood. Query shows the source signal, final category is the mapped answer, and nearby points are the closest alternatives in that embedding space."
                         widthClassName="w-80"
+                        align="start"
                       />
                     </div>
                     <p className="text-xs text-slate-400">
