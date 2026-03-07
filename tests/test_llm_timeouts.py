@@ -126,6 +126,21 @@ def test_query_agent_timeout_returns_tool_error(monkeypatch):
     assert result == '[TOOL: ERROR | reason="LLM Timeout after 300s"]'
 
 
+def test_specificity_search_query_uses_anchor_terms_not_visual_labels():
+    llm = HybridLLM()
+    query = llm._build_specificity_search_query(
+        brand="Mercy",
+        current_category="Movie",
+        ocr_text="Mercy Movie.ca FILMED FOR IMAX NOW PLAYING",
+    )
+
+    assert "Mercy" in query
+    assert '"movie.ca"' in query
+    assert "official site" in query
+    assert "Action/thriller Cinema" not in query
+    assert "Filmed Entertainment" not in query
+
+
 def test_create_provider_routes_qwen_models_to_qwen_plugin():
     provider = create_provider("Ollama", "qwen3-vl:8b-instruct", context_size=8192)
     assert isinstance(provider, OllamaQwenProvider)

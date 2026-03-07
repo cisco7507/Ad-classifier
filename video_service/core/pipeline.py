@@ -475,6 +475,43 @@ def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list
     return list(sorted_vision.items())[:limit]
 
 
+def _build_specificity_search_candidates(
+    *,
+    raw_category: str,
+    current_match: dict[str, object],
+    predicted_brand: str,
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+    mapper_neighbor_limit: int = 6,
+    visual_limit: int = 3,
+) -> list[str]:
+    candidates: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidates:
+            candidates.append(clean)
+
+    _append(str(current_match.get("canonical_category", "") or ""))
+
+    if hasattr(category_mapper, "get_mapper_neighbor_categories"):
+        try:
+            for label, _score in category_mapper.get_mapper_neighbor_categories(
+                raw_category=raw_category,
+                predicted_brand=predicted_brand,
+                ocr_summary=ocr_text,
+                top_k=mapper_neighbor_limit,
+            ):
+                _append(label)
+        except Exception as exc:
+            logger.warning("specificity_search_mapper_neighbors_failed: %s", exc)
+
+    for label, _score in _top_visual_matches(sorted_vision, limit=visual_limit):
+        _append(label)
+
+    return candidates
+
+
 def _should_run_specificity_search_rescue(
     enable_search: bool,
     express_mode: bool,
@@ -530,11 +567,14 @@ def _accept_specificity_search_result(
     current_match: dict[str, object],
     refined_match: dict[str, object],
     sorted_vision: dict[str, float],
+    candidate_categories: list[str],
 ) -> tuple[bool, str]:
     current_canonical = str(current_match.get("canonical_category", "") or "")
     refined_canonical = str(refined_match.get("canonical_category", "") or "")
     if not refined_canonical or refined_canonical == current_canonical:
         return False, f"unchanged_category={refined_canonical!r}"
+    if candidate_categories and refined_canonical not in candidate_categories:
+        return False, f"outside_candidate_set={refined_canonical!r}"
 
     if refined_canonical not in _specificity_search_broad_categories():
         return True, f"narrowed_to={refined_canonical!r}"
@@ -2088,12 +2128,20 @@ def process_single_video(
                 stage_callback("llm", f"specificity search rescue provider={p.lower()} model={m}")
             logger.info("[%s] fallback_triggered type=specificity_search_rescue reason=%s", url, specificity_reason)
             visual_matches = _top_visual_matches(sorted_vision, limit=4)
+            specificity_candidates = _build_specificity_search_candidates(
+                raw_category=str(res.get("category", "") or ""),
+                current_match=category_match,
+                predicted_brand=str(res.get("brand", "") or ""),
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
             refined_res, refined_reason = llm_engine.query_specificity_rescue(
                 p,
                 m,
                 brand=str(res.get("brand", "") or ""),
                 current_category=str(res.get("category", "") or category_match.get("canonical_category", "") or ""),
                 ocr_text=ocr_text,
+                candidate_categories=specificity_candidates,
                 visual_matches=visual_matches,
                 context_size=ctx,
             )
@@ -2109,6 +2157,7 @@ def process_single_video(
                     current_match=category_match,
                     refined_match=refined_match,
                     sorted_vision=sorted_vision,
+                    candidate_categories=specificity_candidates,
                 )
                 if specificity_ok:
                     res = refined_res
@@ -2129,7 +2178,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
-                        evidence_note=f"Search refinement narrowed the category because {specificity_accept_reason}.",
+                        evidence_note=f"Search refinement narrowed the category because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
                 else:
                     logger.info(
@@ -2149,7 +2198,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
-                        evidence_note=f"Search refinement was rejected because {specificity_accept_reason}.",
+                        evidence_note=f"Search refinement was rejected because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
             else:
                 logger.info(

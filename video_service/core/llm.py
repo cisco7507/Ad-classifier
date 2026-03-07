@@ -615,7 +615,6 @@ class HybridLLM:
         brand: str,
         current_category: str,
         ocr_text: str,
-        visual_matches: list[tuple[str, float]] | None = None,
     ) -> str:
         domain, path = self._extract_search_domain(ocr_text)
         query_parts: list[str] = []
@@ -637,11 +636,9 @@ class HybridLLM:
         ]
         if ocr_tokens:
             query_parts.extend(ocr_tokens[:4])
-        if visual_matches:
-            query_parts.extend(label for label, _score in visual_matches[:2])
         if current_category:
             query_parts.append(current_category)
-        query_parts.append("official product service page")
+        query_parts.append("official site")
         return " ".join(dict.fromkeys(part for part in query_parts if part))
 
     def query_specificity_rescue(
@@ -651,6 +648,7 @@ class HybridLLM:
         brand: str,
         current_category: str,
         ocr_text: str,
+        candidate_categories: list[str] | None = None,
         visual_matches: list[tuple[str, float]] | None = None,
         context_size=8192,
     ) -> tuple[dict | None, str]:
@@ -663,7 +661,6 @@ class HybridLLM:
             brand=brand,
             current_category=current_category,
             ocr_text=ocr_text,
-            visual_matches=visual_matches,
         )
         if not query.strip():
             return None, "no_search_query"
@@ -677,10 +674,14 @@ class HybridLLM:
             visual_hint_text = " | ".join(
                 f"{label} ({score:.4f})" for label, score in visual_matches[:4]
             )
+        candidate_text = ""
+        if candidate_categories:
+            candidate_text = " | ".join(candidate_categories)
 
         system_prompt = (
             "You are refining a broad video-ad category into the most specific supported product or service category. "
             "Use the existing brand, OCR, and web search evidence to narrow a broad parent category only when the evidence clearly supports a more specific leaf category. "
+            "You must choose the best-supported category from the supplied candidate categories. "
             "Do not broaden the category. Do not invent a subtype that is not supported. "
             "If the evidence only supports the current broad category, keep it. "
             "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
@@ -688,10 +689,11 @@ class HybridLLM:
         user_prompt = (
             f"Brand: {brand}\n"
             f"Current Category: {current_category}\n"
+            f"Candidate Categories: {candidate_text or current_category}\n"
             f"OCR Evidence: {ocr_text}\n"
             f"Visual Hints: {visual_hint_text or 'None'}\n"
             f"Web Search Snippets: {snippets}\n"
-            "Return the most specific supported product or service category."
+            "Return the most specific supported product or service category from the candidate list."
         )
         try:
             res = provider_plugin.generate_json(system_prompt, user_prompt)

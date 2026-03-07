@@ -1897,6 +1897,10 @@ def test_pipeline_accepts_specificity_search_rescue_for_broad_financial_category
         categories = ["Financial Services", "Credit Card"]
 
         @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Financial Services", 1.0), ("Credit Card", 0.84)]
+
+        @staticmethod
         def map_category(**kwargs):
             raw = kwargs.get("raw_category", "")
             if raw == "Financial Services":
@@ -1989,6 +1993,10 @@ def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatc
         categories = ["Financial Services"]
 
         @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Financial Services", 1.0)]
+
+        @staticmethod
         def map_category(**kwargs):
             return {
                 "canonical_category": "Financial Services",
@@ -2052,8 +2060,14 @@ def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatc
 
 
 def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak_mapper(monkeypatch):
+    specificity_calls = []
+
     class _DummyMapper:
         categories = ["Comedy", "Action/Thriller Cinema"]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Comedy", 0.6108), ("Action/Thriller Cinema", 0.89)]
 
         @staticmethod
         def map_category(**kwargs):
@@ -2096,6 +2110,7 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
 
         @staticmethod
         def query_specificity_rescue(*args, **kwargs):
+            specificity_calls.append(kwargs)
             return (
                 {
                     "brand": "Mercy",
@@ -2135,6 +2150,8 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
 
     assert row[2] == "5281"
     assert row[3] == "Action/Thriller Cinema"
+    assert specificity_calls
+    assert specificity_calls[0]["candidate_categories"] == ["Comedy", "Action/Thriller Cinema"]
     processing_trace = signal_artifacts["processing_trace"]
     assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
     assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
