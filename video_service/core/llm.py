@@ -599,6 +599,108 @@ class HybridLLM:
             )
             return 0.7
 
+    def _extract_search_domain(self, text: str) -> tuple[str, str]:
+        if not text:
+            return "", ""
+        match = re.search(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text, flags=re.IGNORECASE)
+        if not match:
+            return "", ""
+        raw = match.group(1)
+        domain = raw.split("/", 1)[0].lower()
+        path = raw.split("/", 1)[1] if "/" in raw else ""
+        return domain, path
+
+    def _build_specificity_search_query(
+        self,
+        brand: str,
+        current_category: str,
+        ocr_text: str,
+        visual_matches: list[tuple[str, float]] | None = None,
+    ) -> str:
+        domain, path = self._extract_search_domain(ocr_text)
+        query_parts: list[str] = []
+        brand_clean = (brand or "").strip()
+        if domain:
+            query_parts.append(f"site:{domain}")
+        if brand_clean:
+            query_parts.append(f"\"{brand_clean}\"")
+        if domain:
+            query_parts.append(f"\"{domain}\"")
+        if path:
+            path_tokens = [token for token in re.split(r"[/_-]+", path) if len(token) >= 3]
+            if path_tokens:
+                query_parts.extend(path_tokens[:3])
+        ocr_tokens = [
+            token
+            for token in re.findall(r"[A-Za-zÀ-ÿ0-9]{4,}", ocr_text or "")
+            if token.lower() not in {"brand", "offer", "official", "service", "services"}
+        ]
+        if ocr_tokens:
+            query_parts.extend(ocr_tokens[:4])
+        if visual_matches:
+            query_parts.extend(label for label, _score in visual_matches[:2])
+        if current_category:
+            query_parts.append(current_category)
+        query_parts.append("official product service page")
+        return " ".join(dict.fromkeys(part for part in query_parts if part))
+
+    def query_specificity_rescue(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        current_category: str,
+        ocr_text: str,
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        query = self._build_specificity_search_query(
+            brand=brand,
+            current_category=current_category,
+            ocr_text=ocr_text,
+            visual_matches=visual_matches,
+        )
+        if not query.strip():
+            return None, "no_search_query"
+
+        snippets = search_manager.search(query)
+        if not snippets:
+            return None, "search_unavailable"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        system_prompt = (
+            "You are refining a broad video-ad category into the most specific supported product or service category. "
+            "Use the existing brand, OCR, and web search evidence to narrow a broad parent category only when the evidence clearly supports a more specific leaf category. "
+            "Do not broaden the category. Do not invent a subtype that is not supported. "
+            "If the evidence only supports the current broad category, keep it. "
+            "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand: {brand}\n"
+            f"Current Category: {current_category}\n"
+            f"OCR Evidence: {ocr_text}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            f"Web Search Snippets: {snippets}\n"
+            "Return the most specific supported product or service category."
+        )
+        try:
+            res = provider_plugin.generate_json(system_prompt, user_prompt)
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict) or "category" not in res:
+            return None, "invalid_llm_response"
+        return res, "ok"
+
     def query_pipeline(
         self,
         provider,
