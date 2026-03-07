@@ -399,6 +399,34 @@ class CategoryMapper:
             "focus_bounds": focus_bounds,
         }
 
+    def get_mapper_neighbor_categories(
+        self,
+        raw_category: str,
+        predicted_brand: str = "",
+        ocr_summary: str = "",
+        top_k: int = 8,
+    ) -> list[tuple[str, float]]:
+        if not self.active or self.embedder is None or self.category_embeddings is None:
+            return []
+
+        query_text = self._resolve_query_text(
+            raw_category=raw_category,
+            predicted_brand=predicted_brand,
+            ocr_summary=ocr_summary,
+        )
+        query_embedding = self.embedder.encode(
+            query_text,
+            convert_to_tensor=True,
+            show_progress_bar=False,
+        )
+        scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
+        candidate_count = min(max(1, top_k), len(self.categories))
+        top_indices = torch.topk(scores, k=candidate_count).indices.tolist()
+        return [
+            (self.categories[idx], float(scores[idx].item()))
+            for idx in top_indices
+        ]
+
     def build_visual_vector_plot(
         self,
         image_feature: Any,

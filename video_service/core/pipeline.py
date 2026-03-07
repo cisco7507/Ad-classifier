@@ -419,6 +419,175 @@ def _resolve_ocr_support_score_threshold() -> float:
     return max(0.0, min(1.0, value))
 
 
+def _specificity_search_rescue_enabled(enable_search: bool, express_mode: bool) -> bool:
+    raw = os.environ.get("SPECIFICITY_SEARCH_RESCUE_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode:
+        return False
+    return bool(enable_search)
+
+
+def _resolve_specificity_search_mapper_threshold() -> float:
+    raw = os.environ.get("SPECIFICITY_SEARCH_MAPPER_SCORE_THRESHOLD", "0.65")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_specificity_search_mapper_score_threshold value=%r fallback=0.65", raw)
+        return 0.65
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_specificity_search_vision_threshold() -> float:
+    raw = os.environ.get("SPECIFICITY_SEARCH_VISION_SCORE_THRESHOLD", "0.55")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid_specificity_search_vision_score_threshold value=%r fallback=0.55", raw)
+        return 0.55
+    return max(0.0, min(1.0, value))
+
+
+def _specificity_search_broad_categories() -> set[str]:
+    raw = os.environ.get(
+        "SPECIFICITY_SEARCH_BROAD_CATEGORIES",
+        "Financial Services,Retail,Technology,Educational,Banking,Insurance,Automotive,Telecommunications,Travel,Healthcare,Nonprofit Institutions",
+    )
+    values = {value.strip() for value in raw.split(",") if value.strip()}
+    return values or {"Financial Services"}
+
+
+def _specificity_search_generic_raw_categories() -> set[str]:
+    raw = os.environ.get(
+        "SPECIFICITY_SEARCH_GENERIC_RAW_CATEGORIES",
+        "Movie,Film,Entertainment,Financial Services,Banking,Insurance,Retail,Technology,Educational,Healthcare,Travel,Automotive",
+    )
+    values = {value.strip() for value in raw.split(",") if value.strip()}
+    return values or {"Movie"}
+
+
+def _extract_ocr_domains(text: str) -> list[str]:
+    matches = re.findall(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text or "", flags=re.IGNORECASE)
+    return list(dict.fromkeys(match for match in matches if match))
+
+
+def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list[tuple[str, float]]:
+    return list(sorted_vision.items())[:limit]
+
+
+def _build_specificity_search_candidates(
+    *,
+    raw_category: str,
+    current_match: dict[str, object],
+    predicted_brand: str,
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+    mapper_neighbor_limit: int = 6,
+    visual_limit: int = 3,
+) -> list[str]:
+    candidates: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidates:
+            candidates.append(clean)
+
+    _append(str(current_match.get("canonical_category", "") or ""))
+
+    if hasattr(category_mapper, "get_mapper_neighbor_categories"):
+        try:
+            for label, _score in category_mapper.get_mapper_neighbor_categories(
+                raw_category=raw_category,
+                predicted_brand=predicted_brand,
+                ocr_summary=ocr_text,
+                top_k=mapper_neighbor_limit,
+            ):
+                _append(label)
+        except Exception as exc:
+            logger.warning("specificity_search_mapper_neighbors_failed: %s", exc)
+
+    for label, _score in _top_visual_matches(sorted_vision, limit=visual_limit):
+        _append(label)
+
+    return candidates
+
+
+def _should_run_specificity_search_rescue(
+    enable_search: bool,
+    express_mode: bool,
+    result_payload: dict[str, object] | None,
+    category_match: dict[str, object],
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+) -> tuple[bool, str]:
+    if not _specificity_search_rescue_enabled(enable_search, express_mode):
+        return False, "disabled"
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+
+    brand = str(result_payload.get("brand", "") or "").strip()
+    raw_category = str(result_payload.get("category", "") or "").strip()
+    canonical = str(category_match.get("canonical_category", "") or "").strip()
+    if not brand or brand.lower() in {"unknown", "none", "n/a"}:
+        return False, "brand_missing"
+
+    broad_canonical = canonical in _specificity_search_broad_categories()
+    generic_raw = raw_category in _specificity_search_generic_raw_categories()
+    if not broad_canonical and not generic_raw:
+        return False, f"category_not_generic raw={raw_category!r} canonical={canonical!r}"
+
+    score_raw = category_match.get("category_match_score", 0.0)
+    try:
+        mapper_score = float(score_raw or 0.0)
+    except (TypeError, ValueError):
+        mapper_score = 0.0
+
+    category_descriptor = f"raw={raw_category!r};canonical={canonical!r}"
+    domain_hints = _extract_ocr_domains(ocr_text)
+    mapper_threshold = _resolve_specificity_search_mapper_threshold()
+    if mapper_score < mapper_threshold and domain_hints:
+        return True, f"{category_descriptor};mapper_score={mapper_score:.4f};domain_hint={domain_hints[0]!r}"
+
+    if generic_raw and mapper_score < mapper_threshold:
+        return True, f"{category_descriptor};mapper_score={mapper_score:.4f};generic_raw_category"
+
+    if domain_hints and broad_canonical:
+        return True, f"{category_descriptor};domain_hint={domain_hints[0]!r}"
+
+    visual_matches = _top_visual_matches(sorted_vision, limit=1)
+    if visual_matches:
+        top_label, top_score = visual_matches[0]
+        if top_label != canonical and float(top_score) >= _resolve_specificity_search_vision_threshold():
+            return True, f"{category_descriptor};vision_hint={top_label!r}@{float(top_score):.4f}"
+
+    return False, f"{category_descriptor};no_specificity_signal"
+
+
+def _accept_specificity_search_result(
+    current_match: dict[str, object],
+    refined_match: dict[str, object],
+    sorted_vision: dict[str, float],
+    candidate_categories: list[str],
+) -> tuple[bool, str]:
+    current_canonical = str(current_match.get("canonical_category", "") or "")
+    refined_canonical = str(refined_match.get("canonical_category", "") or "")
+    if not refined_canonical or refined_canonical == current_canonical:
+        return False, f"unchanged_category={refined_canonical!r}"
+    if candidate_categories and refined_canonical not in candidate_categories:
+        return False, f"outside_candidate_set={refined_canonical!r}"
+
+    if refined_canonical not in _specificity_search_broad_categories():
+        return True, f"narrowed_to={refined_canonical!r}"
+
+    visual_matches = _top_visual_matches(sorted_vision, limit=1)
+    if visual_matches:
+        top_label, top_score = visual_matches[0]
+        if top_label == refined_canonical and float(top_score) >= _resolve_specificity_search_vision_threshold():
+            return True, f"broad_refinement_confirmed_by_vision={refined_canonical!r}@{float(top_score):.4f}"
+
+    return False, f"refined_category_still_broad={refined_canonical!r}"
+
+
 def _ocr_text_has_commercial_context(text: str) -> tuple[bool, str]:
     normalized = _normalize_ocr(text or "")
     if not normalized:
@@ -1946,6 +2115,111 @@ def process_single_video(
             predicted_brand=res.get("brand", "Unknown"),
             ocr_summary=ocr_text,
         )
+        specificity_needed, specificity_reason = _should_run_specificity_search_rescue(
+            enable_search=bool(enable_search),
+            express_mode=express_mode,
+            result_payload=res,
+            category_match=category_match,
+            ocr_text=ocr_text,
+            sorted_vision=sorted_vision,
+        )
+        if specificity_needed:
+            if stage_callback:
+                stage_callback("llm", f"specificity search rescue provider={p.lower()} model={m}")
+            logger.info("[%s] fallback_triggered type=specificity_search_rescue reason=%s", url, specificity_reason)
+            visual_matches = _top_visual_matches(sorted_vision, limit=4)
+            specificity_candidates = _build_specificity_search_candidates(
+                raw_category=str(res.get("category", "") or ""),
+                current_match=category_match,
+                predicted_brand=str(res.get("brand", "") or ""),
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
+            refined_res, refined_reason = llm_engine.query_specificity_rescue(
+                p,
+                m,
+                brand=str(res.get("brand", "") or ""),
+                current_category=str(res.get("category", "") or category_match.get("canonical_category", "") or ""),
+                ocr_text=ocr_text,
+                candidate_categories=specificity_candidates,
+                visual_matches=visual_matches,
+                context_size=ctx,
+            )
+            if isinstance(refined_res, dict):
+                refined_match = category_mapper.map_category(
+                    raw_category=refined_res.get("category", "Unknown"),
+                    job_id=job_id,
+                    suggested_categories_text="",
+                    predicted_brand=refined_res.get("brand", "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+                specificity_ok, specificity_accept_reason = _accept_specificity_search_result(
+                    current_match=category_match,
+                    refined_match=refined_match,
+                    sorted_vision=sorted_vision,
+                    candidate_categories=specificity_candidates,
+                )
+                if specificity_ok:
+                    res = refined_res
+                    category_match = refined_match
+                    logger.info(
+                        "[%s] fallback_accepted type=specificity_search_rescue reason=%s",
+                        url,
+                        specificity_accept_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="specificity_search_rescue",
+                        title="Specificity Search Rescue",
+                        status="accepted",
+                        source_frames=frames,
+                        detail="web specificity refinement",
+                        trigger_reason=specificity_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=refined_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        evidence_note=f"Search refinement narrowed the category because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
+                    )
+                else:
+                    logger.info(
+                        "[%s] fallback_rejected type=specificity_search_rescue reason=%s trigger=%s",
+                        url,
+                        specificity_accept_reason,
+                        specificity_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="specificity_search_rescue",
+                        title="Specificity Search Rescue",
+                        status="rejected",
+                        source_frames=frames,
+                        detail="web specificity refinement",
+                        trigger_reason=specificity_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=refined_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        evidence_note=f"Search refinement was rejected because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
+                    )
+            else:
+                logger.info(
+                    "[%s] fallback_rejected type=specificity_search_rescue reason=%s trigger=%s",
+                    url,
+                    refined_reason,
+                    specificity_reason,
+                )
+                _append_trace_attempt(
+                    attempt_type="specificity_search_rescue",
+                    title="Specificity Search Rescue",
+                    status="rejected",
+                    source_frames=frames,
+                    detail="web specificity refinement",
+                    trigger_reason=specificity_reason,
+                    ocr_text_value=ocr_text,
+                    result_payload=None,
+                    ocr_mode_used="" if express_mode else om,
+                    llm_mode="standard",
+                    evidence_note=f"Search refinement did not run: {refined_reason}.",
+                )
         cat_out = category_match["canonical_category"]
         cat_id_out = category_match["category_id"]
         signal_artifacts = {

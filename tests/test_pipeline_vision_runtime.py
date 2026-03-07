@@ -1890,3 +1890,269 @@ def test_pipeline_challenges_generic_context_rescue_with_express_when_ocr_is_non
     assert processing_trace["summary"]["accepted_attempt_type"] == "express_rescue"
     assert processing_trace["attempts"][1]["attempt_type"] == "ocr_context_rescue"
     assert processing_trace["attempts"][1]["status"] == "rejected"
+
+
+def test_pipeline_accepts_specificity_search_rescue_for_broad_financial_category(monkeypatch):
+    class _DummyMapper:
+        categories = ["Financial Services", "Credit Card"]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Financial Services", 1.0), ("Credit Card", 0.84)]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            if raw == "Financial Services":
+                return {
+                    "canonical_category": "Financial Services",
+                    "category_id": "391",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            if raw == "Credit Card":
+                return {
+                    "canonical_category": "Credit Card",
+                    "category_id": "5028",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.84,
+                }
+            return {
+                "canonical_category": raw or "Financial Services",
+                "category_id": "391",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "AM EX Visit Amex.ca/Plat"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "American Express",
+                "category": "Financial Services",
+                "confidence": 0.99,
+                "reasoning": "broad but correct parent",
+            }
+
+        @staticmethod
+        def query_specificity_rescue(*args, **kwargs):
+            return (
+                {
+                    "brand": "American Express",
+                    "category": "Credit Card",
+                    "confidence": 0.96,
+                    "reasoning": "web refinement found the Platinum card page",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    sorted_vision, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/amex.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-specificity-search-1",
+    )
+
+    assert sorted_vision == {}
+    assert row[1] == "American Express"
+    assert row[2] == "5028"
+    assert row[3] == "Credit Card"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["status"] == "accepted"
+
+
+def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatch):
+    class _DummyMapper:
+        categories = ["Financial Services"]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Financial Services", 1.0)]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Financial Services",
+                "category_id": "391",
+                "category_match_method": "embeddings",
+                "category_match_score": 1.0,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "AM EX Visit Amex.ca/Plat"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "American Express",
+                "category": "Financial Services",
+                "confidence": 0.99,
+                "reasoning": "broad but correct parent",
+            }
+
+        @staticmethod
+        def query_specificity_rescue(*args, **kwargs):
+            return None, "search_unavailable"
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/amex.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-specificity-search-2",
+    )
+
+    assert row[2] == "391"
+    assert row[3] == "Financial Services"
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "initial"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["status"] == "rejected"
+
+
+def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak_mapper(monkeypatch):
+    specificity_calls = []
+
+    class _DummyMapper:
+        categories = ["Comedy", "Action/Thriller Cinema"]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(**kwargs):
+            return [("Comedy", 0.6108), ("Action/Thriller Cinema", 0.89)]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = kwargs.get("raw_category", "")
+            if raw == "Movie":
+                return {
+                    "canonical_category": "Comedy",
+                    "category_id": "5297",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.6108,
+                }
+            if raw == "Action/Thriller Cinema":
+                return {
+                    "canonical_category": "Action/Thriller Cinema",
+                    "category_id": "5281",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.89,
+                }
+            return {
+                "canonical_category": raw or "Comedy",
+                "category_id": "5297",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Mercy Movie.ca FILMED FOR IMAX NOW PLAYING"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Mercy",
+                "category": "Movie",
+                "confidence": 0.99,
+                "reasoning": "generic film label",
+            }
+
+        @staticmethod
+        def query_specificity_rescue(*args, **kwargs):
+            specificity_calls.append(kwargs)
+            return (
+                {
+                    "brand": "Mercy",
+                    "category": "Action/Thriller Cinema",
+                    "confidence": 0.94,
+                    "reasoning": "search refinement found theatrical positioning",
+                },
+                "ok",
+            )
+
+    frames = [{"image": object(), "ocr_image": np.full((32, 32, 3), 10, dtype=np.uint8), "time": 29.4, "type": "tail"}]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/mercy.mp4",
+        categories=[],
+        p="Llama Server",
+        m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        oe="EasyOCR",
+        om="🚀 Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=True,
+        enable_vision_board=False,
+        enable_llm_frame=False,
+        ctx=8192,
+        job_id="job-specificity-search-3",
+    )
+
+    assert row[2] == "5281"
+    assert row[3] == "Action/Thriller Cinema"
+    assert specificity_calls
+    assert specificity_calls[0]["candidate_categories"] == ["Comedy", "Action/Thriller Cinema"]
+    processing_trace = signal_artifacts["processing_trace"]
+    assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
+    assert processing_trace["attempts"][-1]["status"] == "accepted"
