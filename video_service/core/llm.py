@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import os
+from difflib import SequenceMatcher
 from abc import ABC, abstractmethod
 from typing import Optional, Protocol
 
@@ -519,6 +520,10 @@ def _normalize_brand_text(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+def _compact_brand_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
 def _extract_domains(text: str) -> list[str]:
     return re.findall(r"\b([a-z0-9-]+\.[a-z]{2,}(?:/[a-z0-9/_-]+)?)\b", text or "", flags=re.IGNORECASE)
 
@@ -584,6 +589,34 @@ def _brand_confirmed_by_web(brand: str, snippets: str) -> bool:
     return any(part in normalized_snippets for part in brand_parts)
 
 
+def _looks_like_ocr_brand_normalization(raw_ocr_text: str, brand: str) -> tuple[bool, str]:
+    compact_brand = _compact_brand_text(brand)
+    if len(compact_brand) < 4:
+        return False, "brand_too_short"
+
+    best_token = ""
+    best_ratio = 0.0
+    for token in _ocr_tokens(raw_ocr_text):
+        compact_token = _compact_brand_text(token)
+        if len(compact_token) < 4:
+            continue
+        ratio = SequenceMatcher(None, compact_brand, compact_token).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_token = token
+
+    if not best_token:
+        return False, "no_candidate_token"
+
+    if abs(len(_compact_brand_text(best_token)) - len(compact_brand)) > 2:
+        return False, f"length_gap token={best_token!r} ratio={best_ratio:.2f}"
+
+    threshold = _env_float("BRAND_AMBIGUITY_OCR_NORMALIZATION_THRESHOLD", 0.84)
+    if best_ratio >= threshold:
+        return True, f"ocr_normalization token={best_token!r} ratio={best_ratio:.2f}"
+    return False, f"ratio={best_ratio:.2f}<threshold={threshold:.2f}"
+
+
 class ClassificationPipeline:
     def __init__(
         self,
@@ -633,6 +666,13 @@ class ClassificationPipeline:
         threshold = self._brand_ambiguity_confidence_threshold()
         if confidence < threshold:
             return False, f"confidence={confidence:.2f}<threshold={threshold:.2f}"
+
+        plausible_normalization, normalization_reason = _looks_like_ocr_brand_normalization(
+            raw_ocr_text,
+            brand,
+        )
+        if plausible_normalization:
+            return False, normalization_reason
 
         if _has_exact_brand_anchor(raw_ocr_text, brand):
             return False, "exact_brand_anchor"
@@ -684,12 +724,27 @@ class ClassificationPipeline:
         if resolved_brand.lower() in {"", "unknown", "none", "n/a"}:
             return None, "blank_brand_response"
 
-        if not _brand_confirmed_by_web(resolved_brand, snippets):
-            return None, f"web_unconfirmed_brand={resolved_brand!r}"
+        current_confirmed = _brand_confirmed_by_web(current_brand, snippets)
+        resolved_confirmed = _brand_confirmed_by_web(resolved_brand, snippets)
+        plausible_normalization, normalization_reason = _looks_like_ocr_brand_normalization(
+            raw_ocr_text,
+            current_brand,
+        )
 
         if resolved_brand.lower() == current_brand.lower():
+            if not current_confirmed and not plausible_normalization:
+                return None, f"web_unconfirmed_brand={resolved_brand!r}"
             val_res["reasoning"] = "(Brand confirmed) " + str(val_res.get("reasoning", "") or "")
-            return val_res, "brand_confirmed_by_web"
+            return val_res, "brand_confirmed_by_web" if current_confirmed else normalization_reason
+
+        if plausible_normalization and not current_confirmed:
+            return None, f"kept_plausible_ocr_normalization {normalization_reason}"
+
+        if current_confirmed and resolved_confirmed:
+            return None, f"ambiguous_web_brand_support current={current_brand!r} candidate={resolved_brand!r}"
+
+        if not resolved_confirmed:
+            return None, f"web_unconfirmed_brand={resolved_brand!r}"
 
         val_res["reasoning"] = "(Brand corrected) " + str(val_res.get("reasoning", "") or "")
         return val_res, "brand_corrected_by_web"

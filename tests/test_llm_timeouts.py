@@ -424,3 +424,35 @@ def test_brand_ambiguity_guard_fails_closed_when_search_unavailable(monkeypatch)
     assert result["brand_disambiguation_reason"] == "search_unavailable"
     assert len(provider.calls) == 1
     assert len(search_client.queries) == 1
+
+
+def test_brand_ambiguity_guard_does_not_override_plausible_ocr_normalization(monkeypatch):
+    provider = _FakeProvider(
+        [
+            {
+                "brand": "Graza",
+                "category": "Coffee",
+                "confidence": 0.95,
+                "reasoning": "The OCR text is likely a stylized misspelling of Graza.",
+            }
+        ]
+    )
+    search_client = _FakeSearchClient("Grayza apparel hospitality tech")
+    pipeline = ClassificationPipeline(provider=provider, search_client=search_client, validation_threshold=0.7)
+
+    monkeypatch.setenv("BRAND_AMBIGUITY_GUARD", "true")
+    monkeypatch.setenv("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", "0.85")
+
+    result = pipeline.classify(
+        system_prompt="sys",
+        user_prompt="user",
+        raw_ocr_text="GRAYZA",
+        enable_search=True,
+        include_image=False,
+        image_b64=None,
+    )
+
+    assert result["brand"] == "Graza"
+    assert "brand_ambiguity_flag" not in result
+    assert len(provider.calls) == 1
+    assert search_client.queries == []
