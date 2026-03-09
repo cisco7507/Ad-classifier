@@ -121,6 +121,11 @@ export interface ProcessingTraceResult {
   brand?: string;
   category?: string;
   confidence?: number | null;
+  brand_ambiguity_flag?: boolean;
+  brand_ambiguity_reason?: string;
+  brand_ambiguity_resolved?: boolean;
+  brand_disambiguation_reason?: string;
+  brand_evidence_strength?: string;
 }
 
 export interface ProcessingTraceAttempt {
@@ -183,6 +188,11 @@ export interface JobExplanationFinal {
   confidence?: number | null;
   mapper_method?: string;
   mapper_score?: number | null;
+  brand_ambiguity_flag?: boolean;
+  brand_ambiguity_reason?: string;
+  brand_ambiguity_resolved?: boolean;
+  brand_disambiguation_reason?: string;
+  brand_evidence_strength?: string;
 }
 
 export interface JobExplanationEvidence {

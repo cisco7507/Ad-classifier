@@ -509,6 +509,52 @@ function formatReasonLabel(value?: string): string {
     .join(" ");
 }
 
+function formatBrandAmbiguityReason(value?: string): string {
+  const raw = (value || "").trim();
+  if (!raw) return "weak anchor evidence";
+  if (raw.startsWith("sparse_tokens=")) {
+    const tokenCount = raw.split("=", 2)[1] || "";
+    return `OCR only exposed ${tokenCount} strong token${tokenCount === "1" ? "" : "s"}, so the brand guess was treated as weakly anchored.`;
+  }
+  if (raw.startsWith("short_chars=")) {
+    return "The OCR text was too short to treat the brand match as strongly anchored.";
+  }
+  if (raw.startsWith("ocr_normalization")) {
+    return "The guessed brand already looked like a plausible normalization of the OCR text.";
+  }
+  if (raw.includes("memory_led_reasoning")) {
+    return "The initial brand guess leaned on slogan or style memory more than direct on-frame evidence.";
+  }
+  return formatReasonLabel(raw).toLowerCase();
+}
+
+function formatBrandDisambiguationReason(
+  value?: string,
+  currentBrand?: string,
+): string {
+  const raw = (value || "").trim();
+  if (!raw) return "";
+  if (raw === "brand_corrected_by_web") {
+    return "Web confirmation found stronger direct support for a different brand than the original guess.";
+  }
+  if (raw === "brand_confirmed_by_web") {
+    return `Web confirmation reinforced ${currentBrand || "the final brand"} despite weak direct anchors in OCR.`;
+  }
+  if (raw.startsWith("kept_plausible_ocr_normalization")) {
+    return `The system kept ${currentBrand || "the original brand"} because it already looked like a plausible OCR normalization and the web evidence did not clearly beat it.`;
+  }
+  if (raw === "search_unavailable") {
+    return "Brand disambiguation could not run because web search was unavailable.";
+  }
+  if (raw.startsWith("web_unconfirmed_brand")) {
+    return "The web evidence did not clearly confirm a better alternative brand.";
+  }
+  if (raw.startsWith("ambiguous_web_brand_support")) {
+    return "The web evidence supported multiple plausible brands, so the original guess was kept.";
+  }
+  return formatReasonLabel(raw);
+}
+
 function attemptTone(status?: string) {
   if (status === "accepted") {
     return {
@@ -554,6 +600,9 @@ function buildLocalExplanation(
   const latestFrames = Array.isArray(artifacts?.latest_frames)
     ? artifacts.latest_frames
     : [];
+  const acceptedAttempt =
+    [...trace.attempts].reverse().find((attempt) => attempt?.status === "accepted") || null;
+  const acceptedResult = acceptedAttempt?.result || {};
 
   return {
     job_id: job.job_id,
@@ -583,6 +632,20 @@ function buildLocalExplanation(
       mapper_method: mapper?.method || "",
       mapper_score:
         typeof mapper?.score === "number" ? mapper.score : null,
+      brand_ambiguity_flag: Boolean(acceptedResult?.brand_ambiguity_flag),
+      brand_ambiguity_reason:
+        typeof acceptedResult?.brand_ambiguity_reason === "string"
+          ? acceptedResult.brand_ambiguity_reason
+          : "",
+      brand_ambiguity_resolved: Boolean(acceptedResult?.brand_ambiguity_resolved),
+      brand_disambiguation_reason:
+        typeof acceptedResult?.brand_disambiguation_reason === "string"
+          ? acceptedResult.brand_disambiguation_reason
+          : "",
+      brand_evidence_strength:
+        typeof acceptedResult?.brand_evidence_strength === "string"
+          ? acceptedResult.brand_evidence_strength
+          : "",
     },
     evidence: {
       ocr_excerpt: typeof ocr?.text === "string" ? ocr.text.slice(0, 400) : "",
@@ -641,6 +704,21 @@ function buildOperatorNotes(
   const initialAttempt = attempts[0];
   const acceptedAttempt =
     [...attempts].reverse().find((attempt) => attempt.status === "accepted") || null;
+  const ambiguityTriggered = Boolean(finalResult?.brand_ambiguity_flag);
+  const ambiguityReason = formatBrandAmbiguityReason(finalResult?.brand_ambiguity_reason);
+  const disambiguationReason = formatBrandDisambiguationReason(
+    finalResult?.brand_disambiguation_reason,
+    finalResult?.brand,
+  );
+
+  if (ambiguityTriggered) {
+    notes.push(`Brand ambiguity guard triggered because ${ambiguityReason}`);
+    if (finalResult?.brand_ambiguity_resolved) {
+      notes.push(disambiguationReason);
+    } else if (disambiguationReason) {
+      notes.push(`Brand disambiguation was rejected: ${disambiguationReason}`);
+    }
+  }
 
   if (initialAttempt?.status === "rejected") {
     if (initialAttempt.ocr_signal === false) {
@@ -2602,6 +2680,26 @@ export function JobDetail() {
                             : "—"}
                         </div>
                       </div>
+                      {explanationFinal?.brand_ambiguity_flag ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 xl:col-span-2">
+                          <div className="text-[11px] uppercase tracking-wider text-amber-700 font-semibold">
+                            Brand Review
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-amber-900">
+                            {explanationFinal?.brand_ambiguity_resolved
+                              ? "Web-assisted brand disambiguation ran"
+                              : "Weak-anchor brand guess was kept"}
+                          </div>
+                          <div className="mt-1 text-xs text-amber-800 leading-5">
+                            {explanationFinal?.brand_ambiguity_resolved
+                              ? formatBrandDisambiguationReason(
+                                  explanationFinal?.brand_disambiguation_reason,
+                                  explanationFinal?.brand,
+                                )
+                              : formatBrandAmbiguityReason(explanationFinal?.brand_ambiguity_reason)}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">

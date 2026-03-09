@@ -1612,6 +1612,18 @@ def _build_job_explanation(job_id: str, job_row, artifacts: dict, result_payload
     else:
         headline = "No structured explanation is available for this job yet."
 
+    accepted_attempt = next(
+        (
+            attempt
+            for attempt in reversed(attempts)
+            if isinstance(attempt, dict) and attempt.get("status") == "accepted"
+        ),
+        None,
+    )
+    accepted_result = accepted_attempt.get("result") if isinstance(accepted_attempt, dict) else {}
+    if not isinstance(accepted_result, dict):
+        accepted_result = {}
+
     return {
         "job_id": job_id,
         "mode": job_row["mode"] if "mode" in job_row.keys() else None,
@@ -1633,6 +1645,11 @@ def _build_job_explanation(job_id: str, job_row, artifacts: dict, result_payload
             "confidence": first_result.get("Confidence") or first_result.get("confidence"),
             "mapper_method": category_mapper.get("method") if isinstance(category_mapper, dict) else "",
             "mapper_score": category_mapper.get("score") if isinstance(category_mapper, dict) else None,
+            "brand_ambiguity_flag": bool(accepted_result.get("brand_ambiguity_flag", False)),
+            "brand_ambiguity_reason": str(accepted_result.get("brand_ambiguity_reason") or ""),
+            "brand_ambiguity_resolved": bool(accepted_result.get("brand_ambiguity_resolved", False)),
+            "brand_disambiguation_reason": str(accepted_result.get("brand_disambiguation_reason") or ""),
+            "brand_evidence_strength": str(accepted_result.get("brand_evidence_strength") or ""),
         },
         "evidence": {
             "ocr_excerpt": " ".join((ocr_payload.get("text") or "").split())[:400],

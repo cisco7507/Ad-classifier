@@ -1193,6 +1193,11 @@ def process_single_video(
                 "brand": str(payload.get("brand", "") or ""),
                 "category": str(payload.get("category", "") or ""),
                 "confidence": confidence,
+                "brand_ambiguity_flag": bool(payload.get("brand_ambiguity_flag", False)),
+                "brand_ambiguity_reason": str(payload.get("brand_ambiguity_reason", "") or ""),
+                "brand_ambiguity_resolved": bool(payload.get("brand_ambiguity_resolved", False)),
+                "brand_disambiguation_reason": str(payload.get("brand_disambiguation_reason", "") or ""),
+                "brand_evidence_strength": str(payload.get("brand_evidence_strength", "") or ""),
             }
 
         def _append_trace_attempt(
