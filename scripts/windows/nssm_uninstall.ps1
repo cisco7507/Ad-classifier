@@ -8,7 +8,7 @@ Run as Administrator:
 #>
 
 param(
-  [string]$ServiceName = "AdClassifierAPI",
+  [string]$ServiceName = "ScenalyzeAPI",
   [int]$Port = 3040,
   [switch]$RemoveFirewall = $true
 )
@@ -37,7 +37,7 @@ function Resolve-NssmPath {
     return $local
   }
 
-  $programData = Join-Path $env:ProgramData "AdClassifier\nssm\nssm.exe"
+  $programData = Join-Path $env:ProgramData "Scenalyze\nssm\nssm.exe"
   if (Test-Path $programData) {
     return $programData
   }

@@ -4,6 +4,8 @@ video_service/workers/embedded.py
 Spawn and supervise worker child processes from inside API lifespan.
 """
 
+from __future__ import annotations
+
 import logging
 import multiprocessing
 import os
@@ -184,4 +186,3 @@ def shutdown() -> None:
         _abort_dict = None
         
     logger.info("embedded_workers: all workers stopped")
-

@@ -60,7 +60,7 @@ Round-robin distributes new jobs. Each node proxies job-specific GETs to the own
 ```bash
 # 1. Clone & create venv
 git clone <repo>
-cd Ad-classifier
+cd scenalyze
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 

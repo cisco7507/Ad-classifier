@@ -1,5 +1,5 @@
 <#
-Uninstall-AdClassifierDashboard.ps1 — Remove Ad-classifier Dashboard Windows service installed via NSSM.
+Uninstall-AdClassifierDashboard.ps1 — Remove Scenalyze Dashboard Windows service installed via NSSM.
 
 Run as Administrator:
   Set-ExecutionPolicy RemoteSigned -Scope Process -Force
@@ -8,7 +8,7 @@ Run as Administrator:
 #>
 
 param(
-  [string]$ServiceName = "AdClassifierDashboard",
+  [string]$ServiceName = "ScenalyzeDashboard",
   [int]$Port = 3030,
   [switch]$RemoveFirewall = $true
 )
@@ -37,7 +37,7 @@ function Resolve-NssmPath {
     return $local
   }
 
-  $programData = Join-Path $env:ProgramData "AdClassifier\nssm\nssm.exe"
+  $programData = Join-Path $env:ProgramData "Scenalyze\nssm\nssm.exe"
   if (Test-Path $programData) {
     return $programData
   }

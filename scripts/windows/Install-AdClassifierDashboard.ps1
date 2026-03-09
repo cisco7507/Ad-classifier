@@ -1,5 +1,5 @@
 <#
-Install-AdClassifierDashboard.ps1 — Install Ad-classifier Dashboard as a Windows service (NSSM)
+Install-AdClassifierDashboard.ps1 — Install Scenalyze Dashboard as a Windows service (NSSM)
 
 Run as Administrator:
   Set-ExecutionPolicy RemoteSigned -Scope Process -Force
@@ -9,7 +9,7 @@ Run as Administrator:
 
 [CmdletBinding()]
 param(
-  [string]$ServiceName = "AdClassifierDashboard",
+  [string]$ServiceName = "ScenalyzeDashboard",
   [string]$DashboardDir = "",
   [int]$Port = 3030,
   [string]$ApiBaseUrl = "http://localhost:3040",
@@ -142,7 +142,7 @@ function Ensure-Nssm {
     Fail "Downloaded NSSM archive did not contain expected binary: $sourceExe"
   }
 
-  $installRoot = Join-Path $env:ProgramData "AdClassifier\nssm"
+  $installRoot = Join-Path $env:ProgramData "Scenalyze\nssm"
   New-Item -Path $installRoot -ItemType Directory -Force | Out-Null
   $installedExe = Join-Path $installRoot "nssm.exe"
   Copy-Item -Path $sourceExe -Destination $installedExe -Force
@@ -324,7 +324,7 @@ if ($serveTarget.ToLowerInvariant().EndsWith(".js")) {
 Invoke-Checked -FilePath $nssm -ArgumentList @("install", $ServiceName, $serviceExe, $serviceArgs) -FailureMessage "Failed to install dashboard NSSM service."
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppDirectory", $DashboardDir)
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "DisplayName", $ServiceName)
-Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Description", "Ad-classifier dashboard static web UI")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Description", "Scenalyze dashboard static web UI")
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Start", "SERVICE_AUTO_START")
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStdout", $stdoutLog)
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStderr", $stderrLog)

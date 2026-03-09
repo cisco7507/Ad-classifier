@@ -8,7 +8,7 @@ Run as Administrator:
 #>
 
 param(
-  [string]$ServiceName = "AdClassifierAPI",
+  [string]$ServiceName = "ScenalyzeAPI",
   [string]$BindHost = "0.0.0.0",
   [int]$Port = 3040,
   [string]$NodeName = "node-a",
@@ -370,7 +370,7 @@ function Ensure-Nssm {
     throw "Downloaded NSSM archive did not contain expected binary: $sourceExe"
   }
 
-  $installRoot = Join-Path $env:ProgramData "AdClassifier\nssm"
+  $installRoot = Join-Path $env:ProgramData "Scenalyze\nssm"
   New-Item -Path $installRoot -ItemType Directory -Force | Out-Null
   $installedExe = Join-Path $installRoot "nssm.exe"
   Copy-Item -Path $sourceExe -Destination $installedExe -Force
@@ -866,7 +866,7 @@ $args = "-m uvicorn video_service.app.main:app --host $BindHost --port $Port --w
 Invoke-Checked -FilePath $nssm -ArgumentList @("install", $ServiceName, $venvPy, $args) -FailureMessage "Failed to install NSSM service."
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppDirectory", $repoRoot)
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "DisplayName", $ServiceName)
-Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Description", "Video Ad Classifier API (FastAPI + embedded workers)")
+Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Description", "Scenalyze API (FastAPI + embedded workers)")
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "Start", "SERVICE_AUTO_START")
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStdout", $stdoutLog)
 Invoke-Checked -FilePath $nssm -ArgumentList @("set", $ServiceName, "AppStderr", $stderrLog)

@@ -1,6 +1,6 @@
-# Video Ad Classifier
+# Scenalyze
 
-An HA-capable video ad classification service. Classifies video advertisements into industry categories using local vision-language models (Ollama / qwen3-vl), EasyOCR, and an optional semantic search step.
+An HA-capable video ad classification service. Scenalyze classifies video advertisements into industry categories using local vision-language models (Ollama / qwen3-vl), EasyOCR, and an optional semantic search step.
 
 ---
 
@@ -11,7 +11,7 @@ An HA-capable video ad classification service. Classifies video advertisements i
 #    - Python 3.11+, Node.js 20+, ffmpeg
 #    - Ollama running with: ollama pull qwen3-vl:8b-instruct
 
-git clone <repo> && cd Ad-classifier
+git clone <repo> && cd scenalyze
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 

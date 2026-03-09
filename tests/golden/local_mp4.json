@@ -2,7 +2,7 @@
   "_fixture_id": "local_mp4",
   "_captured_at": "2026-02-24T00:35:06Z",
   "_elapsed_seconds": 10.4,
-  "_source": "/Users/gsp/Projects/Ad-classifier/tests/fixtures/sample_local.mp4",
+  "_source": "/Users/gsp/Projects/scenalyze/tests/fixtures/sample_local.mp4",
   "_settings": {
     "categories": "Cars, Insurance, Finance, Technology, Retail",
     "provider": "Ollama",
