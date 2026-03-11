@@ -849,6 +849,10 @@ function buildOperatorNotes(
       notes.push(
         "Full-video fallback succeeded only after the narrower recovery paths failed to produce a confident answer.",
       );
+    } else if (acceptedAttempt.attempt_type === "category_rerank") {
+      notes.push(
+        "Category rerank succeeded because the initial taxonomy match was weak, so the model was asked to choose the safest fit from a small set of nearby candidate categories.",
+      );
     }
   }
 
@@ -947,6 +951,13 @@ const EXPLAIN_METHOD_GUIDE: ExplainMethodGuideEntry[] = [
     short: "Last-resort recovery path across the whole video.",
     detail:
       "Samples across the full video only after the narrower retry paths fail to produce a confident answer.",
+  },
+  {
+    key: "category_rerank",
+    label: "Category Rerank",
+    short: "Constrained taxonomy tie-break for weak mappings.",
+    detail:
+      "When the embedding mapper returns a weak or tightly clustered result for a free-form LLM category, the model gets one extra chance to choose only from a small set of nearby taxonomy candidates.",
   },
 ];
 

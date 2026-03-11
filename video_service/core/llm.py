@@ -952,6 +952,74 @@ class HybridLLM:
         query_parts.append("official site")
         return " ".join(dict.fromkeys(part for part in query_parts if part))
 
+    def query_category_rerank(
+        self,
+        provider,
+        backend_model,
+        brand: str,
+        raw_category: str,
+        mapped_category: str,
+        ocr_text: str,
+        reasoning: str,
+        candidate_categories: list[str],
+        visual_matches: list[tuple[str, float]] | None = None,
+        context_size=8192,
+    ) -> tuple[dict | None, str]:
+        try:
+            provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
+        except ValueError as exc:
+            return None, f"provider_error:{exc}"
+
+        normalized_candidates = {
+            str(candidate or "").strip().casefold(): str(candidate or "").strip()
+            for candidate in candidate_categories
+            if str(candidate or "").strip()
+        }
+        if len(normalized_candidates) < 2:
+            return None, "insufficient_candidates"
+
+        visual_hint_text = ""
+        if visual_matches:
+            visual_hint_text = " | ".join(
+                f"{label} ({score:.4f})" for label, score in visual_matches[:4]
+            )
+
+        ocr_excerpt = " ".join((ocr_text or "").split())[:500]
+        reasoning_excerpt = " ".join((reasoning or "").split())[:400]
+        candidate_text = " | ".join(normalized_candidates.values())
+        system_prompt = (
+            "You are resolving a taxonomy mapping ambiguity for a video ad classification system. "
+            "Choose exactly one category from the supplied candidate categories only. "
+            "Use the brand, OCR evidence, prior category guess, model reasoning, and optional visual hints together. "
+            "Prefer the category that best matches the ad's overall product or service domain, not a superficial keyword overlap. "
+            "Do not invent a label. Do not choose a candidate whose domain contradicts the overall ad evidence. "
+            "If the evidence is mixed, choose the safer in-family category from the list. "
+            "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
+        )
+        user_prompt = (
+            f"Brand: {brand}\n"
+            f"LLM Category Guess: {raw_category}\n"
+            f"Current Mapped Category: {mapped_category}\n"
+            f"Candidate Categories: {candidate_text}\n"
+            f"OCR Evidence: {ocr_excerpt or 'None'}\n"
+            f"Prior Reasoning: {reasoning_excerpt or 'None'}\n"
+            f"Visual Hints: {visual_hint_text or 'None'}\n"
+            "Return the single best-supported category from the candidate list."
+        )
+        try:
+            res = provider_plugin.generate_json(system_prompt, user_prompt)
+        except Exception as exc:
+            return None, f"provider_error:{exc}"
+        if not isinstance(res, dict) or "category" not in res:
+            return None, "invalid_llm_response"
+
+        chosen = str(res.get("category", "") or "").strip()
+        canonical_candidate = normalized_candidates.get(chosen.casefold())
+        if canonical_candidate is None:
+            return None, f"outside_candidate_set={chosen!r}"
+        res["category"] = canonical_candidate
+        return res, "ok"
+
     def query_specificity_rescue(
         self,
         provider,

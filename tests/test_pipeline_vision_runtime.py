@@ -257,6 +257,320 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
     assert ocr_calls == [200.0]
 
 
+def test_pipeline_category_rerank_corrects_weak_cross_domain_mapping(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Electric Power Generation",
+            "Automotive",
+            "Car/Van",
+            "City Cars",
+            "Micro Cars",
+        ]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Electric Vehicles":
+                return {
+                    "canonical_category": "Electric Power Generation",
+                    "category_id": "329",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.5964,
+                }
+            if raw == "Automotive":
+                return {
+                    "canonical_category": "Automotive",
+                    "category_id": "399",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            return {
+                "canonical_category": raw or "Unknown",
+                "category_id": "",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Electric Vehicles":
+                return [
+                    ("Electric Power Generation", 0.5964),
+                    ("Automotive", 0.5884),
+                    ("Car/Van", 0.5852),
+                    ("City Cars", 0.5595),
+                    ("Micro Cars", 0.5577),
+                ][:top_k]
+            if "Toyota" in query or "bZ" in query:
+                return [
+                    ("Automotive", 0.6421),
+                    ("Car/Van", 0.6310),
+                    ("Electric Power Generation", 0.4110),
+                ][:top_k]
+            return [("Electric Power Generation", 0.5964), ("Automotive", 0.5884)][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Toyota bZ"
+
+    rerank_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Toyota",
+                "category": "Electric Vehicles",
+                "confidence": 0.96,
+                "reasoning": "Toyota bZ electric vehicle launch ad.",
+            }
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls.append({"args": args, "kwargs": kwargs})
+            return (
+                {
+                    "brand": "Toyota",
+                    "category": "Automotive",
+                    "confidence": 0.93,
+                    "reasoning": "Toyota bZ is an electric vehicle, so the ad belongs in the automotive family.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/toyota-bz.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-rerank-1",
+    )
+
+    assert len(rerank_calls) == 1
+    assert row[1] == "Toyota"
+    assert row[2] == "399"
+    assert row[3] == "Automotive"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank" and attempt.get("status") == "accepted"
+        for attempt in attempts
+    )
+
+
+def test_pipeline_skips_category_rerank_for_confident_mapping(monkeypatch):
+    class _DummyMapper:
+        categories = ["Automotive", "Car/Van", "City Cars"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Automotive":
+                return {
+                    "canonical_category": "Automotive",
+                    "category_id": "399",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.711,
+                }
+            return {
+                "canonical_category": raw or "Unknown",
+                "category_id": "",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+            return [
+                ("Automotive", 0.7110),
+                ("Car/Van", 0.6610),
+                ("City Cars", 0.6400),
+            ][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Toyota"
+
+    rerank_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Toyota",
+                "category": "Automotive",
+                "confidence": 0.94,
+                "reasoning": "Toyota automotive ad.",
+            }
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls.append({"args": args, "kwargs": kwargs})
+            return None, "should_not_run"
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/toyota.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-rerank-2",
+    )
+
+    assert rerank_calls == []
+    assert row[2] == "399"
+    assert row[3] == "Automotive"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert not any(attempt.get("attempt_type") == "category_rerank" for attempt in attempts)
+
+
+def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_extra_probe_contradiction(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Electric Power Generation",
+            "Automotive",
+            "Car/Van",
+            "City Cars",
+        ]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Electric Vehicles":
+                return {
+                    "canonical_category": "Electric Power Generation",
+                    "category_id": "329",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.5964,
+                }
+            if raw == "Automotive":
+                return {
+                    "canonical_category": "Automotive",
+                    "category_id": "399",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            return {
+                "canonical_category": raw or "Unknown",
+                "category_id": "",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Electric Vehicles":
+                return [
+                    ("Electric Power Generation", 0.5964),
+                    ("Automotive", 0.5884),
+                    ("Car/Van", 0.5852),
+                    ("City Cars", 0.5595),
+                ][:top_k]
+            return [
+                ("Electric Power Generation", 0.6120),
+                ("Automotive", 0.6040),
+                ("Car/Van", 0.5980),
+            ][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "bZ"
+
+    rerank_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Toyota",
+                "category": "Electric Vehicles",
+                "confidence": 0.99,
+                "reasoning": "Toyota bZ electric vehicle ad.",
+            }
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls.append({"args": args, "kwargs": kwargs})
+            return (
+                {
+                    "brand": "Toyota",
+                    "category": "Automotive",
+                    "confidence": 0.92,
+                    "reasoning": "Within the supplied candidates, Automotive is the safer in-family category.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/toyota-bz-freeform.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-rerank-3",
+    )
+
+    assert len(rerank_calls) == 1
+    assert row[2] == "399"
+    assert row[3] == "Automotive"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and "freeform_category_with_weak_mapping" in str(attempt.get("trigger_reason", ""))
+        for attempt in attempts
+    )
+
+
 def test_extract_ocr_focus_region_returns_smaller_crop_for_text_band():
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     cv2.putText(frame, "BRAND.COM", (34, 178), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 3, cv2.LINE_AA)

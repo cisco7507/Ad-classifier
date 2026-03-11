@@ -497,6 +497,227 @@ def _top_visual_matches(sorted_vision: dict[str, float], limit: int = 3) -> list
     return list(sorted_vision.items())[:limit]
 
 
+def _category_rerank_enabled() -> bool:
+    raw = os.environ.get("CATEGORY_RERANK_ENABLED", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _resolve_category_rerank_top1_score_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_TOP1_SCORE_THRESHOLD", "0.62")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_top1_score_threshold value=%r fallback=0.62", raw)
+        return 0.62
+
+
+def _resolve_category_rerank_top2_gap_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_TOP2_GAP_THRESHOLD", "0.02")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_top2_gap_threshold value=%r fallback=0.02", raw)
+        return 0.02
+
+
+def _resolve_category_rerank_top3_gap_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_TOP3_GAP_THRESHOLD", "0.03")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_top3_gap_threshold value=%r fallback=0.03", raw)
+        return 0.03
+
+
+def _resolve_category_rerank_evidence_score_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_EVIDENCE_SCORE_THRESHOLD", "0.58")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_evidence_score_threshold value=%r fallback=0.58", raw)
+        return 0.58
+
+
+def _resolve_category_rerank_visual_score_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_VISUAL_SCORE_THRESHOLD", "0.55")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning("invalid_category_rerank_visual_score_threshold value=%r fallback=0.55", raw)
+        return 0.55
+
+
+def _build_category_rerank_candidates(
+    *,
+    raw_category: str,
+    current_match: dict[str, object],
+    predicted_brand: str,
+    ocr_text: str,
+    limit: int = 5,
+) -> list[tuple[str, float]]:
+    if not hasattr(category_mapper, "get_mapper_neighbor_categories"):
+        return []
+
+    try:
+        candidates = list(
+            category_mapper.get_mapper_neighbor_categories(
+                raw_category=raw_category,
+                predicted_brand=predicted_brand,
+                ocr_summary=ocr_text,
+                top_k=limit,
+            )
+        )
+    except Exception as exc:
+        logger.warning("category_rerank_candidates_failed: %s", exc)
+        return []
+
+    canonical = str(current_match.get("canonical_category", "") or "").strip()
+    if canonical and canonical not in {label for label, _score in candidates}:
+        score_raw = current_match.get("category_match_score", 0.0)
+        try:
+            score = float(score_raw or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        candidates.append((canonical, score))
+    return candidates[:limit]
+
+
+def _build_category_rerank_evidence_query(
+    result_payload: dict[str, object] | None,
+    ocr_text: str,
+) -> str:
+    if not isinstance(result_payload, dict):
+        return ""
+
+    parts: list[str] = []
+    brand = str(result_payload.get("brand", "") or "").strip()
+    if brand and brand.lower() not in {"unknown", "none", "n/a"}:
+        parts.append(brand)
+
+    compact_ocr = " ".join((ocr_text or "").split())
+    if compact_ocr:
+        parts.append(compact_ocr[:260])
+
+    reasoning = " ".join((str(result_payload.get("reasoning", "") or "")).split())
+    if reasoning:
+        parts.append(reasoning[:260])
+
+    return "\n".join(parts).strip()
+
+
+def _should_run_category_rerank(
+    *,
+    result_payload: dict[str, object] | None,
+    category_match: dict[str, object],
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+) -> tuple[bool, str, list[str], list[tuple[str, float]]]:
+    if not _category_rerank_enabled():
+        return False, "disabled", [], []
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result", [], []
+    if str(category_match.get("category_match_method", "") or "") != "embeddings":
+        return False, "mapping_not_embeddings", [], []
+
+    raw_category = str(result_payload.get("category", "") or "").strip()
+    canonical = str(category_match.get("canonical_category", "") or "").strip()
+    brand = str(result_payload.get("brand", "") or "").strip()
+    if not raw_category or not canonical:
+        return False, "missing_category", [], []
+
+    mapper_candidates = _build_category_rerank_candidates(
+        raw_category=raw_category,
+        current_match=category_match,
+        predicted_brand=brand,
+        ocr_text=ocr_text,
+        limit=5,
+    )
+    candidate_categories = [label for label, _score in mapper_candidates]
+    if len(candidate_categories) < 2:
+        return False, "insufficient_candidates", candidate_categories, []
+
+    uncertainty_reasons: list[str] = []
+    top1_score = float(mapper_candidates[0][1])
+    top2_score = float(mapper_candidates[1][1]) if len(mapper_candidates) > 1 else 0.0
+    top3_score = float(mapper_candidates[2][1]) if len(mapper_candidates) > 2 else top2_score
+    if top1_score < _resolve_category_rerank_top1_score_threshold():
+        uncertainty_reasons.append(f"top1_score={top1_score:.4f}")
+    if (top1_score - top2_score) < _resolve_category_rerank_top2_gap_threshold():
+        uncertainty_reasons.append(f"top1_top2_gap={top1_score - top2_score:.4f}")
+    if (top1_score - top3_score) < _resolve_category_rerank_top3_gap_threshold():
+        uncertainty_reasons.append(f"top1_top3_gap={top1_score - top3_score:.4f}")
+    if not uncertainty_reasons:
+        return False, "mapping_confident", candidate_categories, []
+
+    contradiction_reasons: list[str] = []
+    exact_taxonomy_match = hasattr(category_mapper, "categories") and raw_category in set(
+        getattr(category_mapper, "categories", []) or []
+    )
+    if not exact_taxonomy_match:
+        contradiction_reasons.append("freeform_category_with_weak_mapping")
+
+    evidence_query = _build_category_rerank_evidence_query(result_payload, ocr_text)
+    if evidence_query and hasattr(category_mapper, "get_mapper_neighbor_categories"):
+        try:
+            evidence_neighbors = list(
+                category_mapper.get_mapper_neighbor_categories(
+                    raw_category=evidence_query,
+                    predicted_brand="",
+                    ocr_summary="",
+                    top_k=3,
+                )
+            )
+        except Exception as exc:
+            logger.warning("category_rerank_evidence_neighbors_failed: %s", exc)
+            evidence_neighbors = []
+        if evidence_neighbors:
+            evidence_top_label, evidence_top_score = evidence_neighbors[0]
+            if (
+                evidence_top_label != canonical
+                and float(evidence_top_score) >= _resolve_category_rerank_evidence_score_threshold()
+            ):
+                contradiction_reasons.append(
+                    f"evidence_prefers={evidence_top_label!r}@{float(evidence_top_score):.4f}"
+                )
+
+    visual_matches = _top_visual_matches(sorted_vision, limit=3)
+    if visual_matches:
+        visual_top_label, visual_top_score = visual_matches[0]
+        if (
+            visual_top_label != canonical
+            and float(visual_top_score) >= _resolve_category_rerank_visual_score_threshold()
+        ):
+            contradiction_reasons.append(
+                f"vision_prefers={visual_top_label!r}@{float(visual_top_score):.4f}"
+            )
+
+    if not contradiction_reasons:
+        return False, ";".join(uncertainty_reasons), candidate_categories, visual_matches
+
+    return (
+        True,
+        ";".join([*uncertainty_reasons, *contradiction_reasons]),
+        candidate_categories,
+        visual_matches,
+    )
+
+
+def _accept_category_rerank_result(
+    current_match: dict[str, object],
+    reranked_match: dict[str, object],
+    candidate_categories: list[str],
+) -> tuple[bool, str]:
+    current_canonical = str(current_match.get("canonical_category", "") or "").strip()
+    reranked_canonical = str(reranked_match.get("canonical_category", "") or "").strip()
+    if not reranked_canonical:
+        return False, "reranked_category_empty"
+    if candidate_categories and reranked_canonical not in candidate_categories:
+        return False, f"outside_candidate_set={reranked_canonical!r}"
+    if reranked_canonical == current_canonical:
+        return False, f"unchanged_category={reranked_canonical!r}"
+    return True, f"reranked_to={reranked_canonical!r}"
+
+
 def _build_specificity_search_candidates(
     *,
     raw_category: str,
@@ -2142,6 +2363,120 @@ def process_single_video(
             predicted_brand=res.get("brand", "Unknown"),
             ocr_summary=ocr_text,
         )
+        category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
+            result_payload=res,
+            category_match=category_match,
+            ocr_text=ocr_text,
+            sorted_vision=sorted_vision,
+        )
+        if category_rerank_needed:
+            if stage_callback:
+                stage_callback("llm", f"category rerank provider={p.lower()} model={m}")
+            logger.info(
+                "[%s] fallback_triggered type=category_rerank reason=%s candidates=%s",
+                url,
+                category_rerank_reason,
+                category_rerank_candidates,
+            )
+            rerank_fn = getattr(llm_engine, "query_category_rerank", None)
+            if not callable(rerank_fn):
+                reranked_res, rerank_status = None, "unsupported"
+            else:
+                reranked_res, rerank_status = rerank_fn(
+                    p,
+                    m,
+                    brand=str(res.get("brand", "") or ""),
+                    raw_category=str(res.get("category", "") or ""),
+                    mapped_category=str(category_match.get("canonical_category", "") or ""),
+                    ocr_text=ocr_text,
+                    reasoning=str(res.get("reasoning", "") or ""),
+                    candidate_categories=category_rerank_candidates,
+                    visual_matches=category_rerank_visual_matches,
+                    context_size=ctx,
+                )
+            if isinstance(reranked_res, dict):
+                reranked_match = category_mapper.map_category(
+                    raw_category=reranked_res.get("category", "Unknown"),
+                    job_id=job_id,
+                    suggested_categories_text="",
+                    predicted_brand=reranked_res.get("brand", "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+                rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
+                    category_match,
+                    reranked_match,
+                    category_rerank_candidates,
+                )
+                if rerank_ok:
+                    res = reranked_res
+                    category_match = reranked_match
+                    logger.info(
+                        "[%s] fallback_accepted type=category_rerank reason=%s",
+                        url,
+                        rerank_accept_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="category_rerank",
+                        title="Category Rerank",
+                        status="accepted",
+                        source_frames=frames,
+                        detail="candidate-only taxonomy rerank",
+                        trigger_reason=category_rerank_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=reranked_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        evidence_note=(
+                            f"Reranked within mapper candidates because {rerank_accept_reason}. "
+                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                        ),
+                    )
+                else:
+                    logger.info(
+                        "[%s] fallback_rejected type=category_rerank reason=%s trigger=%s",
+                        url,
+                        rerank_accept_reason,
+                        category_rerank_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="category_rerank",
+                        title="Category Rerank",
+                        status="rejected",
+                        source_frames=frames,
+                        detail="candidate-only taxonomy rerank",
+                        trigger_reason=category_rerank_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=reranked_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        evidence_note=(
+                            f"Rerank was rejected because {rerank_accept_reason}. "
+                            f"Candidates: {', '.join(category_rerank_candidates)}."
+                        ),
+                    )
+            else:
+                logger.info(
+                    "[%s] fallback_rejected type=category_rerank reason=%s trigger=%s",
+                    url,
+                    rerank_status,
+                    category_rerank_reason,
+                )
+                _append_trace_attempt(
+                    attempt_type="category_rerank",
+                    title="Category Rerank",
+                    status="rejected",
+                    source_frames=frames,
+                    detail="candidate-only taxonomy rerank",
+                    trigger_reason=category_rerank_reason,
+                    ocr_text_value=ocr_text,
+                    result_payload=None,
+                    ocr_mode_used="" if express_mode else om,
+                    llm_mode="standard",
+                    evidence_note=(
+                        f"Rerank did not run: {rerank_status}. "
+                        f"Candidates: {', '.join(category_rerank_candidates)}."
+                    ),
+                )
         specificity_needed, specificity_reason = _should_run_specificity_search_rescue(
             enable_search=bool(enable_search),
             express_mode=express_mode,
