@@ -54,7 +54,7 @@ def test_run_agent_job_accepts_intermediate_six_field_agent_outputs(monkeypatch)
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -165,7 +165,7 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
             provider="Ollama",
             model="qwen3-vl:8b-instruct",
             ocr_engine="EasyOCR",
-            ocr_mode="🚀 Fast",
+            ocr_mode="Fast",
             allow_override=False,
             enable_search=False,
             enable_vision=False,
@@ -179,7 +179,7 @@ def test_react_agent_run_emits_delta_logs_not_full_memory_repeats(monkeypatch):
     assert logs[0].startswith("Initial State:")
     assert sum("Initial State:" in l for l in logs) == 1
     assert any(l.startswith("--- Step 1 ---") for l in logs)
-    assert any("✅ FINAL CONCLUSION REACHED." in l for l in logs)
+    assert any("FINAL CONCLUSION REACHED." in l for l in logs)
     assert any("Observation: VOLVO" in l for l in logs)
     assert all("[Scene" not in l for l in logs)
 

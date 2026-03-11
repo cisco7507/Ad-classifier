@@ -110,7 +110,7 @@ def test_pipeline_vision_uses_runtime_siglip_handles_and_emits_top_matches(monke
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -178,7 +178,7 @@ def test_pipeline_passes_canonical_fallback_categories_to_llm(monkeypatch):
         p="LM Studio",
         m="local-model",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -244,7 +244,7 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -333,7 +333,7 @@ def test_pipeline_easyocr_roi_falls_back_to_full_frame_when_crop_text_is_weak(mo
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -409,7 +409,7 @@ def test_pipeline_tail_ocr_stops_early_after_strong_signal_but_keeps_last_frame(
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -481,7 +481,7 @@ def test_pipeline_tail_easyocr_skips_nonfinal_frame_when_no_text_roi(monkeypatch
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -549,7 +549,7 @@ def test_pipeline_logs_ocr_call_metrics(monkeypatch, caplog):
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -662,7 +662,7 @@ def test_pipeline_skips_ocr_when_multimodal_tail_is_high_confidence(monkeypatch)
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -782,7 +782,7 @@ def test_pipeline_runs_ocr_when_multimodal_tail_confidence_is_too_low(monkeypatc
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -848,7 +848,7 @@ def test_pipeline_does_not_trigger_edge_rescue_when_initial_result_is_usable(mon
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -931,7 +931,7 @@ def test_pipeline_edge_rescue_retries_extended_tail_ocr_only_after_blank_initial
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -941,7 +941,7 @@ def test_pipeline_edge_rescue_retries_extended_tail_ocr_only_after_blank_initial
     )
 
     assert rescue_calls == ["called"]
-    assert ocr_modes == ["🚀 Fast", "🧠 Detailed"]
+    assert ocr_modes == ["Fast", "Detailed"]
     assert llm_calls == [("", False), ("ACME SAVE MORE", False)]
     assert ocr_text == "ACME SAVE MORE"
     assert row[1] == "Acme"
@@ -1015,7 +1015,7 @@ def test_pipeline_edge_rescue_falls_back_to_image_first_when_rescue_ocr_is_blank
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1119,7 +1119,7 @@ def test_pipeline_edge_rescue_runs_express_before_extended_tail(monkeypatch):
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1225,7 +1225,7 @@ def test_pipeline_edge_rescue_runs_extended_tail_before_full_video(monkeypatch):
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1329,7 +1329,7 @@ def test_pipeline_edge_rescue_runs_full_video_last_and_limits_frames(monkeypatch
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1383,7 +1383,7 @@ def test_pipeline_runs_ocr_context_rescue_for_low_confidence_short_ocr(monkeypat
         @staticmethod
         def extract_text(engine, image, mode):
             marker = int(image[0, 0, 0])
-            if mode == "🚀 Fast":
+            if mode == "Fast":
                 if marker == 10:
                     return "DoRMEZ-vous"
                 return ""
@@ -1448,7 +1448,7 @@ def test_pipeline_runs_ocr_context_rescue_for_low_confidence_short_ocr(monkeypat
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1535,7 +1535,7 @@ def test_pipeline_runs_ocr_context_rescue_on_short_ocr_when_mapper_score_is_weak
         @staticmethod
         def extract_text(engine, image, mode):
             marker = int(image[0, 0, 0])
-            if mode == "🚀 Fast":
+            if mode == "Fast":
                 return "DoRMEZ-vous" if marker == 10 else ""
             if marker == 10:
                 return "DoRMEZ-vous"
@@ -1601,7 +1601,7 @@ def test_pipeline_runs_ocr_context_rescue_on_short_ocr_when_mapper_score_is_weak
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1668,7 +1668,7 @@ def test_pipeline_rejects_context_rescue_when_ocr_supports_different_category(mo
         @staticmethod
         def extract_text(engine, image, mode):
             marker = int(image[0, 0, 0])
-            if mode == "🚀 Fast":
+            if mode == "Fast":
                 return "HISTORICA" if marker == 10 else ""
             if marker == 10:
                 return "HISTORICA"
@@ -1743,7 +1743,7 @@ def test_pipeline_rejects_context_rescue_when_ocr_supports_different_category(mo
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1817,7 +1817,7 @@ def test_pipeline_challenges_generic_context_rescue_with_express_when_ocr_is_non
         @staticmethod
         def extract_text(engine, image, mode):
             marker = int(image[0, 0, 0])
-            if mode == "🚀 Fast":
+            if mode == "Fast":
                 return "DoRMEZ-vous" if marker == 10 else ""
             if marker == 10:
                 return "HISTORICA"
@@ -1892,7 +1892,7 @@ def test_pipeline_challenges_generic_context_rescue_with_express_when_ocr_is_non
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,
@@ -1990,7 +1990,7 @@ def test_pipeline_accepts_specificity_search_rescue_for_broad_financial_category
         p="Llama Server",
         m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=True,
@@ -2063,7 +2063,7 @@ def test_pipeline_fails_closed_when_specificity_search_is_unavailable(monkeypatc
         p="Llama Server",
         m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=True,
@@ -2160,7 +2160,7 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
         p="Llama Server",
         m="Qwen/Qwen3-VL-8B-Instruct-GGUF",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=True,

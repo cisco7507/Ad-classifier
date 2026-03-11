@@ -72,7 +72,7 @@ def test_job_settings_accept_enable_web_search_alias():
             "provider": "Ollama",
             "model_name": "qwen3-vl:8b-instruct",
             "ocr_engine": "EasyOCR",
-            "ocr_mode": "🚀 Fast",
+            "ocr_mode": "Fast",
             "scan_mode": "Tail Only",
             "override": False,
             "enable_web_search": True,

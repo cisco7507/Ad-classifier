@@ -28,9 +28,9 @@ function sortedDurationSeries(series: DurationSeriesPoint[]): DurationSeriesPoin
 
 function MetricPill({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className="rounded-[24px] border border-slate-200/80 bg-white/85 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur">
+    <div className="bell-panel p-5">
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{label}</div>
-      <div className={`mt-3 text-4xl font-black tracking-[-0.05em] ${accent}`}>{value}</div>
+      <div className={`mt-3 text-4xl font-bold ${accent}`}>{value}</div>
     </div>
   );
 }
@@ -142,13 +142,13 @@ export function Analytics() {
       animationDuration: 650,
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(2, 6, 23, 0.95)',
-        borderColor: 'rgba(103, 232, 249, 0.28)',
+        backgroundColor: 'rgba(0, 31, 68, 0.96)',
+        borderColor: 'rgba(191, 220, 242, 0.35)',
         textStyle: { color: '#e2e8f0' },
       },
       legend: {
         top: 8,
-        textStyle: { color: '#94a3b8' },
+        textStyle: { color: '#5e6772' },
       },
       grid: {
         left: 40,
@@ -181,8 +181,8 @@ export function Analytics() {
           smooth: true,
           symbol: 'circle',
           symbolSize: 6,
-          lineStyle: { width: 3, color: '#22d3ee' },
-          itemStyle: { color: '#22d3ee' },
+          lineStyle: { width: 3, color: '#0070ce' },
+          itemStyle: { color: '#0070ce' },
           emphasis: { focus: 'series' },
         },
         {
@@ -191,8 +191,8 @@ export function Analytics() {
           data: series.map((row) => row.p90),
           smooth: true,
           symbol: 'none',
-          lineStyle: { width: 1.7, color: '#a78bfa', type: 'dashed' },
-          areaStyle: { color: 'rgba(167, 139, 250, 0.10)' },
+          lineStyle: { width: 1.7, color: '#00549a', type: 'dashed' },
+          areaStyle: { color: 'rgba(0, 84, 154, 0.08)' },
           emphasis: { focus: 'series' },
         },
         {
@@ -201,8 +201,8 @@ export function Analytics() {
           data: series.map((row) => row.p95),
           smooth: true,
           symbol: 'none',
-          lineStyle: { width: 1.9, color: '#f472b6' },
-          areaStyle: { color: 'rgba(244, 114, 182, 0.08)' },
+          lineStyle: { width: 1.9, color: '#4e9fd4' },
+          areaStyle: { color: 'rgba(78, 159, 212, 0.07)' },
           emphasis: { focus: 'series' },
         },
         {
@@ -211,7 +211,7 @@ export function Analytics() {
           data: series.map((row) => row.p99),
           smooth: true,
           symbol: 'none',
-          lineStyle: { width: 1.4, color: '#fb7185', type: 'dotted' },
+          lineStyle: { width: 1.4, color: '#8aa9c5', type: 'dotted' },
           emphasis: { focus: 'series' },
         },
       ],
@@ -228,28 +228,28 @@ export function Analytics() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <section className="rounded-[30px] border border-slate-200/80 bg-[linear-gradient(135deg,rgba(15,23,42,0.96)_0%,rgba(15,23,42,0.92)_52%,rgba(30,41,59,0.94)_100%)] p-7 text-slate-50 shadow-[0_24px_65px_rgba(15,23,42,0.18)]">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <section className="bell-hero">
+        <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-200">
+            <div className="bell-badge">
               <BarChartIcon className="h-3.5 w-3.5" />
               Throughput intelligence
             </div>
-            <h2 className="mt-4 text-4xl font-black tracking-[-0.06em] text-white">Watch the tails, not just the averages</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+            <h2 className="mt-4 max-w-2xl text-[3rem] font-bold text-primary-700">Watch the tails, not just the averages</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
               This dashboard is tuned for operational reliability. Median speed tells you how healthy the system feels. P95 and P99 tell you when rescues, retries, and edge cases are starting to dominate
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-4 backdrop-blur">
+            <div className="rounded-[1.7rem] border border-white/90 bg-white/88 px-4 py-4 shadow-[0_14px_28px_rgba(0,55,120,0.08)]">
               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Completed jobs</div>
-              <div className="mt-2 text-4xl font-black tracking-[-0.05em] text-white">{totals.completed}</div>
-              <div className="mt-2 text-sm text-slate-400">Persistent output volume across the cluster</div>
+              <div className="mt-2 text-4xl font-bold text-slate-950">{totals.completed}</div>
+              <div className="mt-2 text-sm text-slate-500">Persistent output volume across the cluster</div>
             </div>
-            <div className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-4 backdrop-blur">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Sample windows</div>
-              <div className="mt-2 text-4xl font-black tracking-[-0.05em] text-white">{percentiles.count}</div>
-              <div className="mt-2 text-sm text-slate-400">Recent completion buckets feeding the chart</div>
+            <div className="rounded-[1.7rem] border border-primary-700/30 bg-primary-700 px-4 py-4 text-white shadow-[0_18px_36px_rgba(0,55,120,0.22)]">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/65">Sample windows</div>
+              <div className="mt-2 text-4xl font-bold text-white">{percentiles.count}</div>
+              <div className="mt-2 text-sm text-white/72">Recent completion buckets feeding the chart</div>
             </div>
           </div>
         </div>
@@ -266,13 +266,13 @@ export function Analytics() {
 
       <section className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <MetricPill label="Completed Jobs" value={String(totals.completed)} accent="text-slate-950" />
-        <MetricPill label="P50" value={formatSeconds(percentiles.p50)} accent="text-cyan-700" />
-        <MetricPill label="P90" value={formatSeconds(percentiles.p90)} accent="text-violet-700" />
-        <MetricPill label="P95" value={formatSeconds(percentiles.p95)} accent="text-fuchsia-700" />
-        <MetricPill label="P99" value={formatSeconds(percentiles.p99)} accent="text-rose-700" />
+        <MetricPill label="P50" value={formatSeconds(percentiles.p50)} accent="text-primary-700" />
+        <MetricPill label="P90" value={formatSeconds(percentiles.p90)} accent="text-primary-800" />
+        <MetricPill label="P95" value={formatSeconds(percentiles.p95)} accent="text-[#4e9fd4]" />
+        <MetricPill label="P99" value={formatSeconds(percentiles.p99)} accent="text-slate-700" />
       </section>
 
-      <section className="rounded-[30px] border border-slate-200/80 bg-white/88 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur">
+      <section className="bell-panel p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-black uppercase tracking-[0.22em] text-slate-500">Path telemetry</h3>
@@ -290,32 +290,32 @@ export function Analytics() {
             subtitle="Where jobs finished after the fallback ladder settled on a final answer."
             items={pathMetrics.accepted_paths || []}
             denominator={pathMetrics.jobs_with_trace}
-            accent="linear-gradient(135deg, #4f46e5, #2563eb)"
+            accent="linear-gradient(135deg, #00549a, #0070ce)"
           />
           <PathMetricList
             title="Transit counts"
             subtitle="How many jobs traversed each stage, including retries that were later rejected."
             items={pathMetrics.transit_paths || []}
             denominator={pathMetrics.jobs_with_trace}
-            accent="linear-gradient(135deg, #0f766e, #14b8a6)"
+            accent="linear-gradient(135deg, #4e9fd4, #8dbfe3)"
           />
         </div>
       </section>
 
       {totals.completed === 0 ? (
-        <div className="rounded-[28px] border border-slate-200/80 bg-white/82 p-12 text-center text-slate-500 shadow-sm">
+        <div className="bell-panel p-12 text-center text-slate-500">
           No duration analytics yet. Complete some jobs to populate percentile trends.
         </div>
       ) : (
-        <section className="rounded-[30px] border border-slate-800 bg-slate-950 p-5 shadow-[0_24px_65px_rgba(15,23,42,0.18)]">
+        <section className="bell-panel p-5">
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h3 className="text-lg font-black tracking-[-0.03em] text-slate-50">Job duration percentiles</h3>
-              <p className="mt-1 text-sm text-slate-400">
+              <h3 className="text-lg font-bold text-slate-950">Job duration percentiles</h3>
+              <p className="mt-1 text-sm text-slate-500">
                 Median tracks the common case. The upper bands reveal when the rescue ladder, OCR retries, or provider latency start to stretch the tail.
               </p>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
+            <div className="bell-data-pill">
               Samples: {percentiles.count}
             </div>
           </div>

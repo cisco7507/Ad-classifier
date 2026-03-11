@@ -7,12 +7,21 @@ class JobMode(str, Enum):
     agent = "agent"
     benchmark = "benchmark"
 
+
+def _normalize_ocr_mode_value(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if "detail" in text:
+        return "Detailed"
+    if "fast" in text:
+        return "Fast"
+    return "Fast"
+
 class JobSettings(BaseModel):
     categories: str = ""
     provider: str = "Gemini CLI"
     model_name: str = "Gemini CLI Default"
     ocr_engine: str = "EasyOCR"
-    ocr_mode: str = "🚀 Fast"
+    ocr_mode: str = "Fast"
     scan_mode: str = "Tail Only"
     express_mode: bool = False
     override: bool = False
@@ -57,6 +66,7 @@ class JobSettings(BaseModel):
             data["enable_vision_board"] = True
         if data.get("enable_llm_frame") is None:
             data["enable_llm_frame"] = True
+        data["ocr_mode"] = _normalize_ocr_mode_value(data.get("ocr_mode"))
         return data
 
 class JobSettingsForm(JobSettings):

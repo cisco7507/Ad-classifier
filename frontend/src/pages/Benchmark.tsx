@@ -36,9 +36,9 @@ import type {
 } from '../lib/api';
 
 const panelClass =
-  'rounded-[30px] border border-slate-200/80 bg-white/82 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur';
+  'bell-panel';
 const controlClass =
-  'h-10 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
+  'h-10 w-full rounded-[1.15rem] border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
 
 function formatSeconds(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
@@ -691,28 +691,28 @@ export function Benchmark() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className={`${panelClass} overflow-hidden p-6`}>
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-end">
+      <div className="bell-hero">
+        <div className="relative z-10 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-end">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-primary-700">
+            <div className="bell-badge">
               <RocketIcon className="h-3.5 w-3.5" />
               Controlled trials
             </div>
-            <h2 className="mt-4 text-3xl font-black tracking-[-0.05em] text-slate-950">Benchmark lab</h2>
+            <h2 className="mt-4 text-[2.7rem] font-bold text-primary-700">Benchmark lab</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               Run repeatable suites across OCR, model hosts, and runtime modes. This screen is tuned for comparative readouts rather than day-to-day queue operations.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 shadow-sm">
+            <div className="rounded-[1.7rem] border border-white/90 bg-white/88 px-4 py-4 shadow-[0_14px_28px_rgba(0,55,120,0.08)]">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Truth sets</div>
-              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-slate-950">{truths.length}</div>
+              <div className="mt-2 text-lg font-bold text-slate-950">{truths.length}</div>
               <div className="text-xs text-slate-500">Golden references loaded</div>
             </div>
-            <div className="rounded-[22px] border border-slate-200/80 bg-slate-950 px-4 py-4 text-slate-50 shadow-[0_18px_36px_rgba(15,23,42,0.18)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Available models</div>
-              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-white">{availableModels.length}</div>
-              <div className="text-xs text-slate-400">Selectable benchmark contenders</div>
+            <div className="rounded-[1.7rem] border border-primary-700/30 bg-primary-700 px-4 py-4 text-white shadow-[0_18px_36px_rgba(0,55,120,0.22)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/65">Available models</div>
+              <div className="mt-2 text-lg font-bold text-white">{availableModels.length}</div>
+              <div className="text-xs text-white/72">Selectable benchmark contenders</div>
             </div>
           </div>
         </div>
@@ -812,7 +812,7 @@ export function Benchmark() {
             type="button"
             disabled={createTruthDisabled}
             onClick={handleCreateTruth}
-            className="inline-flex h-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#4f46e5,#2563eb)] px-4 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_18px_36px_rgba(79,70,229,0.22)] transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
+            className="bell-button-primary h-11 px-4 text-sm uppercase tracking-[0.18em] disabled:opacity-50"
           >
             Create Truth
           </button>
@@ -992,7 +992,7 @@ export function Benchmark() {
             <div
               onClick={() => setExpressMode((v) => !v)}
               className={`relative h-5 w-9 rounded-full transition-colors ${
-                expressMode ? 'bg-emerald-500' : 'bg-gray-300'
+                expressMode ? 'bg-primary-500' : 'bg-gray-300'
               }`}
             >
               <span
@@ -1011,7 +1011,7 @@ export function Benchmark() {
             type="button"
             disabled={runDisabled}
             onClick={handleRunSuite}
-            className="inline-flex h-11 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#059669,#0f766e)] px-4 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_18px_36px_rgba(5,150,105,0.18)] transition-transform duration-200 hover:-translate-y-0.5 disabled:opacity-50"
+            className="bell-button-primary h-11 px-4 text-sm uppercase tracking-[0.18em] disabled:opacity-50"
           >
             Launch Benchmark
           </button>

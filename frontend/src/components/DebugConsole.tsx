@@ -112,25 +112,25 @@ function formatJobId(jobId: string): string {
 }
 
 function levelClass(level: LogLevel): string {
-  if (level === 'ERROR') return 'border-red-500/40 bg-red-900/30 text-red-200';
-  if (level === 'WARNING') return 'border-amber-500/40 bg-amber-900/30 text-amber-200';
-  if (level === 'INFO') return 'border-emerald-500/40 bg-emerald-900/30 text-emerald-200';
-  if (level === 'DEBUG') return 'border-sky-500/40 bg-sky-900/30 text-sky-200';
-  return 'border-slate-600/50 bg-slate-800/60 text-slate-200';
+  if (level === 'ERROR') return 'border-red-200 bg-red-50 text-red-700';
+  if (level === 'WARNING') return 'border-[#e5d9c7] bg-[rgba(247,244,237,0.96)] text-[#9a5a18]';
+  if (level === 'INFO') return 'border-primary-200 bg-primary-50 text-primary-700';
+  if (level === 'DEBUG') return 'border-slate-200 bg-slate-100 text-slate-600';
+  return 'border-slate-200 bg-white text-slate-600';
 }
 
 function stageClass(stage: string): string {
   const value = (stage || '').toLowerCase();
-  if (!value || value === '-') return 'border-slate-700 bg-slate-900/50 text-slate-400';
-  if (value.includes('ingest') || value.includes('download')) return 'border-violet-500/40 bg-violet-900/30 text-violet-200';
-  if (value.includes('frame')) return 'border-indigo-500/40 bg-indigo-900/30 text-indigo-200';
-  if (value.includes('ocr')) return 'border-cyan-500/40 bg-cyan-900/30 text-cyan-200';
-  if (value.includes('vision')) return 'border-fuchsia-500/40 bg-fuchsia-900/30 text-fuchsia-200';
-  if (value.includes('llm')) return 'border-pink-500/40 bg-pink-900/30 text-pink-200';
-  if (value.includes('persist')) return 'border-teal-500/40 bg-teal-900/30 text-teal-200';
-  if (value.includes('fail')) return 'border-red-500/40 bg-red-900/30 text-red-200';
-  if (value.includes('complete')) return 'border-emerald-500/40 bg-emerald-900/30 text-emerald-200';
-  return 'border-slate-600/50 bg-slate-800/60 text-slate-300';
+  if (!value || value === '-') return 'border-slate-200 bg-slate-100 text-slate-500';
+  if (value.includes('ingest') || value.includes('download')) return 'border-primary-100 bg-primary-50 text-primary-700';
+  if (value.includes('frame')) return 'border-blue-100 bg-blue-50 text-blue-700';
+  if (value.includes('ocr')) return 'border-sky-100 bg-sky-50 text-sky-700';
+  if (value.includes('vision')) return 'border-indigo-100 bg-indigo-50 text-indigo-700';
+  if (value.includes('llm')) return 'border-slate-200 bg-slate-100 text-slate-700';
+  if (value.includes('persist')) return 'border-primary-200 bg-primary-50 text-primary-700';
+  if (value.includes('fail')) return 'border-red-200 bg-red-50 text-red-700';
+  if (value.includes('complete')) return 'border-primary-200 bg-primary-50 text-primary-700';
+  return 'border-slate-200 bg-white text-slate-600';
 }
 
 function renderMessage(message: string): ReactNode {
@@ -142,7 +142,7 @@ function renderMessage(message: string): ReactNode {
       return (
         <span
           key={`${part}-${index}`}
-          className="rounded border border-slate-600/60 bg-slate-800/70 px-1 py-0.5 text-[11px] text-cyan-200"
+          className="rounded border border-primary-100 bg-primary-50 px-1 py-0.5 text-[11px] text-primary-700"
         >
           {part}
         </span>
@@ -339,10 +339,10 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
   const connectionLabel = connection === 'open' ? 'Live' : connection === 'error' ? 'Retrying' : 'Connecting';
   const connectionClass =
     connection === 'open'
-      ? 'text-emerald-300 bg-emerald-900/40 border-emerald-600/40'
+      ? 'text-primary-700 bg-white border-primary-200'
       : connection === 'error'
-        ? 'text-amber-200 bg-amber-900/40 border-amber-600/40'
-        : 'text-slate-200 bg-slate-800/50 border-slate-600/40';
+        ? 'text-[#9a5a18] bg-[rgba(247,244,237,0.96)] border-[#e5d9c7]'
+        : 'text-white bg-white/12 border-white/25';
 
   return (
     <div
@@ -351,25 +351,25 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
         open ? 'translate-y-0' : 'translate-y-full'
       )}
     >
-      <div className="mx-3 mb-3 rounded-xl border border-primary-300 bg-white shadow-xl lg:mx-6">
-        <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 rounded-t-xl">
+      <div className="mx-3 mb-3 overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_22px_48px_rgba(0,55,120,0.16)] lg:mx-6">
+        <div className="flex flex-wrap items-center gap-3 border-b border-white/12 bg-[linear-gradient(90deg,#003778_0%,#00549A_100%)] px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="h-1.5 w-1.5 rounded-full bg-primary-500 animate-pulse" />
-            <div className="text-sm font-semibold tracking-wide text-gray-800">Server Logs</div>
+            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            <div className="text-sm font-semibold tracking-wide text-white">Server Logs</div>
           </div>
           <div className={cn('rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase', connectionClass)}>
             {connectionLabel}
           </div>
           <div className="relative ml-auto min-w-[220px] flex-1 max-w-md">
-            <MagnifyingGlassIcon className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+            <MagnifyingGlassIcon className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-primary-300" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter logs (job_id, error, timeout...)"
-              className="h-8 w-full rounded-md border border-gray-300 bg-white pl-8 pr-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none"
+              className="h-8 w-full rounded-full border border-white/30 bg-white pl-8 pr-2 text-xs text-primary-900 placeholder:text-primary-300 focus:border-white focus:outline-none"
             />
           </div>
-          <label className="flex items-center gap-1 text-xs text-gray-600">
+          <label className="flex items-center gap-1 text-xs text-white/72">
             <input
               type="checkbox"
               checked={hideInfo}
@@ -378,7 +378,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
             />
             hide INFO
           </label>
-          <label className="flex items-center gap-1 text-xs text-gray-600">
+          <label className="flex items-center gap-1 text-xs text-white/72">
             <input
               type="checkbox"
               checked={hideDebug}
@@ -392,7 +392,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
             onClick={() => {
               void clearLogs();
             }}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
+            className="inline-flex h-8 items-center gap-1 rounded-full border border-white/24 bg-white/12 px-3 text-xs font-semibold text-white transition-colors hover:bg-white/18"
           >
             <TrashIcon className="h-3.5 w-3.5" />
             Clear
@@ -400,7 +400,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 text-xs font-semibold text-gray-600 hover:bg-gray-100"
+            className="inline-flex h-8 items-center gap-1 rounded-full border border-white/24 bg-white/12 px-3 text-xs font-semibold text-white transition-colors hover:bg-white/18"
           >
             <Cross2Icon className="h-3.5 w-3.5" />
             Close
@@ -414,10 +414,10 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
             const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 24;
             setStickToBottom(nearBottom);
           }}
-          className="h-[44vh] overflow-y-auto bg-white px-2 py-2 font-mono text-xs rounded-b-xl"
+          className="h-[44vh] overflow-y-auto bg-[linear-gradient(180deg,#f7f8fb_0%,#edf3f8_100%)] px-2 py-2 font-mono text-xs"
         >
           {filteredLogs.length === 0 ? (
-            <div className="flex h-full items-center justify-center gap-2 text-gray-400">
+            <div className="flex h-full items-center justify-center gap-2 text-slate-500">
               <ReloadIcon className="h-4 w-4 animate-spin" />
               Waiting for logs...
             </div>
@@ -426,12 +426,12 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
               {filteredLogs.map((line) => {
                 const parsed = line.parsed;
                 const rowBaseClass = line.hasTimeout
-                  ? 'border-orange-300 bg-orange-50'
+                  ? 'border-[#e5d9c7] bg-[rgba(247,244,237,0.96)]'
                   : line.level === 'ERROR' || line.hasException
                     ? 'border-red-200 bg-red-50'
                     : line.level === 'WARNING'
-                      ? 'border-amber-200 bg-amber-50'
-                      : 'border-gray-200 bg-gray-50';
+                      ? 'border-[#e5d9c7] bg-[rgba(247,244,237,0.96)]'
+                      : 'border-slate-200 bg-white/92';
 
                 if (!parsed.parsed) {
                   return (
@@ -453,7 +453,7 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
                     className={cn('rounded border px-2 py-1 transition-colors', rowBaseClass)}
                   >
                     <div className="grid min-w-[980px] grid-cols-[170px_60px_100px_minmax(0,1fr)] items-start gap-3">
-                      <div className="truncate pt-[2px] text-[11px] text-gray-400">{parsed.timestamp}</div>
+                      <div className="truncate pt-[2px] text-[11px] text-slate-500">{parsed.timestamp}</div>
                       <div>
                         <span
                           className={cn(
@@ -478,14 +478,14 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
                       </div>
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-gray-400">{parsed.module}</span>
+                          <span className="text-[10px] text-slate-500">{parsed.module}</span>
                           {parsed.jobId && parsed.jobId !== '-' && (
                             <span className="inline-flex rounded border border-primary-200 bg-primary-50 px-1.5 align-middle text-[9px] text-primary-700">
                               job: {formatJobId(parsed.jobId)}
                             </span>
                           )}
                         </div>
-                        <div className="whitespace-pre-wrap break-words leading-5 text-gray-800">
+                        <div className="whitespace-pre-wrap break-words leading-5 text-slate-800">
                           {renderMessage(parsed.message)}
                         </div>
                       </div>

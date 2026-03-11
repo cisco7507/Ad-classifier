@@ -10,9 +10,9 @@ import { HelpTooltip } from '../components/HelpTooltip';
 type InputMode = 'urls' | 'filepath' | 'dirpath';
 const PROVIDER_OPTIONS = ['Ollama', 'LM Studio', 'Llama Server', 'Gemini CLI'] as const;
 const panelClass =
-  'rounded-[30px] border border-slate-200/80 bg-white/82 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur';
+  'bell-panel';
 const controlClass =
-  'h-10 w-full rounded-2xl border border-slate-200 bg-white/90 px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
+  'h-10 w-full rounded-[1.15rem] border border-slate-300 bg-white px-3 text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15';
 const monoControlClass = `${controlClass} font-mono`;
 const queueColumns = 'xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_220px]';
 const queueFrameColumns = 'grid-cols-[36px_minmax(0,1fr)]';
@@ -32,11 +32,11 @@ function formatDurationLabel(durationSeconds?: number | null): string {
 }
 
 function getStatusBadgeClass(status: string): string {
-  if (status === 'completed') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (status === 'completed') return 'bg-primary-50 text-primary-700 border-primary-200';
   if (status === 'failed') return 'bg-red-50 text-red-700 border-red-200';
-  if (status === 'processing') return 'bg-blue-50 text-blue-700 border-blue-200';
-  if (status === 're-queued') return 'bg-orange-50 text-orange-700 border-orange-200';
-  return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'processing') return 'bg-primary-100 text-primary-800 border-primary-200';
+  if (status === 're-queued') return 'bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]';
+  return 'bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]';
 }
 
 function getStatusText(status: string): string {
@@ -55,6 +55,13 @@ function formatRelativeTimestamp(value?: string): string {
   return formatDistanceToNow(parsed, { addSuffix: true });
 }
 
+function sanitizeDecorativeLabel(value?: string | null): string {
+  const text = (value || '').trim();
+  if (!text) return '—';
+  const cleaned = text.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+  return cleaned || text;
+}
+
 function FieldLabel({
   label,
   help,
@@ -63,7 +70,7 @@ function FieldLabel({
   help?: string;
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-xs uppercase tracking-wider font-semibold text-gray-400">
+    <label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-primary-700/78">
       <span>{label}</span>
       {help ? <HelpTooltip content={help} /> : null}
     </label>
@@ -89,7 +96,7 @@ export function Jobs() {
   const [providerModels, setProviderModels] = useState<string[]>([]);
   const [providerModelsLoading, setProviderModelsLoading] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('EasyOCR');
-  const [ocrMode, setOcrMode] = useState('🚀 Fast');
+  const [ocrMode, setOcrMode] = useState('Fast');
   const [scanMode, setScanMode] = useState('Tail Only');
   const [expressMode, setExpressMode] = useState(false);
   const [enableVisionBoard, setEnableVisionBoard] = useState(true);
@@ -319,36 +326,36 @@ export function Jobs() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className={`${panelClass} p-6`}>
-        <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="bell-hero">
+        <div className="relative z-10 mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-primary-700">
+            <div className="bell-badge">
               <PlayIcon className="h-3.5 w-3.5" />
               Launch pipeline
             </div>
-            <h2 className="mt-4 text-3xl font-black tracking-[-0.05em] text-slate-950">Start a new analysis run.</h2>
+            <h2 className="mt-4 max-w-2xl text-[2.9rem] font-bold text-primary-700">Start a new analysis run.</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               Pick the evidence path, model runtime, and OCR profile. The defaults stay fast for normal work; the advanced controls help when you need to probe harder edge cases.
             </p>
           </div>
           <div className="grid min-w-[17rem] grid-cols-2 gap-3">
-            <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/80 px-4 py-4 shadow-sm">
+            <div className="rounded-[1.7rem] border border-white/90 bg-white/88 px-4 py-4 shadow-[0_14px_28px_rgba(0,55,120,0.08)]">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Primary mode</div>
-              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-slate-950">{mode === 'pipeline' ? 'Pipeline' : 'Agent'}</div>
+              <div className="mt-2 text-lg font-bold text-slate-950">{mode === 'pipeline' ? 'Pipeline' : 'Agent'}</div>
             </div>
-            <div className="rounded-[22px] border border-slate-200/80 bg-slate-950 px-4 py-4 text-slate-50 shadow-[0_18px_36px_rgba(15,23,42,0.18)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Model host</div>
-              <div className="mt-2 text-lg font-black tracking-[-0.04em] text-white">{provider}</div>
+            <div className="rounded-[1.7rem] border border-primary-700/30 bg-primary-700 px-4 py-4 text-white shadow-[0_18px_36px_rgba(0,55,120,0.22)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/65">Model host</div>
+              <div className="mt-2 text-lg font-bold text-white">{provider}</div>
             </div>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <form onSubmit={handleSubmit} className="relative z-10 flex flex-col gap-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50/85 p-1 shadow-inner">
-              <button type="button" onClick={() => setInputMode('urls')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'urls' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>URLs</button>
-              <button type="button" onClick={() => setInputMode('filepath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'filepath' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>File Path</button>
-              <button type="button" onClick={() => setInputMode('dirpath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'dirpath' ? 'bg-primary-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}>Directory Path</button>
+            <div className="inline-flex w-fit rounded-full border border-primary-100 bg-white/88 p-1.5 shadow-[0_12px_24px_rgba(0,55,120,0.08)]">
+              <button type="button" onClick={() => setInputMode('urls')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'urls' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>URLs</button>
+              <button type="button" onClick={() => setInputMode('filepath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'filepath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>File Path</button>
+              <button type="button" onClick={() => setInputMode('dirpath')} className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] transition-colors ${inputMode === 'dirpath' ? 'bg-primary-500 text-white shadow-[0_10px_20px_rgba(0,112,206,0.20)]' : 'text-primary-700 hover:bg-primary-50'}`}>Directory Path</button>
             </div>
 
             <div className="flex items-center justify-between gap-3 lg:min-w-[18rem] lg:justify-end">
@@ -361,7 +368,7 @@ export function Jobs() {
               <button
                 type="submit"
                 disabled={disableSubmit}
-                className="flex h-12 min-w-[13rem] items-center justify-center gap-2 rounded-[20px] bg-[linear-gradient(135deg,#4f46e5,#2563eb)] px-5 text-sm font-bold uppercase tracking-[0.24em] text-white shadow-[0_18px_36px_rgba(79,70,229,0.22)] transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-[0_24px_44px_rgba(79,70,229,0.26)] disabled:opacity-50"
+                className="bell-button-primary h-12 min-w-[13rem] gap-2 px-5 text-sm uppercase tracking-[0.22em] disabled:opacity-50"
               >
                 {submitLoading ? <UpdateIcon className="h-4 w-4 animate-spin" /> : <PlayIcon className="h-4 w-4" />}
                 {submitLoading ? 'Submitting…' : 'Execute'}
@@ -369,13 +376,13 @@ export function Jobs() {
             </div>
           </div>
 
-          <div className="rounded-[26px] border border-slate-200/80 bg-slate-50/70 p-3 shadow-inner">
+          <div className="rounded-[1.9rem] border border-slate-200/90 bg-white/74 p-3 shadow-[inset_0_0_0_1px_rgba(212,221,230,0.55)]">
             {inputMode === 'urls' && (
               <textarea
                 value={urls}
                 onChange={(e) => setUrls(e.target.value)}
                 placeholder="Enter URLs (one per line)..."
-                className="h-36 w-full resize-none rounded-[20px] border border-slate-200 bg-white/90 p-4 font-mono text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
+                className="h-36 w-full resize-none rounded-[1.5rem] border border-slate-200 bg-white/96 p-4 font-mono text-sm text-slate-700 shadow-sm transition-colors focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
               />
             )}
             {inputMode === 'filepath' && (
@@ -397,10 +404,10 @@ export function Jobs() {
           </div>
 
           {inputMode !== 'urls' && (
-            <div className="flex items-start gap-3 rounded-[22px] border border-sky-100 bg-sky-50/75 px-4 py-3 text-sm text-slate-600">
-              <InfoCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />
+            <div className="flex items-start gap-3 rounded-[1.45rem] border border-primary-100 bg-primary-50/80 px-4 py-3 text-sm text-slate-600">
+              <InfoCircledIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary-500" />
               <div className="space-y-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-700">Server path note</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-primary-700">Server path note</div>
                 <div>
                   File and directory paths are resolved on the backend server, not in your browser. UNC paths only work if the server can reach that share and has permission to read it.
                 </div>
@@ -408,7 +415,7 @@ export function Jobs() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(248,250,252,0.85)_0%,rgba(241,245,249,0.92)_100%)] p-5 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 rounded-[2rem] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.88)_0%,rgba(244,247,250,0.96)_100%)] p-5 md:grid-cols-4">
             <div className="space-y-1.5">
               <FieldLabel
                 label="Mode"
@@ -459,7 +466,7 @@ export function Jobs() {
                 help="Computes category similarity scores from the selected frames. Useful for debugging why the visual encoder leaned toward certain categories."
               />
               <select value={enableVisionBoard ? 'true' : 'false'} onChange={(e) => setEnableVisionBoard(e.target.value === 'true')} className={controlClass}>
-                <option value="true">📸 Generate Vision Board (SigLIP/OpenCLIP)</option>
+                <option value="true">Generate Vision Board (SigLIP/OpenCLIP)</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
@@ -469,7 +476,7 @@ export function Jobs() {
                 help="Sends a representative video frame to the multimodal model. Disable this only if you want the LLM to rely on OCR text alone."
               />
               <select value={enableLlmFrame ? 'true' : 'false'} onChange={(e) => setEnableLlmFrame(e.target.value === 'true')} className={controlClass}>
-                <option value="true">🧠 Send Keyframe to LLM</option>
+                <option value="true">Send Keyframe to LLM</option>
                 <option value="false">Disabled</option>
               </select>
             </div>
@@ -489,7 +496,7 @@ export function Jobs() {
                 help="Fast favors latency and aggressive shortcuts. Detailed keeps more OCR work enabled for harder frames and better text recovery."
               />
               <select value={ocrMode} onChange={(e) => setOcrMode(e.target.value)} className={controlClass}>
-                <option value="🚀 Fast">Fast</option>
+                <option value="Fast">Fast</option>
                 <option value="Detailed">Detailed</option>
               </select>
             </div>
@@ -563,14 +570,14 @@ export function Jobs() {
         </form>
       </div>
 
-      <div className={`${panelClass} overflow-hidden flex flex-col`}>
-        <div className="border-b border-slate-200/80 bg-white/75 px-6 py-5">
+      <div className={`${panelClass} flex flex-col overflow-hidden`}>
+        <div className="border-b border-slate-200/80 bg-primary-50/70 px-6 py-5">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-3">
-                <h3 className="text-xl font-black tracking-[-0.04em] text-slate-950">Job queue</h3>
-                <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 shadow-inner">
-                  <ClockIcon className="h-3.5 w-3.5 text-emerald-500" />
+                <h3 className="text-xl font-bold text-slate-950">Job queue</h3>
+                <div className="bell-data-pill">
+                  <ClockIcon className="h-3.5 w-3.5 text-primary-500" />
                   Auto-syncing
                 </div>
               </div>
@@ -589,13 +596,13 @@ export function Jobs() {
                   value={search}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   placeholder="Search job, brand, category..."
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15 font-mono"
+                  className="h-11 w-full rounded-full border border-slate-300 bg-white pl-10 pr-3 font-mono text-sm text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
                 />
               </div>
               <select
                 value={statusFilter}
                 onChange={(e) => handleStatusFilterChange(e.target.value)}
-                className="h-11 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold tracking-wide text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
+                className="h-11 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold tracking-wide text-slate-700 shadow-sm focus:border-primary-400 focus:ring-2 focus:ring-primary-500/15"
               >
                 <option value="all">ALL STATUSES</option>
                 <option value="queued">QUEUED</option>
@@ -606,7 +613,7 @@ export function Jobs() {
               </select>
               <button
                 onClick={fetchJobs}
-                className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-primary-700 shadow-sm transition-colors hover:border-primary-300 hover:bg-primary-50"
                 title="Refresh queue"
               >
                 <UpdateIcon className="w-4 h-4" />
@@ -643,43 +650,33 @@ export function Jobs() {
           </div>
         )}
 
-        <div className="border-b border-slate-200/80 bg-slate-50/70 px-6 py-4">
-          <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white/80 shadow-sm">
+        <div className="border-b border-slate-200/80 bg-white/85 px-6 py-4">
+          <div className="overflow-hidden rounded-[1.9rem] border border-slate-200 bg-white shadow-[0_16px_32px_rgba(0,55,120,0.06)]">
             <div className="grid grid-cols-2 divide-x divide-y divide-slate-200 xl:grid-cols-5 xl:divide-y-0">
-              <div className="flex min-h-[102px] flex-col justify-between px-5 py-4">
+              <div className="flex min-h-[110px] flex-col gap-3 px-5 py-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Jobs</div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="text-2xl font-black tracking-[-0.04em] text-slate-950">{summary.total}</div>
-                  <div className="text-xs text-slate-500">{summary.visible} visible</div>
-                </div>
+                <div className="text-2xl font-bold text-slate-950">{summary.total}</div>
+                <div className="mt-auto text-xs text-slate-500">{summary.visible} visible</div>
               </div>
-              <div className="flex min-h-[102px] flex-col justify-between bg-blue-50/55 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-500">Processing</div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="text-2xl font-black tracking-[-0.04em] text-blue-800">{summary.processing}</div>
-                  <div className="text-xs text-blue-700">active</div>
-                </div>
+              <div className="flex min-h-[110px] flex-col gap-3 bg-primary-50/65 px-5 py-4">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-600">Processing</div>
+                <div className="text-2xl font-bold text-primary-800">{summary.processing}</div>
+                <div className="mt-auto text-xs text-primary-700">active now</div>
               </div>
-              <div className="flex min-h-[102px] flex-col justify-between bg-amber-50/55 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-amber-500">Queued</div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="text-2xl font-black tracking-[-0.04em] text-amber-800">{summary.queued}</div>
-                  <div className="text-xs text-amber-700">waiting</div>
-                </div>
+              <div className="flex min-h-[110px] flex-col gap-3 bg-slate-50 px-5 py-4">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Queued</div>
+                <div className="text-2xl font-bold text-slate-900">{summary.queued}</div>
+                <div className="mt-auto text-xs text-slate-600">waiting or re-queued</div>
               </div>
-              <div className="flex min-h-[102px] flex-col justify-between bg-emerald-50/55 px-5 py-4">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-500">Completed</div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="text-2xl font-black tracking-[-0.04em] text-emerald-800">{summary.completed}</div>
-                  <div className="text-xs text-emerald-700">done</div>
-                </div>
+              <div className="flex min-h-[110px] flex-col gap-3 bg-[rgba(221,238,250,0.65)] px-5 py-4">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary-600">Completed</div>
+                <div className="text-2xl font-bold text-primary-800">{summary.completed}</div>
+                <div className="mt-auto text-xs text-primary-700">finished successfully</div>
               </div>
-              <div className="flex min-h-[102px] flex-col justify-between bg-red-50/55 px-5 py-4">
+              <div className="flex min-h-[110px] flex-col gap-3 bg-red-50/55 px-5 py-4">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-red-500">Failed</div>
-                <div className="flex items-end justify-between gap-3">
-                  <div className="text-2xl font-black tracking-[-0.04em] text-red-800">{summary.failed}</div>
-                  <div className="text-xs text-red-700">review</div>
-                </div>
+                <div className="text-2xl font-bold text-red-800">{summary.failed}</div>
+                <div className="mt-auto text-xs text-red-700">needs attention</div>
               </div>
             </div>
           </div>
@@ -698,12 +695,12 @@ export function Jobs() {
             </div>
             <div className={`grid items-center gap-4 ${queueColumns}`}>
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Identity & Source</div>
-                <div className="mt-1 text-sm text-slate-500">Select visible jobs for bulk actions.</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Identity & Source</div>
+                <div className="mt-1 text-sm text-slate-600">Select visible jobs for bulk actions.</div>
               </div>
-              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-400 font-semibold">Classification</div>
-              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-400 font-semibold">Execution State</div>
-              <div className="hidden xl:block text-right text-[10px] uppercase tracking-[0.22em] text-slate-400 font-semibold">Runtime</div>
+              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Classification</div>
+              <div className="hidden xl:block text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Execution State</div>
+              <div className="hidden xl:block text-right text-[10px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Runtime</div>
             </div>
           </div>
         </div>
@@ -724,8 +721,8 @@ export function Jobs() {
             const providerLabel = job.settings?.provider || '—';
             const modelLabel = job.settings?.model_name || '—';
             const ocrEngineLabel = job.settings?.ocr_engine || '—';
-            const ocrModeLabel = job.settings?.ocr_mode || '—';
-            const scanModeLabel = job.settings?.scan_mode || '—';
+            const ocrModeLabel = sanitizeDecorativeLabel(job.settings?.ocr_mode);
+            const scanModeLabel = sanitizeDecorativeLabel(job.settings?.scan_mode);
             const categoryLabel = job.category || '—';
             const brandLabel = job.brand || '—';
             const categoryId = (job.category_id || '').trim();
@@ -769,41 +766,41 @@ export function Jobs() {
                         </span>
                         <span
                           title={`Execution mode: ${job.mode || '—'}`}
-                          className="px-2 py-1 rounded border border-gray-200 bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500"
+                          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600"
                         >
                           {job.mode || '—'}
                         </span>
                       </div>
                       <div
-                        className="text-[11px] text-gray-500 font-mono break-all"
+                        className="break-all font-mono text-[11px] text-slate-600"
                         title={job.url}
                       >
                         {job.url}
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                        <span className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                        <span className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1">
                           <span title={`Provider: ${providerLabel}`}>{providerLabel}</span>
                         </span>
                         <span
-                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1 font-mono max-w-full truncate"
+                          className="inline-flex max-w-full items-center truncate rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono"
                           title={`Model: ${modelLabel}`}
                         >
                           {modelLabel}
                         </span>
                         <span
-                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
                           title={`OCR engine: ${ocrEngineLabel}`}
                         >
                           {ocrEngineLabel}
                         </span>
                         <span
-                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
                           title={`OCR mode: ${ocrModeLabel}`}
                         >
                           {ocrModeLabel}
                         </span>
                         <span
-                          className="inline-flex items-center rounded border border-gray-200 bg-gray-50 px-2 py-1"
+                          className="inline-flex items-center rounded border border-slate-200 bg-slate-50 px-2 py-1"
                           title={`Scan mode: ${scanModeLabel}`}
                         >
                           {scanModeLabel}
@@ -813,14 +810,14 @@ export function Jobs() {
 
                     <div className="min-w-0 space-y-2">
                       <div>
-                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Brand</div>
-                        <div className="mt-1 text-sm font-semibold text-gray-900 break-words">{brandLabel}</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Brand</div>
+                        <div className="mt-1 break-words text-sm font-semibold text-slate-900">{brandLabel}</div>
                       </div>
                       <div>
-                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Category</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Category</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                             <span
-                              className="text-sm text-gray-700 break-words"
+                              className="break-words text-sm text-slate-800"
                               title={`Category: ${categoryLabel}`}
                             >
                               {categoryLabel}
@@ -839,26 +836,26 @@ export function Jobs() {
 
                     <div className="min-w-0 space-y-2">
                       <div>
-                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Stage</div>
-                        <div className="mt-1 text-sm font-semibold text-gray-900 capitalize">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Stage</div>
+                        <div className="mt-1 text-sm font-semibold capitalize text-slate-900">
                           <span title={`Stage: ${formatStageLabel(job.stage)}`}>
                             {formatStageLabel(job.stage)}
                           </span>
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Detail</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Detail</div>
                         <div
-                          className="mt-1 text-xs text-gray-600 break-words"
+                          className="mt-1 break-words text-xs text-slate-700"
                           title={job.stage_detail || '—'}
                         >
                           {job.stage_detail || '—'}
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-gray-400">
+                        <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-500">
                           <span>Progress</span>
-                          <span className="font-mono text-gray-600">
+                          <span className="font-mono text-slate-700">
                             {job.status === 'completed'
                               ? '100%'
                               : job.status === 'processing'
@@ -872,7 +869,7 @@ export function Jobs() {
                               job.status === 'failed'
                                 ? 'bg-red-400'
                                 : job.status === 'completed'
-                                  ? 'bg-emerald-500'
+                                  ? 'bg-primary-500'
                                   : 'bg-primary-500'
                             }`}
                             style={{ width: `${job.status === 'failed' ? 100 : progressValue}%` }}
@@ -883,25 +880,25 @@ export function Jobs() {
 
                     <div className="min-w-0 flex flex-col xl:items-end gap-2">
                       <div className={`grid gap-2 w-full xl:w-auto ${terminal ? 'grid-cols-1' : 'grid-cols-2 xl:grid-cols-1'}`}>
-                        <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Duration</div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Duration</div>
                           <div
-                            className="mt-1 text-sm font-mono text-gray-800"
+                            className="mt-1 text-sm font-mono text-slate-900"
                             title={job.duration_seconds != null ? `${job.duration_seconds.toFixed(3)} seconds` : 'No duration recorded'}
                           >
                             {formatDurationLabel(job.duration_seconds)}
                           </div>
                         </div>
                         {!terminal && (
-                          <div className="rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2">
-                            <div className="text-[10px] uppercase tracking-wider text-blue-500 font-semibold">{ageLabel}</div>
-                            <div className="mt-1 text-sm text-blue-900" title={job.created_at}>
+                          <div className="rounded-lg border border-primary-100 bg-primary-50/70 px-3 py-2">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-primary-600">{ageLabel}</div>
+                            <div className="mt-1 text-sm text-primary-900" title={job.created_at}>
                               {formatRelativeTimestamp(job.created_at)}
                             </div>
                           </div>
                         )}
                       </div>
-                      <div className="text-xs text-gray-500 text-right" title={job.updated_at}>
+                      <div className="text-right text-xs text-slate-600" title={job.updated_at}>
                         Updated {formatRelativeTimestamp(job.updated_at)}
                       </div>
                       <Link

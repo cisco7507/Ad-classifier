@@ -2006,7 +2006,7 @@ def _parse_settings(
     provider: str = Form("Ollama"),
     model_name: str = Form("qwen3-vl:8b-instruct"),
     ocr_engine: str = Form("EasyOCR"),
-    ocr_mode: str = Form("🚀 Fast"),
+    ocr_mode: str = Form("Fast"),
     scan_mode: str = Form("Tail Only"),
     express_mode: bool = Form(False),
     override: bool = Form(False),

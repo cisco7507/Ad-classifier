@@ -5,12 +5,12 @@ import { Share1Icon, ExclamationTriangleIcon, UpdateIcon, LightningBoltIcon } fr
 
 function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isUp: boolean; isSelf: boolean }) {
   return (
-    <tr className="transition-colors hover:bg-slate-50/80">
+    <tr className="transition-colors hover:bg-primary-50/50">
       <td className="px-6 py-4 font-semibold text-slate-800">
         <div className="flex items-center gap-2">
           <span>{name}</span>
           {isSelf ? (
-            <span className="rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-primary-700">
+            <span className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-700">
               Self
             </span>
           ) : null}
@@ -19,10 +19,10 @@ function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isU
       <td className="px-6 py-4 text-xs font-mono text-slate-500">{url}</td>
       <td className="px-6 py-4 text-right">
         {isUp ? (
-          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-700">
+          <span className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary-700">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-300 opacity-70" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary-500" />
             </span>
             Online
           </span>
@@ -39,16 +39,16 @@ function NodeBadge({ name, url, isUp, isSelf }: { name: string; url: string; isU
 
 function StatCard({ label, value, detail, tone }: { label: string; value: string | number; detail: string; tone: 'blue' | 'amber' | 'emerald' | 'rose'; }) {
   const toneMap = {
-    blue: 'from-sky-50 to-blue-50 border-sky-200/80 text-sky-900',
-    amber: 'from-amber-50 to-orange-50 border-amber-200/80 text-amber-900',
-    emerald: 'from-emerald-50 to-teal-50 border-emerald-200/80 text-emerald-900',
-    rose: 'from-rose-50 to-pink-50 border-rose-200/80 text-rose-900',
+    blue: 'from-primary-50 to-white border-primary-200/80 text-primary-900',
+    amber: 'from-[rgba(247,244,237,1)] to-white border-[#e5d9c7] text-slate-900',
+    emerald: 'from-[rgba(221,238,250,0.75)] to-white border-primary-200/80 text-primary-900',
+    rose: 'from-rose-50 to-white border-rose-200/80 text-rose-900',
   } as const;
 
   return (
-    <div className={`rounded-[26px] border bg-[linear-gradient(135deg,var(--tw-gradient-from),var(--tw-gradient-to))] p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)] ${toneMap[tone]}`}>
+    <div className={`rounded-[1.9rem] border bg-[linear-gradient(135deg,var(--tw-gradient-from),var(--tw-gradient-to))] p-5 shadow-[0_18px_45px_rgba(0,55,120,0.08)] ${toneMap[tone]}`}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</div>
-      <div className="mt-3 text-4xl font-black tracking-[-0.05em]">{value}</div>
+      <div className="mt-3 text-4xl font-bold">{value}</div>
       <div className="mt-2 text-sm text-slate-600">{detail}</div>
     </div>
   );
@@ -109,28 +109,28 @@ export function Overview() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <section className="rounded-[30px] border border-slate-200/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(240,246,255,0.96)_55%,rgba(232,239,255,0.92)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.08)]">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+      <section className="bell-hero">
+        <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-primary-700">
+            <div className="bell-badge">
               <Share1Icon className="h-3.5 w-3.5" />
               Live Cluster View
             </div>
-            <h2 className="mt-4 text-4xl font-black tracking-[-0.06em] text-slate-950">See the fleet before you inspect the jobs.</h2>
+            <h2 className="mt-4 max-w-2xl text-[3rem] font-bold text-primary-700">See the fleet before you inspect the jobs.</h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
               This page surfaces availability, queue pressure, and output quality signals so an operator can spot imbalance before diving into individual jobs
             </p>
           </div>
           <div className="grid min-w-[18rem] grid-cols-2 gap-3 lg:w-[22rem]">
-            <div className="rounded-[22px] border border-white/80 bg-white/75 px-4 py-4 shadow-sm">
+            <div className="rounded-[1.7rem] border border-white/90 bg-white/88 px-4 py-4 shadow-[0_14px_28px_rgba(0,55,120,0.08)]">
               <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Nodes online</div>
-              <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-slate-950">{onlineNodes}/{totalNodes || '—'}</div>
+              <div className="mt-2 text-3xl font-bold text-slate-950">{onlineNodes}/{totalNodes || '—'}</div>
               <div className="mt-2 text-sm text-slate-500">Shared-nothing workers with proxy-to-owner routing.</div>
             </div>
-            <div className="rounded-[22px] border border-white/80 bg-slate-950 px-4 py-4 text-slate-50 shadow-[0_20px_45px_rgba(15,23,42,0.18)]">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">API uptime</div>
-              <div className="mt-2 text-3xl font-black tracking-[-0.05em]">{metrics ? `${Math.floor(metrics.uptime_seconds / 60)}m` : '—'}</div>
-              <div className="mt-2 text-sm text-slate-400">Node {metrics?.node || '—'} is driving this control surface.</div>
+            <div className="rounded-[1.7rem] border border-primary-700/30 bg-primary-700 px-4 py-4 text-white shadow-[0_20px_42px_rgba(0,55,120,0.22)]">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/65">API uptime</div>
+              <div className="mt-2 text-3xl font-bold">{metrics ? `${Math.floor(metrics.uptime_seconds / 60)}m` : '—'}</div>
+              <div className="mt-2 text-sm text-white/72">Node {metrics?.node || '—'} is driving this control surface.</div>
             </div>
           </div>
         </div>
@@ -149,12 +149,12 @@ export function Overview() {
       ) : null}
 
       {!nodeErr && offlineNodes > 0 ? (
-        <div className="rounded-[24px] border border-amber-200 bg-amber-50/90 p-4 text-amber-800 shadow-sm">
+        <div className="rounded-[24px] border border-[#e5d9c7] bg-[rgba(247,244,237,0.96)] p-4 text-slate-700 shadow-sm">
           <div className="flex items-start gap-3">
-            <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
+            <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0 text-[#a1632b]" />
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.2em]">Partial visibility</p>
-              <p className="mt-1 text-sm text-amber-800/90">{offlineNodes} node{offlineNodes > 1 ? 's are' : ' is'} unreachable. Jobs owned by those nodes may not appear until connectivity returns</p>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#a1632b]">Partial visibility</p>
+              <p className="mt-1 text-sm text-slate-700">{offlineNodes} node{offlineNodes > 1 ? 's are' : ' is'} unreachable. Jobs owned by those nodes may not appear until connectivity returns</p>
             </div>
           </div>
         </div>
@@ -184,21 +184,21 @@ export function Overview() {
             { label: 'Submitted This Session', value: metrics.jobs_submitted_this_process },
             { label: 'API Uptime', value: `${Math.floor(metrics.uptime_seconds / 60)}m ${metrics.uptime_seconds % 60}s` },
           ].map((item) => (
-            <div key={item.label} className="rounded-[22px] border border-slate-200/80 bg-white/80 px-4 py-4 shadow-sm backdrop-blur">
+            <div key={item.label} className="bell-panel px-4 py-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{item.label}</div>
-              <div className="mt-3 text-2xl font-black tracking-[-0.05em] text-slate-950">{item.value}</div>
+              <div className="mt-3 text-2xl font-bold text-slate-950">{item.value}</div>
             </div>
           ))}
         </section>
       ) : null}
 
-      <section className="overflow-hidden rounded-[30px] border border-slate-200/80 bg-white/82 shadow-[0_18px_45px_rgba(15,23,42,0.06)] backdrop-blur">
-        <div className="flex items-center justify-between border-b border-slate-200/80 bg-slate-50/70 px-6 py-4">
+      <section className="bell-panel overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-200/80 bg-primary-50/75 px-6 py-4">
           <div>
-            <h3 className="text-lg font-black tracking-[-0.03em] text-slate-900">Worker fleet</h3>
+            <h3 className="text-lg font-bold text-slate-900">Worker fleet</h3>
             <p className="mt-1 text-sm text-slate-500">Each node is a claim-capable executor with deterministic owner routing.</p>
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+          <div className="bell-data-pill">
             <LightningBoltIcon className="h-3.5 w-3.5 text-primary-500" />
             {onlineNodes}/{totalNodes || '—'} online
           </div>

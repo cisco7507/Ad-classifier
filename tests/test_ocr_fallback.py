@@ -154,7 +154,7 @@ def test_florence_extract_text_disables_cache_for_generation(monkeypatch):
         lambda _name: {"type": "florence2", "model": _FakeModel(), "processor": _FakeProcessor()},
     )
     image = np.zeros((16, 16, 3), dtype=np.uint8)
-    text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
+    text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="Fast")
 
     assert text == "demo-line"
     assert captured["use_cache"] is False
@@ -204,7 +204,7 @@ def test_florence_extract_text_serializes_generate_calls(monkeypatch):
     image = np.zeros((16, 16, 3), dtype=np.uint8)
 
     def _run():
-        text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
+        text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="Fast")
         assert text == "line"
 
     t1 = threading.Thread(target=_run)
@@ -221,12 +221,12 @@ def test_florence_max_new_tokens_respects_mode_and_env(monkeypatch):
     mgr = ocr_module.OCRManager()
     monkeypatch.delenv("FLORENCE_MAX_NEW_TOKENS", raising=False)
     monkeypatch.delenv("FLORENCE_MAX_NEW_TOKENS_FAST", raising=False)
-    assert mgr._resolve_florence_max_new_tokens("🚀 Fast") == 256
+    assert mgr._resolve_florence_max_new_tokens("Fast") == 256
     assert mgr._resolve_florence_max_new_tokens("Detailed") == 1024
 
     monkeypatch.setenv("FLORENCE_MAX_NEW_TOKENS_FAST", "128")
     monkeypatch.setenv("FLORENCE_MAX_NEW_TOKENS", "768")
-    assert mgr._resolve_florence_max_new_tokens("🚀 Fast") == 128
+    assert mgr._resolve_florence_max_new_tokens("Fast") == 128
     assert mgr._resolve_florence_max_new_tokens("Detailed") == 768
 
 
@@ -257,13 +257,13 @@ def test_florence_init_failure_falls_back_to_easyocr(monkeypatch):
     mgr = ocr_module.OCRManager()
     image = np.zeros((32, 32, 3), dtype=np.uint8)
 
-    text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
+    text = mgr.extract_text("Florence-2 (Microsoft)", image, mode="Fast")
     assert "fallback-ocr" in text
     assert mgr.florence_unavailable_reason is not None
 
     # Subsequent Florence requests should not attempt Florence init again.
     before = mgr.florence_unavailable_reason
-    text2 = mgr.extract_text("Florence-2 (Microsoft)", image, mode="🚀 Fast")
+    text2 = mgr.extract_text("Florence-2 (Microsoft)", image, mode="Fast")
     assert "fallback-ocr" in text2
     assert mgr.florence_unavailable_reason == before
 
@@ -288,8 +288,8 @@ def test_easyocr_mode_profiles_adjust_readtext_kwargs(monkeypatch):
     monkeypatch.setenv("EASYOCR_MAX_DIMENSION_DETAILED", "0")
     image = np.zeros((80, 160, 3), dtype=np.uint8)
 
-    fast_text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
-    detailed_text = mgr.extract_text("EasyOCR", image, mode="🧠 Detailed")
+    fast_text = mgr.extract_text("EasyOCR", image, mode="Fast")
+    detailed_text = mgr.extract_text("EasyOCR", image, mode="Detailed")
 
     assert "mode-line" in fast_text
     assert "mode-line" in detailed_text
@@ -318,7 +318,7 @@ def test_easyocr_mode_kwargs_fallback_on_type_error(monkeypatch):
     monkeypatch.setattr(mgr, "get_engine", lambda _name: _LegacyReader())
     image = np.zeros((32, 32, 3), dtype=np.uint8)
 
-    text = mgr.extract_text("EasyOCR", image, mode="🚀 Fast")
+    text = mgr.extract_text("EasyOCR", image, mode="Fast")
 
     assert "legacy-line" in text
     assert calls[0]["detail"] == 0

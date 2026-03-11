@@ -171,7 +171,7 @@ Current Memory:
                 response = "[TOOL: ERROR | reason=\"LLM returned absolute empty string. Check backend.\"]"
 
             thought = response.split('[TOOL:')[0].strip() if '[TOOL:' in response else response
-            thought_delta = f"🤔 Thought: {thought}\n" if thought else "🤔 Thought:\n"
+            thought_delta = f"Thought: {thought}\n" if thought else "Thought:\n"
             yield thought_delta, "Unknown", "Unknown", "", "N/A", "Executing Tool...", "pending", None
             
             tool_match = re.search(r"\[TOOL:\s*(.*?)(?:\|\s*(.*?))?\]", response)
@@ -201,7 +201,7 @@ Current Memory:
                         f"--- Step {step + 1} ---\n"
                         f"Action: {response}\n"
                         "Result: Final tool accepted.\n"
-                        "✅ FINAL CONCLUSION REACHED.\n"
+                        "FINAL CONCLUSION REACHED.\n"
                     )
                     memory_log += f"\n{final_delta}"
                     yield final_delta, brand, official_cat, cat_id, "N/A", reason, category_match["category_match_method"], category_match["category_match_score"]
@@ -260,7 +260,7 @@ Current Memory:
             predicted_brand="Unknown",
             ocr_summary=ocr_summary,
         )
-        timeout_delta = "⚠️ Agent Timeout: Max iterations reached.\n"
+        timeout_delta = "Agent Timeout: Max iterations reached.\n"
         memory_log += f"\n{timeout_delta}"
         yield (
             timeout_delta,
@@ -360,7 +360,7 @@ def run_agent_job(
                 yield log, gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             
             master.append([url, brand, cat_id, cat, "N/A", reason, category_match_method, category_match_score])
-            yield "✅ Result row appended.\n", gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
+            yield "Result row appended.\n", gallery, pd.DataFrame(master, columns=RESULT_COLUMNS), category_mapper.get_nebula_plot(cat)
             time.sleep(4)
         except Exception as e:
             master.append([url, "Error", "", "Error", "N/A", str(e), "none", None])

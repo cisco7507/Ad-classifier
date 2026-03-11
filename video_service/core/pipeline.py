@@ -324,7 +324,7 @@ def _resolve_full_video_rescue_max_frames() -> int:
 
 def _resolve_rescue_ocr_mode(engine_name: str, current_mode: str) -> str:
     if engine_name == "EasyOCR":
-        return "🧠 Detailed"
+        return "Detailed"
     return current_mode
 
 

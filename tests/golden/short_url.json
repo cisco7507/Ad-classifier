@@ -8,7 +8,7 @@
     "provider": "Ollama",
     "model_name": "qwen3-vl:8b-instruct",
     "ocr_engine": "EasyOCR",
-    "ocr_mode": "\ud83d\ude80 Fast",
+    "ocr_mode": "Fast",
     "scan_mode": "Tail Only",
     "override": false,
     "enable_search": false,

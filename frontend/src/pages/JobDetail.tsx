@@ -94,6 +94,13 @@ function formatSummaryMatch(method: unknown, score: unknown): string {
   return `${label} (${scoreValue.toFixed(2)})`;
 }
 
+function sanitizeDecorativeLabel(value?: string | null): string {
+  const text = (value || "").trim();
+  if (!text) return "—";
+  const cleaned = text.replace(/^[^\p{L}\p{N}]+/u, "").trim();
+  return cleaned || text;
+}
+
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
@@ -105,7 +112,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     <button
       onClick={handleCopy}
       title={`Copy ${label}`}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200 hover:text-gray-900 active:scale-95"
+      className="flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-700 transition-colors hover:border-primary-300 hover:bg-primary-100 active:scale-95"
     >
       <CopyIcon className="w-3 h-3" />
       {copied ? "Copied!" : label}
@@ -540,17 +547,17 @@ function normalizeStage(raw: string): string {
 
 function reasoningPillClass(type: ReasoningTermType): string {
   if (type === "brand")
-    return "bg-gray-200 text-gray-900 font-semibold px-2.5 py-1 rounded-full text-xs";
+    return "bg-slate-200 text-slate-900 font-semibold px-2.5 py-1 rounded-full text-xs";
   if (type === "url")
-    return "bg-cyan-50 text-cyan-700 border border-cyan-200 px-2.5 py-1 rounded-full text-xs font-mono";
-  return "bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-xs";
+    return "bg-primary-50 text-primary-700 border border-primary-200 px-2.5 py-1 rounded-full text-xs font-mono";
+  return "bg-slate-50 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-full text-xs";
 }
 
 function reasoningInlineClass(type: ReasoningTermType): string {
   if (type === "brand")
-    return "bg-gray-200 text-gray-900 font-semibold px-1 rounded";
-  if (type === "url") return "bg-cyan-50 text-cyan-700 px-1 rounded font-mono";
-  return "bg-amber-50 text-amber-700 px-1 rounded";
+    return "bg-slate-200 text-slate-900 font-semibold px-1 rounded";
+  if (type === "url") return "bg-primary-50 text-primary-700 px-1 rounded font-mono";
+  return "bg-slate-50 text-slate-700 px-1 rounded";
 }
 
 function HelpHeading({
@@ -1021,9 +1028,12 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
       : [],
     tooltip: {
       trigger: "item",
-      backgroundColor: "rgba(2, 6, 23, 0.96)",
-      borderColor: "rgba(56, 189, 248, 0.25)",
-      textStyle: { color: "#e2e8f0" },
+      backgroundColor: "rgba(255, 255, 255, 0.98)",
+      borderColor: "rgba(0, 84, 154, 0.18)",
+      borderWidth: 1,
+      textStyle: { color: "#1e293b" },
+      extraCssText:
+        "border-radius: 18px; box-shadow: 0 18px 36px rgba(0, 55, 120, 0.14); padding: 12px 14px;",
       formatter: (params: any) => {
         const data = params?.data || {};
         const lines = [
@@ -1063,8 +1073,8 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
         silent: false,
         data: toSeriesData(grouped.background),
         itemStyle: {
-          color: "rgba(71, 85, 105, 0.22)",
-          borderColor: "rgba(148, 163, 184, 0.18)",
+          color: "rgba(78, 159, 212, 0.10)",
+          borderColor: "rgba(149, 195, 230, 0.22)",
           borderWidth: 0.5,
         },
         emphasis: { scale: 1.05 },
@@ -1075,8 +1085,8 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
         symbolSize: 14,
         data: toSeriesData(grouped.neighbor),
         itemStyle: {
-          color: "rgba(148, 163, 184, 0.55)",
-          borderColor: "rgba(226, 232, 240, 0.35)",
+          color: "rgba(149, 195, 230, 0.68)",
+          borderColor: "rgba(0, 84, 154, 0.16)",
           borderWidth: 1,
         },
         emphasis: { scale: 1.15 },
@@ -1088,14 +1098,14 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
         symbolSize: 18,
         data: toSeriesData(grouped.leader),
         itemStyle: {
-          color: "#f59e0b",
-          borderColor: "#fde68a",
+          color: "#003778",
+          borderColor: "#95c3e6",
           borderWidth: 2,
         },
         label: {
           show: true,
           position: "top",
-          color: "#fef3c7",
+          color: "#003778",
           fontSize: 11,
           formatter: (params: any) => params?.data?.pointLabel || "",
         },
@@ -1107,16 +1117,16 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
         symbolSize: 20,
         data: toSeriesData(grouped.selected),
         itemStyle: {
-          color: "#6366f1",
-          borderColor: "#c7d2fe",
+          color: "#0070ce",
+          borderColor: "#bfdcf2",
           borderWidth: 2,
           shadowBlur: 14,
-          shadowColor: "rgba(99, 102, 241, 0.45)",
+          shadowColor: "rgba(0, 112, 206, 0.18)",
         },
         label: {
           show: true,
           position: "top",
-          color: "#e0e7ff",
+          color: "#00549a",
           fontSize: 11,
           formatter: (params: any) => params?.data?.pointLabel || "",
         },
@@ -1128,16 +1138,16 @@ function buildSignalPlotOption(plot: SignalVectorPlot | null): EChartsOption {
         symbolSize: 24,
         data: toSeriesData(grouped.query),
         itemStyle: {
-          color: "#22d3ee",
-          borderColor: "#cffafe",
+          color: "#00549a",
+          borderColor: "#ddeefa",
           borderWidth: 2,
           shadowBlur: 18,
-          shadowColor: "rgba(34, 211, 238, 0.45)",
+          shadowColor: "rgba(0, 84, 154, 0.18)",
         },
         label: {
           show: true,
           position: "bottom",
-          color: "#cffafe",
+          color: "#00549a",
           fontSize: 11,
           formatter: (params: any) => params?.data?.pointLabel || "",
         },
@@ -1181,7 +1191,6 @@ function parseToolSegment(line: string): {
 }
 
 function toolTone(tool: ScratchTool | null): {
-  icon: string;
   badge: string;
   border: string;
   text: string;
@@ -1189,42 +1198,36 @@ function toolTone(tool: ScratchTool | null): {
   switch (tool) {
     case "OCR":
       return {
-        icon: "📝",
-        badge: "bg-cyan-50 border-cyan-200 text-cyan-700",
-        border: "border-cyan-300",
-        text: "text-cyan-700",
+        badge: "bg-primary-50 border-primary-200 text-primary-700",
+        border: "border-primary-300",
+        text: "text-primary-700",
       };
     case "SEARCH":
       return {
-        icon: "🔍",
-        badge: "bg-amber-50 border-amber-200 text-amber-700",
-        border: "border-amber-300",
-        text: "text-amber-700",
+        badge: "bg-slate-50 border-slate-200 text-slate-700",
+        border: "border-slate-300",
+        text: "text-slate-700",
       };
     case "VISION":
       return {
-        icon: "👁️",
-        badge: "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700",
-        border: "border-fuchsia-300",
-        text: "text-fuchsia-700",
+        badge: "bg-blue-50 border-blue-200 text-blue-700",
+        border: "border-blue-300",
+        text: "text-blue-700",
       };
     case "FINAL":
       return {
-        icon: "✅",
         badge: "bg-emerald-50 border-emerald-200 text-emerald-700",
         border: "border-emerald-300",
         text: "text-emerald-700",
       };
     case "ERROR":
       return {
-        icon: "❌",
         badge: "bg-red-50 border-red-200 text-red-700",
         border: "border-red-300",
         text: "text-red-700",
       };
     default:
       return {
-        icon: "•",
         badge: "bg-gray-100 border-gray-300 text-gray-700",
         border: "border-gray-300",
         text: "text-gray-700",
@@ -1258,7 +1261,7 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
       return;
     }
 
-    if (trimmed.includes("✅ FINAL CONCLUSION")) {
+    if (trimmed.includes("FINAL CONCLUSION")) {
       renderedLines.push(
         <div
           key={key}
@@ -1294,7 +1297,6 @@ function renderScratchboardEvent(event: string, index: number): ReactElement {
               <span
                 className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${tone.badge}`}
               >
-                <span>{tone.icon}</span>
                 <span>{parsed.tool}</span>
               </span>
             ) : (
@@ -1907,7 +1909,7 @@ export function JobDetail() {
     confidenceValue === null
       ? "text-gray-500"
       : confidenceValue >= 0.8
-        ? "text-emerald-700"
+        ? "text-primary-700"
         : confidenceValue >= 0.5
           ? "text-amber-700"
           : "text-red-700";
@@ -1915,7 +1917,7 @@ export function JobDetail() {
     confidenceValue === null
       ? "bg-gray-400"
       : confidenceValue >= 0.8
-        ? "bg-emerald-500"
+        ? "bg-primary-500"
         : confidenceValue >= 0.5
           ? "bg-amber-500"
           : "bg-red-500";
@@ -2073,31 +2075,31 @@ export function JobDetail() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-24 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4 text-sm text-gray-500 mb-2">
+      <div className="mb-2 flex items-center gap-4 text-sm text-slate-500">
         <Link
           to="/jobs"
-          className="hover:text-primary-600 flex items-center gap-1 transition-colors"
+          className="flex items-center gap-1 transition-colors hover:text-primary-600"
         >
           <ArrowLeftIcon /> Jobs
         </Link>
         <span>/</span>
-        <span className="font-mono text-gray-700 truncate max-w-sm">
+        <span className="max-w-sm truncate font-mono text-slate-700">
           {job.job_id}
         </span>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-8 shadow-sm flex flex-col gap-6 relative overflow-hidden">
+      <div className="bell-hero flex flex-col gap-6 p-8">
         <div className="absolute top-0 left-0 w-full h-1 bg-gray-100">
           <div
-            className="h-full bg-gradient-to-r from-primary-500 to-primary-400 transition-all duration-1000 ease-in-out"
+            className="h-full bg-gradient-to-r from-primary-700 via-primary-500 to-primary-300 transition-all duration-1000 ease-in-out"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
 
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+        <div className="relative z-10 flex flex-col justify-between gap-6 md:flex-row md:items-start">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
+              <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-primary-700">
                 {job.mode === "agent" ? (
                   <MagicWandIcon className="text-primary-500" />
                 ) : (
@@ -2108,14 +2110,14 @@ export function JobDetail() {
               {(() => {
                 const statusClass =
                   job.status === "completed"
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    ? "bg-primary-50 text-primary-700 border-primary-200"
                     : job.status === "failed"
                       ? "bg-red-50 text-red-700 border-red-200"
                       : job.status === "processing"
-                        ? "bg-blue-50 text-blue-700 border-blue-200 animate-pulse"
+                        ? "bg-primary-100 text-primary-800 border-primary-200 animate-pulse"
                         : job.status === "re-queued"
-                          ? "bg-orange-50 text-orange-700 border-orange-200"
-                          : "bg-amber-50 text-amber-700 border-amber-200";
+                          ? "bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]"
+                          : "bg-[rgba(247,244,237,0.95)] text-slate-700 border-[#e5d9c7]";
                 const statusLabel =
                   job.status === "re-queued"
                     ? "waiting (recovered)"
@@ -2143,7 +2145,7 @@ export function JobDetail() {
                   />
                   <button
                     onClick={handleExportCSV}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider rounded border transition-colors bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 active:scale-95"
+                    className="flex items-center gap-1.5 rounded-full border border-primary-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-700 transition-colors hover:border-primary-300 hover:bg-primary-50 active:scale-95"
                   >
                     <DownloadIcon className="w-3 h-3" /> Export CSV
                   </button>
@@ -2151,48 +2153,50 @@ export function JobDetail() {
               )}
             </div>
 
-            <div className="text-sm text-gray-500 break-all max-w-3xl font-mono opacity-80 bg-gray-50/80 p-2 rounded border border-gray-200">
+            <div className="max-w-3xl break-all rounded-2xl border border-slate-200 bg-white/88 p-3 font-mono text-sm text-slate-600 shadow-[0_12px_22px_rgba(0,55,120,0.06)]">
               {job.url}
             </div>
 
             {job.status !== "completed" && job.status !== "failed" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                <div className="bg-gray-100 border border-gray-200 rounded p-3">
-                  <div className="uppercase tracking-wider text-gray-400 mb-1">
+                <div className="rounded-[1.35rem] border border-white/90 bg-white/88 p-3 shadow-[0_12px_22px_rgba(0,55,120,0.06)]">
+                  <div className="mb-1 uppercase tracking-wider text-slate-400">
                     Current Stage
                   </div>
-                  <div className="text-gray-800 font-mono">
+                  <div className="font-mono text-slate-800">
                     {job.stage || "unknown"}
                   </div>
                 </div>
-                <div className="bg-gray-100 border border-gray-200 rounded p-3">
-                  <div className="uppercase tracking-wider text-gray-400 mb-1">
+                <div className="rounded-[1.35rem] border border-white/90 bg-white/88 p-3 shadow-[0_12px_22px_rgba(0,55,120,0.06)]">
+                  <div className="mb-1 uppercase tracking-wider text-slate-400">
                     Stage Detail
                   </div>
-                  <div className="text-gray-700">{job.stage_detail || "—"}</div>
+                  <div className="text-slate-700">{job.stage_detail || "—"}</div>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="flex flex-col items-end gap-1 text-sm text-gray-400 shrink-0">
-            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">
+          <div className="shrink-0 text-sm text-slate-400">
+            <div className="flex flex-col items-end gap-2">
+              <span className="flex items-center gap-2 rounded-full border border-white/90 bg-white/88 px-3 py-1.5 shadow-[0_12px_22px_rgba(0,55,120,0.06)]">
               Created:{" "}
-              <span className="text-gray-700 font-mono text-xs">
+              <span className="font-mono text-xs text-slate-700">
                 {job.created_at}
               </span>
             </span>
-            <span className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-md border border-gray-200 shadow-sm">
+              <span className="flex items-center gap-2 rounded-full border border-white/90 bg-white/88 px-3 py-1.5 shadow-[0_12px_22px_rgba(0,55,120,0.06)]">
               Updated:{" "}
-              <span className="text-gray-700 font-mono text-xs">
+              <span className="font-mono text-xs text-slate-700">
                 {job.updated_at}
               </span>
             </span>
+            </div>
           </div>
         </div>
 
         {job.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm shadow-inner flex flex-col gap-2">
+          <div className="flex flex-col gap-2 rounded-[1.35rem] border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-inner">
             <div className="flex items-center gap-2 font-bold">
               <ExclamationTriangleIcon /> Execution Failure
             </div>
@@ -2204,24 +2208,24 @@ export function JobDetail() {
       </div>
 
       {job.status === "completed" && firstRow && firstRow.Brand !== "Err" && (
-        <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
+        <div className="bell-panel flex flex-col items-start justify-between gap-3 border-primary-200/70 px-6 py-4 md:flex-row md:items-center md:gap-0">
           <div className="flex items-center gap-3 min-w-0">
-            <CheckCircledIcon className="w-5 h-5 text-emerald-600 shrink-0" />
+            <CheckCircledIcon className="w-5 h-5 shrink-0 text-primary-600" />
             <span
               title={brandText || "Unknown Brand"}
-              className="text-lg md:text-xl font-bold text-gray-900 max-w-[14rem] md:max-w-xs truncate"
+              className="max-w-[14rem] truncate text-lg font-bold text-slate-900 md:max-w-xs md:text-xl"
             >
               {brandText || "Unknown Brand"}
             </span>
-            <span className="text-gray-400 shrink-0">→</span>
+            <span className="shrink-0 text-slate-400">→</span>
             <span
               title={categoryText || "Unknown Category"}
-              className="text-lg md:text-xl font-bold text-emerald-700 max-w-[14rem] md:max-w-sm truncate"
+              className="max-w-[14rem] truncate text-lg font-bold text-primary-700 md:max-w-sm md:text-xl"
             >
               {categoryText || "Unknown Category"}
             </span>
             {categoryIdText && (
-              <span className="text-[10px] font-mono text-gray-400 bg-gray-100 px-2 py-0.5 rounded shrink-0">
+              <span className="shrink-0 rounded-full bg-primary-50 px-2.5 py-0.5 text-[10px] font-mono text-primary-700">
                 ID: {categoryIdText}
               </span>
             )}
@@ -2246,7 +2250,7 @@ export function JobDetail() {
               <div className="text-[9px] uppercase tracking-wider text-gray-400 mb-0.5">
                 Match
               </div>
-              <div className="text-sm font-mono text-cyan-700">
+              <div className="text-sm font-mono text-primary-700">
                 {summaryMatchDisplay}
               </div>
             </div>
@@ -2264,7 +2268,7 @@ export function JobDetail() {
 
       {firstRow && firstRow.Brand !== "Err" && (
         <div className="animate-in slide-in-from-bottom-4 duration-500 fill-mode-forwards">
-          <div className="bg-white border border-gray-200 border-l-[3px] border-l-primary-500 rounded-xl p-6 shadow-sm">
+          <div className="bell-panel border-l-[3px] border-l-primary-500 p-6">
             <div className="flex items-center justify-between gap-3 mb-3">
               <h3 className="text-xs uppercase tracking-wider text-gray-400 font-bold">
                 Evidence &amp; Reasoning
@@ -2397,13 +2401,13 @@ export function JobDetail() {
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-visible">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
+      <div className="bell-panel overflow-visible">
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-primary-50/70 px-4 py-3">
           {videoAvailable && videoSource && (
             <button
               type="button"
               onClick={() => setArtifactTab("video")}
-              className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "video" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-gray-300 text-gray-700"}`}
+              className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "video" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
             >
               ▶ Video
             </button>
@@ -2412,28 +2416,28 @@ export function JobDetail() {
             type="button"
             onClick={() => setArtifactTab("signals")}
             title="Final mapper output and supporting vision matches"
-            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "signals" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "signals" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
           >
             Signals
           </button>
           <button
             type="button"
             onClick={() => setArtifactTab("explain")}
-            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "explain" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "explain" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
           >
             Explain
           </button>
           <button
             type="button"
             onClick={() => setArtifactTab("ocr")}
-            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "ocr" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "ocr" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
           >
             OCR Output
           </button>
           <button
             type="button"
             onClick={() => setArtifactTab("frames")}
-            className={`px-3 py-1.5 text-xs rounded border ${artifactTab === "frames" ? "bg-primary-600 border-primary-500 text-white" : "bg-gray-50 border-gray-200 text-gray-700"}`}
+            className={`rounded-full border px-3 py-1.5 text-xs ${artifactTab === "frames" ? "bg-primary-600 border-primary-500 text-white" : "bg-white border-slate-300 text-slate-700"}`}
           >
             Latest Frames
           </button>
@@ -2591,11 +2595,17 @@ export function JobDetail() {
             </div>
 
             {activeVectorPlot && (
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 shadow-xl">
+              <div
+                className="rounded-[2rem] border border-primary-100/90 p-4 shadow-[0_20px_48px_rgba(0,55,120,0.12)]"
+                style={{
+                  background:
+                    "radial-gradient(circle at top right, rgba(0, 112, 206, 0.14), transparent 24%), linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(238, 244, 248, 0.94) 100%)",
+                }}
+              >
                 <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-200">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-primary-700">
                         Vector View
                       </h3>
                       <HelpTooltip
@@ -2604,20 +2614,20 @@ export function JobDetail() {
                         align="start"
                       />
                     </div>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-600">
                       {activeVectorPlot.subtitle ||
                         "Projected neighborhood around the chosen category."}
                     </p>
                   </div>
                   {vectorPlotSpaces.length > 1 && (
-                    <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+                    <div className="inline-flex rounded-full border border-slate-200 bg-white/90 p-1 shadow-sm">
                       <button
                         type="button"
                         onClick={() => setVectorSpace("mapper")}
-                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                           effectiveVectorSpace === "mapper"
-                            ? "bg-indigo-500 text-white"
-                            : "text-slate-300 hover:bg-slate-800"
+                            ? "bg-primary-600 text-white shadow-[0_10px_24px_rgba(0,84,154,0.22)]"
+                            : "text-slate-700 hover:bg-primary-50"
                         }`}
                       >
                         Mapper Space
@@ -2625,10 +2635,10 @@ export function JobDetail() {
                       <button
                         type="button"
                         onClick={() => setVectorSpace("visual")}
-                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                           effectiveVectorSpace === "visual"
-                            ? "bg-cyan-500 text-slate-950"
-                            : "text-slate-300 hover:bg-slate-800"
+                            ? "bg-primary-500 text-white shadow-[0_10px_24px_rgba(0,112,206,0.22)]"
+                            : "text-slate-700 hover:bg-primary-50"
                         }`}
                       >
                         Visual Space
@@ -2637,29 +2647,38 @@ export function JobDetail() {
                   )}
                 </div>
 
-                <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-slate-300">
-                  <span className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1">
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-slate-700">
+                  <span className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-primary-700">
                     Query: {activeVectorPlot.query_label || "signal"}
                   </span>
-                  <span className="rounded-full border border-indigo-400/40 bg-indigo-400/10 px-2.5 py-1">
+                  <span className="rounded-full border border-primary-300 bg-white px-2.5 py-1 text-primary-800">
                     Final: {activeVectorPlot.selected_label || mapperCategoryText || "—"}
                   </span>
                   {activeVectorPlot.backend && (
-                    <span className="rounded-full border border-slate-600 bg-slate-900 px-2.5 py-1">
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-600">
                       Backend: {activeVectorPlot.backend}
                     </span>
                   )}
-                  <span className="rounded-full border border-slate-600 bg-slate-900 px-2.5 py-1 text-slate-400">
+                  <span className="rounded-full border border-slate-200 bg-white/90 px-2.5 py-1 text-slate-500">
                     Scroll to zoom, drag to pan
                   </span>
                 </div>
 
-                <ReactECharts
-                  option={vectorPlotOption}
-                  style={{ height: 360, width: "100%" }}
-                  notMerge
-                  lazyUpdate
-                />
+                <div
+                  className="rounded-[1.5rem] border border-primary-100/90 px-1.5 py-1.5"
+                  style={{
+                    background:
+                      "radial-gradient(circle at 82% 12%, rgba(0, 112, 206, 0.12), transparent 20%), linear-gradient(180deg, #fbfdff 0%, #eef4f8 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.96)",
+                  }}
+                >
+                  <ReactECharts
+                    option={vectorPlotOption}
+                    style={{ height: 360, width: "100%" }}
+                    notMerge
+                    lazyUpdate
+                  />
+                </div>
               </div>
             )}
 
@@ -3236,7 +3255,7 @@ export function JobDetail() {
                             const width = `${(elapsed / Math.max(maxAttemptElapsedMs, 1)) * 100}%`;
                             const segmentClass =
                               attempt.status === "accepted"
-                                ? "bg-emerald-500"
+                                ? "bg-primary-500"
                                 : attempt.status === "rejected"
                                   ? "bg-red-400"
                                   : "bg-gray-400";
@@ -3259,7 +3278,7 @@ export function JobDetail() {
                               <span
                                 className={`inline-block h-2 w-2 rounded-full ${
                                   attempt.status === "accepted"
-                                    ? "bg-emerald-500"
+                                    ? "bg-primary-500"
                                     : attempt.status === "rejected"
                                       ? "bg-red-400"
                                       : "bg-gray-400"
@@ -3357,7 +3376,7 @@ export function JobDetail() {
                                     )}
                                     {attempt.ocr_mode && (
                                       <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-600">
-                                        OCR: {attempt.ocr_mode}
+                                        OCR: {sanitizeDecorativeLabel(attempt.ocr_mode)}
                                       </span>
                                     )}
                                   </div>
@@ -3697,14 +3716,14 @@ export function JobDetail() {
                     <Fragment key={stage}>
                       {idx > 0 && (
                         <div
-                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? "bg-emerald-500" : "bg-gray-100"}`}
+                          className={`flex-1 h-0.5 transition-colors duration-500 ${isDone || isCurrent ? "bg-primary-500" : "bg-gray-100"}`}
                         />
                       )}
                       <div
                         title={dotTitle}
                         className={`w-3 h-3 rounded-full border-2 shrink-0 transition-colors duration-500 ${
                           isDone
-                            ? "bg-emerald-500 border-emerald-400"
+                            ? "bg-primary-500 border-primary-400"
                             : isCurrent
                               ? "bg-blue-500 border-blue-400 animate-pulse"
                               : isFailed
@@ -3734,7 +3753,7 @@ export function JobDetail() {
                         idx === 0 ? "w-3 shrink-0" : "flex-1 min-w-0"
                       } ${
                         isDone
-                          ? "text-emerald-500"
+                          ? "text-primary-600"
                           : isCurrent
                             ? "text-blue-400"
                             : isFailed

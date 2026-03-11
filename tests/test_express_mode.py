@@ -69,7 +69,7 @@ def test_process_single_video_express_mode_bypasses_ocr(monkeypatch):
         p="Ollama",
         m="qwen3-vl:8b-instruct",
         oe="EasyOCR",
-        om="🚀 Fast",
+        om="Fast",
         override=False,
         sm="Tail Only",
         enable_search=False,

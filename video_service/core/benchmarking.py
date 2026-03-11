@@ -23,9 +23,9 @@ def normalize_ocr_engine(engine: str) -> str:
 
 def normalize_ocr_mode(mode: str) -> str:
     value = (mode or "").strip().lower()
-    if value in {"detailed", "detail"}:
+    if "detail" in value:
         return "Detailed"
-    return "🚀 Fast"
+    return "Fast"
 
 
 def jaccard_similarity(actual_categories: list[str], expected_categories: list[str]) -> float:
