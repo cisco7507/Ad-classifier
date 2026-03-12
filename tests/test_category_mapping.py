@@ -104,3 +104,33 @@ def test_select_mapping_input_text_keeps_specific_freeform_category():
         )
         == "Consumer Goods / Household Cleaning & Laundry"
     )
+
+
+def test_select_mapping_input_text_appends_reasoning_for_ambiguous_product_family():
+    assert (
+        select_mapping_input_text(
+            raw_category="Hair Care",
+            predicted_brand="P&G",
+            ocr_summary="HB hair biology volumizing shampoo conditioner thickening treatment",
+            reasoning_summary="volumizing shampoo conditioner thickening treatment",
+            exact_taxonomy_match=False,
+        )
+        == "Hair Care\nHB hair biology volumizing shampoo conditioner thickening treatment"
+    )
+
+
+def test_select_mapping_input_text_appends_reasoning_for_broad_exact_taxonomy():
+    assert (
+        select_mapping_input_text(
+            raw_category="Pharmaceutical Manufacture and Sale - over the counter",
+            predicted_brand="Pepto-Bismol",
+            ocr_summary="upset stomach indigestion nausea diarrhea",
+            reasoning_summary="upset stomach indigestion nausea diarrhea",
+            exact_taxonomy_match=True,
+        )
+        == (
+            "Pharmaceutical Manufacture and Sale - over the counter\n"
+            "Pepto-Bismol\n"
+            "upset stomach indigestion nausea diarrhea"
+        )
+    )

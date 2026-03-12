@@ -61,6 +61,47 @@ def _looks_generic_freeform_category(value: str) -> bool:
     return tokens.issubset(generic_terms)
 
 
+def _looks_ambiguous_product_family_category(value: str) -> bool:
+    normalized = normalize_whitespace(value).lower()
+    if not normalized or normalized in UNKNOWN_CATEGORY_VALUES:
+        return False
+
+    compact = normalized.replace("/", " ").replace("-", " ")
+    product_family_phrases = {
+        "hair care",
+        "skin care",
+        "body care",
+        "oral care",
+        "personal care",
+        "beauty care",
+        "pet care",
+    }
+    return compact in product_family_phrases
+
+
+def _exact_taxonomy_category_accepts_specificity_hint(value: str) -> bool:
+    normalized = normalize_whitespace(value).lower()
+    if not normalized or normalized in UNKNOWN_CATEGORY_VALUES:
+        return False
+
+    hint_terms = {
+        "manufacture",
+        "sale",
+        "services",
+        "service",
+        "products",
+        "product",
+        "store",
+        "stores",
+        "providers",
+        "provider",
+        "pharmaceutical",
+        "pharmaceuticals",
+        "over the counter",
+    }
+    return any(term in normalized for term in hint_terms)
+
+
 def _log_critical_once(message: str) -> None:
     if message in _critical_messages_logged:
         return
@@ -75,13 +116,12 @@ def select_mapping_input_text(
     ocr_summary: str = "",
     ocr_max_chars: int = 400,
     exact_taxonomy_match: bool = False,
+    reasoning_summary: str = "",
 ) -> str:
     raw_norm = normalize_whitespace(raw_category)
     brand_norm = normalize_whitespace(predicted_brand)
     ocr_norm = normalize_whitespace(ocr_summary)
-
-    if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES and exact_taxonomy_match:
-        return raw_norm
+    reasoning_norm = normalize_whitespace(reasoning_summary)
 
     evidence_parts: list[str] = []
     if brand_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
@@ -89,6 +129,18 @@ def select_mapping_input_text(
     if _mapping_text_has_signal(ocr_norm):
         evidence_parts.append(ocr_norm[:ocr_max_chars])
     evidence_text = "\n".join(evidence_parts)
+    ocr_support_text = ocr_norm[:ocr_max_chars] if _mapping_text_has_signal(ocr_norm) else ""
+    support_text = reasoning_norm[:ocr_max_chars] if _mapping_text_has_signal(reasoning_norm) else ""
+
+    if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES and exact_taxonomy_match:
+        if (
+            _exact_taxonomy_category_accepts_specificity_hint(raw_norm)
+        ):
+            if evidence_text:
+                return f"{raw_norm}\n{evidence_text}"
+            if support_text:
+                return f"{raw_norm}\n{support_text}"
+        return raw_norm
 
     if (
         raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES
@@ -97,6 +149,16 @@ def select_mapping_input_text(
         and evidence_text
     ):
         return evidence_text
+
+    if (
+        raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES
+        and not exact_taxonomy_match
+        and _looks_ambiguous_product_family_category(raw_norm)
+    ):
+        if ocr_support_text:
+            return f"{raw_norm}\n{ocr_support_text}"
+        if support_text:
+            return f"{raw_norm}\n{support_text}"
 
     if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return raw_norm

@@ -2418,6 +2418,7 @@ def process_single_video(
             suggested_categories_text="",
             predicted_brand=res.get("brand", "Unknown"),
             ocr_summary=ocr_text,
+            reasoning_summary=str(res.get("reasoning", "") or ""),
         )
         category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
             result_payload=res,
@@ -2652,6 +2653,7 @@ def process_single_video(
                     selected_category=str(cat_out or ""),
                     predicted_brand=str(res.get("brand", "Unknown") or "Unknown"),
                     ocr_summary=ocr_text,
+                    reasoning_summary=str(res.get("reasoning", "") or ""),
                 )
             except Exception as exc:
                 logger.debug("[%s] mapper_vector_plot_failed: %s", url, exc)
