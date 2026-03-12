@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from video_service.core.category_mapping import load_category_mapping, select_mapping_input_text
+from video_service.core.category_mapping import (
+    build_product_cue_query_text,
+    load_category_mapping,
+    select_mapping_input_text,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -115,7 +119,7 @@ def test_select_mapping_input_text_appends_reasoning_for_ambiguous_product_famil
             reasoning_summary="volumizing shampoo conditioner thickening treatment",
             exact_taxonomy_match=False,
         )
-        == "Hair Care\nHB hair biology volumizing shampoo conditioner thickening treatment"
+        == "Hair Care\nP&G volumizing shampoo conditioner thickening treatment"
     )
 
 
@@ -133,4 +137,26 @@ def test_select_mapping_input_text_appends_reasoning_for_broad_exact_taxonomy():
             "Pepto-Bismol\n"
             "upset stomach indigestion nausea diarrhea"
         )
+    )
+
+
+def test_build_product_cue_query_text_prefers_compact_reasoning_over_noisy_ocr():
+    noisy_ocr = (
+        "PeG PANIENI miAc PANTF Kescue Fonditionyv REviiai Ein Repakateun "
+        "PANTENE Kepaip MIRACLE WTAMNe Conditionek BIOTIN COLLAGEN KERATIN"
+    )
+    reasoning = (
+        "The OCR text contains multiple fragments that clearly reference Pantene and "
+        "its product line, including Miracle Rescue, Biotin + Collagen, and "
+        "Keratin + Vitamin E. The ad shows shampoos and conditioners."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Pantene",
+            ocr_summary=noisy_ocr,
+            reasoning_summary=reasoning,
+            family_context="Hair Care",
+        )
+        == "Pantene Miracle Rescue Biotin Collagen Keratin Vitamin shampoo conditioner"
     )

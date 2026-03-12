@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -15,6 +16,96 @@ DEFAULT_CATEGORY_CSV_PATH = (
 ).resolve()
 UNKNOWN_CATEGORY_VALUES = {"unknown", "none", "n/a", "n-a", ""}
 _critical_messages_logged: set[str] = set()
+_PRODUCT_CUE_STOPWORDS = {
+    "a",
+    "ad",
+    "advertisement",
+    "all",
+    "an",
+    "and",
+    "are",
+    "attached",
+    "bilingual",
+    "brand",
+    "branding",
+    "clear",
+    "care",
+    "clearly",
+    "company",
+    "confirm",
+    "confirms",
+    "contains",
+    "context",
+    "corrupted",
+    "corner",
+    "designed",
+    "despite",
+    "evidence",
+    "explicit",
+    "explicitly",
+    "english",
+    "final",
+    "five",
+    "for",
+    "frame",
+    "fragment",
+    "fragments",
+    "french",
+    "from",
+    "further",
+    "hair",
+    "heavily",
+    "image",
+    "images",
+    "including",
+    "its",
+    "item",
+    "items",
+    "label",
+    "labels",
+    "line",
+    "logo",
+    "multiple",
+    "of",
+    "ocr",
+    "overall",
+    "parent",
+    "point",
+    "points",
+    "product",
+    "products",
+    "reference",
+    "references",
+    "right",
+    "set",
+    "setting",
+    "show",
+    "showing",
+    "shows",
+    "studio",
+    "text",
+    "that",
+    "the",
+    "their",
+    "them",
+    "they",
+    "this",
+    "those",
+    "top",
+    "visual",
+    "visually",
+    "well",
+    "which",
+    "with",
+    "woman",
+}
+_PRODUCT_CUE_SINGULARS = {
+    "conditioners": "conditioner",
+    "formulations": "formulation",
+    "shampoos": "shampoo",
+    "treatments": "treatment",
+    "vitamins": "vitamin",
+}
 
 
 def normalize_whitespace(value: str) -> str:
@@ -102,6 +193,117 @@ def _exact_taxonomy_category_accepts_specificity_hint(value: str) -> bool:
     return any(term in normalized for term in hint_terms)
 
 
+def _looks_like_product_cue_token(token: str) -> bool:
+    compact = re.sub(r"[^A-Za-zÀ-ÿ0-9]+", "", token or "")
+    if len(compact) < 2 or compact.isdigit():
+        return False
+
+    letters = sum(1 for char in compact if char.isalpha())
+    if letters == 0:
+        return False
+
+    if len(compact) >= 5:
+        vowels = sum(1 for char in compact.lower() if char in "aeiouyàâäéèêëîïôöùûü")
+        if vowels == 0:
+            return False
+        if len(set(compact.lower())) <= 2:
+            return False
+    return True
+
+
+def _extract_product_cue_terms(
+    text: str,
+    *,
+    extra_stopwords: set[str] | None = None,
+    max_terms: int = 10,
+) -> list[str]:
+    normalized = normalize_whitespace(text)
+    if not normalized:
+        return []
+
+    stopwords = set(_PRODUCT_CUE_STOPWORDS)
+    if extra_stopwords:
+        stopwords.update(token.lower() for token in extra_stopwords if token)
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_token in re.findall(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9&+/-]*", normalized):
+        token = raw_token.strip("&+/-")
+        if not token:
+            continue
+
+        lower = token.lower()
+        lower = _PRODUCT_CUE_SINGULARS.get(lower, lower)
+        if lower in stopwords:
+            continue
+        if len(lower) < 3 and lower not in {"hb"}:
+            continue
+        if not _looks_like_product_cue_token(lower):
+            continue
+        if lower in seen:
+            continue
+        seen.add(lower)
+        terms.append(token if lower == token.lower() else token)
+        if len(terms) >= max_terms:
+            break
+    return [(_PRODUCT_CUE_SINGULARS.get(term.lower(), term.lower()) if term.islower() else _PRODUCT_CUE_SINGULARS.get(term.lower(), term)) for term in terms]
+
+
+def build_product_cue_query_text(
+    *,
+    predicted_brand: str = "",
+    ocr_summary: str = "",
+    reasoning_summary: str = "",
+    family_context: str = "",
+    max_terms: int = 10,
+    max_chars: int = 260,
+) -> str:
+    brand_norm = normalize_whitespace(predicted_brand)
+    family_tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-zÀ-ÿ0-9]{2,}", normalize_whitespace(family_context))
+    }
+    brand_tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-zÀ-ÿ0-9]{2,}", brand_norm)
+    }
+    excluded_tokens = family_tokens | brand_tokens
+
+    cue_terms: list[str] = []
+    seen: set[str] = set()
+    if brand_norm and brand_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
+        seen.add(brand_norm.casefold())
+
+    def _extend(tokens: list[str]) -> None:
+        for token in tokens:
+            key = token.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            cue_terms.append(token)
+            if len(cue_terms) >= max_terms:
+                break
+
+    reasoning_terms = _extract_product_cue_terms(
+        reasoning_summary,
+        extra_stopwords=excluded_tokens,
+        max_terms=max_terms,
+    )
+    _extend(reasoning_terms)
+
+    if len(cue_terms) < 4:
+        ocr_terms = _extract_product_cue_terms(
+            ocr_summary,
+            extra_stopwords=excluded_tokens,
+            max_terms=max_terms,
+        )
+        _extend(ocr_terms)
+
+    compact_terms = " ".join(cue_terms[:max_terms]).strip()
+    query_parts = [part for part in (brand_norm, compact_terms) if part]
+    return normalize_whitespace(" ".join(query_parts))[:max_chars]
+
+
 def _log_critical_once(message: str) -> None:
     if message in _critical_messages_logged:
         return
@@ -155,6 +357,15 @@ def select_mapping_input_text(
         and not exact_taxonomy_match
         and _looks_ambiguous_product_family_category(raw_norm)
     ):
+        compact_cues = build_product_cue_query_text(
+            predicted_brand=brand_norm,
+            ocr_summary=ocr_norm,
+            reasoning_summary=reasoning_norm,
+            family_context=raw_norm,
+            max_chars=ocr_max_chars,
+        )
+        if compact_cues:
+            return f"{raw_norm}\n{compact_cues}"
         if ocr_support_text:
             return f"{raw_norm}\n{ocr_support_text}"
         if support_text:

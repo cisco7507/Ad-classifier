@@ -21,6 +21,7 @@ from video_service.core.video_io import (
 )
 from video_service.core import categories as categories_runtime
 from video_service.core.categories import category_mapper, normalize_feature_tensor
+from video_service.core.category_mapping import build_product_cue_query_text
 from video_service.core.ocr import ocr_manager
 from video_service.core.llm import llm_engine, create_provider
 
@@ -579,54 +580,114 @@ def _build_category_rerank_candidates(
     current_match: dict[str, object],
     predicted_brand: str,
     ocr_text: str,
-    limit: int = 5,
-) -> list[tuple[str, float]]:
+    reasoning: str = "",
+    primary_limit: int = 5,
+    evidence_limit: int = 3,
+    combined_limit: int = 8,
+) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
     if not hasattr(category_mapper, "get_mapper_neighbor_categories"):
-        return []
+        return [], []
+
+    def _merge_ranked_candidates(
+        *candidate_lists: list[tuple[str, float]],
+        limit: int,
+    ) -> list[tuple[str, float]]:
+        merged: list[tuple[str, float]] = []
+        seen: set[str] = set()
+        for candidates in candidate_lists:
+            for label, score in candidates:
+                canonical_label = str(label or "").strip()
+                if not canonical_label:
+                    continue
+                key = canonical_label.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    numeric_score = float(score)
+                except (TypeError, ValueError):
+                    numeric_score = 0.0
+                merged.append((canonical_label, numeric_score))
+                if len(merged) >= limit:
+                    return merged
+        return merged
 
     try:
-        candidates = list(
+        primary_candidates = list(
             category_mapper.get_mapper_neighbor_categories(
                 raw_category=raw_category,
                 predicted_brand=predicted_brand,
                 ocr_summary=ocr_text,
-                top_k=limit,
+                reasoning_summary=reasoning,
+                top_k=primary_limit,
             )
         )
     except Exception as exc:
         logger.warning("category_rerank_candidates_failed: %s", exc)
-        return []
+        return [], []
 
     canonical = str(current_match.get("canonical_category", "") or "").strip()
-    if canonical and canonical not in {label for label, _score in candidates}:
+    if canonical and canonical not in {label for label, _score in primary_candidates}:
         score_raw = current_match.get("category_match_score", 0.0)
         try:
             score = float(score_raw or 0.0)
         except (TypeError, ValueError):
             score = 0.0
-        candidates.append((canonical, score))
-    return candidates[:limit]
+        primary_candidates.append((canonical, score))
+
+    evidence_neighbors: list[tuple[str, float]] = []
+    evidence_query = _build_category_rerank_evidence_query(
+        brand=predicted_brand,
+        ocr_text=ocr_text,
+        reasoning=reasoning,
+    )
+    if evidence_query:
+        try:
+            evidence_neighbors = list(
+                category_mapper.get_mapper_neighbor_categories(
+                    raw_category=evidence_query,
+                    predicted_brand="",
+                    ocr_summary="",
+                    top_k=evidence_limit,
+                )
+            )
+        except Exception as exc:
+            logger.warning("category_rerank_evidence_neighbors_failed: %s", exc)
+            evidence_neighbors = []
+
+    return (
+        _merge_ranked_candidates(primary_candidates, evidence_neighbors, limit=combined_limit),
+        evidence_neighbors,
+    )
 
 
 def _build_category_rerank_evidence_query(
-    result_payload: dict[str, object] | None,
+    *,
+    brand: str,
     ocr_text: str,
+    reasoning: str,
 ) -> str:
-    if not isinstance(result_payload, dict):
-        return ""
+    compact_cues = build_product_cue_query_text(
+        predicted_brand=brand,
+        ocr_summary=ocr_text,
+        reasoning_summary=reasoning,
+        max_chars=260,
+    )
+    if compact_cues:
+        return compact_cues
 
     parts: list[str] = []
-    brand = str(result_payload.get("brand", "") or "").strip()
-    if brand and brand.lower() not in {"unknown", "none", "n/a"}:
-        parts.append(brand)
+    brand_text = str(brand or "").strip()
+    if brand_text and brand_text.lower() not in {"unknown", "none", "n/a"}:
+        parts.append(brand_text)
 
     compact_ocr = " ".join((ocr_text or "").split())
     if compact_ocr:
         parts.append(compact_ocr[:260])
 
-    reasoning = " ".join((str(result_payload.get("reasoning", "") or "")).split())
-    if reasoning:
-        parts.append(reasoning[:260])
+    compact_reasoning = " ".join((reasoning or "").split())
+    if compact_reasoning:
+        parts.append(compact_reasoning[:260])
 
     return "\n".join(parts).strip()
 
@@ -648,15 +709,16 @@ def _should_run_category_rerank(
     raw_category = str(result_payload.get("category", "") or "").strip()
     canonical = str(category_match.get("canonical_category", "") or "").strip()
     brand = str(result_payload.get("brand", "") or "").strip()
+    reasoning = str(result_payload.get("reasoning", "") or "").strip()
     if not raw_category or not canonical:
         return False, "missing_category", [], []
 
-    mapper_candidates = _build_category_rerank_candidates(
+    mapper_candidates, evidence_neighbors = _build_category_rerank_candidates(
         raw_category=raw_category,
         current_match=category_match,
         predicted_brand=brand,
         ocr_text=ocr_text,
-        limit=5,
+        reasoning=reasoning,
     )
     candidate_categories = [label for label, _score in mapper_candidates]
     if len(candidate_categories) < 2:
@@ -682,29 +744,15 @@ def _should_run_category_rerank(
     if not exact_taxonomy_match:
         contradiction_reasons.append("freeform_category_with_weak_mapping")
 
-    evidence_query = _build_category_rerank_evidence_query(result_payload, ocr_text)
-    if evidence_query and hasattr(category_mapper, "get_mapper_neighbor_categories"):
-        try:
-            evidence_neighbors = list(
-                category_mapper.get_mapper_neighbor_categories(
-                    raw_category=evidence_query,
-                    predicted_brand="",
-                    ocr_summary="",
-                    top_k=3,
-                )
+    if evidence_neighbors:
+        evidence_top_label, evidence_top_score = evidence_neighbors[0]
+        if (
+            evidence_top_label != canonical
+            and float(evidence_top_score) >= _resolve_category_rerank_evidence_score_threshold()
+        ):
+            contradiction_reasons.append(
+                f"evidence_prefers={evidence_top_label!r}@{float(evidence_top_score):.4f}"
             )
-        except Exception as exc:
-            logger.warning("category_rerank_evidence_neighbors_failed: %s", exc)
-            evidence_neighbors = []
-        if evidence_neighbors:
-            evidence_top_label, evidence_top_score = evidence_neighbors[0]
-            if (
-                evidence_top_label != canonical
-                and float(evidence_top_score) >= _resolve_category_rerank_evidence_score_threshold()
-            ):
-                contradiction_reasons.append(
-                    f"evidence_prefers={evidence_top_label!r}@{float(evidence_top_score):.4f}"
-                )
 
     visual_matches = _top_visual_matches(sorted_vision, limit=3)
     if visual_matches:
@@ -2458,6 +2506,7 @@ def process_single_video(
                     suggested_categories_text="",
                     predicted_brand=reranked_res.get("brand", "Unknown"),
                     ocr_summary=ocr_text,
+                    reasoning_summary=str(reranked_res.get("reasoning", "") or ""),
                 )
                 rerank_ok, rerank_accept_reason = _accept_category_rerank_result(
                     category_match,
