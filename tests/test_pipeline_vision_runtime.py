@@ -292,7 +292,13 @@ def test_pipeline_category_rerank_corrects_weak_cross_domain_mapping(monkeypatch
             }
 
         @staticmethod
-        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
             query = str(raw_category or "")
             if query == "Electric Vehicles":
                 return [
@@ -397,7 +403,13 @@ def test_pipeline_skips_category_rerank_for_confident_mapping(monkeypatch):
             }
 
         @staticmethod
-        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
             return [
                 ("Automotive", 0.7110),
                 ("Car/Van", 0.6610),
@@ -491,7 +503,13 @@ def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_ext
             }
 
         @staticmethod
-        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", top_k=8):
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
             query = str(raw_category or "")
             if query == "Electric Vehicles":
                 return [
@@ -2492,3 +2510,56 @@ def test_pipeline_triggers_specificity_search_for_generic_raw_category_with_weak
     assert processing_trace["summary"]["accepted_attempt_type"] == "specificity_search_rescue"
     assert processing_trace["attempts"][-1]["attempt_type"] == "specificity_search_rescue"
     assert processing_trace["attempts"][-1]["status"] == "accepted"
+
+
+def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
+    class _DummyMapper:
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=5,
+        ):
+            if raw_category == "Hair Care":
+                assert predicted_brand == "Pantene"
+                assert reasoning_summary == "Pantene Miracle Rescue shampoos and conditioners."
+                return [
+                    ("Haircare products", 0.5612),
+                    ("Haircare products - All else", 0.5499),
+                    ("Hair loss product", 0.5348),
+                    ("Hair Care Services", 0.4964),
+                    ("Hair removal product", 0.4816),
+                ][:top_k]
+
+            assert raw_category == "Pantene Miracle Rescue shampoo conditioner"
+            return [
+                ("Shampoo/Conditioner", 0.6707),
+                ("Haircare products", 0.6112),
+                ("Haircare products - All else", 0.6013),
+            ][:top_k]
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    candidates, evidence_neighbors = pipeline_module._build_category_rerank_candidates(
+        raw_category="Hair Care",
+        current_match={
+            "canonical_category": "Haircare products",
+            "category_match_score": 0.5612,
+        },
+        predicted_brand="Pantene",
+        ocr_text="garbled ocr that should not dominate the compact evidence query",
+        reasoning="Pantene Miracle Rescue shampoos and conditioners.",
+    )
+
+    labels = [label for label, _score in candidates]
+    assert labels[:5] == [
+        "Haircare products",
+        "Haircare products - All else",
+        "Hair loss product",
+        "Hair Care Services",
+        "Hair removal product",
+    ]
+    assert "Shampoo/Conditioner" in labels
+    assert evidence_neighbors[0][0] == "Shampoo/Conditioner"
