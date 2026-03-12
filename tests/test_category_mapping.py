@@ -68,3 +68,69 @@ def test_select_mapping_input_text_fallback_order_without_suggested_categories_b
         )
         == "Long OCR summary text"
     )
+
+
+def test_select_mapping_input_text_prefers_evidence_for_generic_freeform_category():
+    assert (
+        select_mapping_input_text(
+            raw_category="Technology / Internet Services",
+            predicted_brand="Google",
+            ocr_summary="Google Pixel 9",
+            exact_taxonomy_match=False,
+        )
+        == "Google\nGoogle Pixel 9"
+    )
+
+
+def test_select_mapping_input_text_preserves_exact_taxonomy_match():
+    assert (
+        select_mapping_input_text(
+            raw_category="Language Learning",
+            predicted_brand="OnParle",
+            ocr_summary="French lessons",
+            exact_taxonomy_match=True,
+        )
+        == "Language Learning"
+    )
+
+
+def test_select_mapping_input_text_keeps_specific_freeform_category():
+    assert (
+        select_mapping_input_text(
+            raw_category="Consumer Goods / Household Cleaning & Laundry",
+            predicted_brand="Tide & Downy",
+            ocr_summary="Tide Downy laundry detergent",
+            exact_taxonomy_match=False,
+        )
+        == "Consumer Goods / Household Cleaning & Laundry"
+    )
+
+
+def test_select_mapping_input_text_appends_reasoning_for_ambiguous_product_family():
+    assert (
+        select_mapping_input_text(
+            raw_category="Hair Care",
+            predicted_brand="P&G",
+            ocr_summary="HB hair biology volumizing shampoo conditioner thickening treatment",
+            reasoning_summary="volumizing shampoo conditioner thickening treatment",
+            exact_taxonomy_match=False,
+        )
+        == "Hair Care\nHB hair biology volumizing shampoo conditioner thickening treatment"
+    )
+
+
+def test_select_mapping_input_text_appends_reasoning_for_broad_exact_taxonomy():
+    assert (
+        select_mapping_input_text(
+            raw_category="Pharmaceutical Manufacture and Sale - over the counter",
+            predicted_brand="Pepto-Bismol",
+            ocr_summary="upset stomach indigestion nausea diarrhea",
+            reasoning_summary="upset stomach indigestion nausea diarrhea",
+            exact_taxonomy_match=True,
+        )
+        == (
+            "Pharmaceutical Manufacture and Sale - over the counter\n"
+            "Pepto-Bismol\n"
+            "upset stomach indigestion nausea diarrhea"
+        )
+    )

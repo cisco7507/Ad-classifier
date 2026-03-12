@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Scenalyze – Animated Mark (Blue)</title>
+
+  <style>
+    /* Exact Bell Slim fonts for Scenalyze typography */
+    @font-face {
+      font-family: 'bellslim';
+      src: url('https://www.bellmedia.ca/lede/wp-content/themes/bellmedia-sales-2026.02.24-185303/dist/fonts/bell_slim_regular-webfont.2ce9ae35.woff2') format('woff2');
+      font-weight: 300;
+      font-style: normal;
+    }
+    @font-face {
+      font-family: 'bellslim';
+      src: url('https://www.bellmedia.ca/lede/wp-content/themes/bellmedia-sales-2026.02.24-185303/dist/fonts/bell_slim_bold-webfont.fcf79cf2.woff2') format('woff2');
+      font-weight: 700;
+      font-style: normal;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #e8edf2;
+    }
+
+    /* ── Outer pill card — exact Bell Media blue #00549A ── */
+    .logo-card {
+      display: inline-flex;
+      align-items: center;
+      background: #00549A;   /* ← exact Bell Media brand blue */
+      border-radius: 10px;
+      padding: 26px 44px;
+      gap: 30px;
+      box-shadow: 0 10px 40px rgba(0, 84, 154, 0.4);
+    }
+
+    /* ── Bell Media logo (White PNG) ── */
+    .bell-media-logo {
+      display: flex;
+      align-items: center;
+    }
+    .bell-media-logo img {
+      height: 48px;
+      width: auto;
+      object-fit: contain;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      width: 1.5px;
+      height: 58px;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── Scenalyze section ── */
+    .scenalyze-block {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* ── Animated AI Mark ── */
+    .scenalyze-mark {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Creative AI Video "B" Mark ── */
+    .scenalyze-mark {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 54px;
+      height: 54px;
+    }
+
+    /* Rotating camera focus ring (representing video) */
+    .scenalyze-mark .lens-ring {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      border: 1.5px dashed rgba(255, 255, 255, 0.35);
+      border-radius: 50%;
+      border-top: 1.5px solid #ffffff;
+      border-bottom: 1.5px solid #ffffff;
+      animation: slow-spin 8s linear infinite;
+    }
+
+    @keyframes slow-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Container for the B and the laser */
+    .scenalyze-mark .tech-b-container {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      overflow: hidden; /* keeps scanline contained within the ring area */
+      border-radius: 50%;
+    }
+
+    /* The actual Bell typographic B */
+    .scenalyze-mark .tech-b {
+      font-family: 'bellslim', Arial, sans-serif;
+      font-weight: 700;
+      font-size: 2.8rem;
+      color: #ffffff;
+      line-height: 1;
+      text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+    }
+
+    /* Glowing AI scanning laser (representing intelligence/analysis) */
+    .scenalyze-mark .scan-line {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: #00d2ff;
+      box-shadow: 0 0 6px #00d2ff, 0 0 12px rgba(0, 210, 255, 0.8);
+      animation: scan-up-down 2.5s ease-in-out infinite;
+      z-index: 2;
+    }
+
+    @keyframes scan-up-down {
+      0%, 100% { top: 5%; opacity: 0; }
+      10%, 90% { opacity: 1; }
+      50% { top: 95%; }
+    }
+
+    /* ── Scenalyze wordmark + tagline ── */
+    .scenalyze-text { 
+      display: flex; 
+      flex-direction: column; 
+      justify-content: center;
+      gap: 3px; 
+    }
+
+    .scenalyze-text .name {
+      font-family: 'bellslim', Arial, sans-serif;
+      font-weight: 700;
+      font-size: 2.2rem;
+      color: #ffffff; 
+      letter-spacing: 0.5px;
+      line-height: 1;
+    }
+
+    .scenalyze-text .tagline {
+      font-family: 'bellslim', Arial, sans-serif;
+      font-weight: 700;
+      font-size: 0.72rem;
+      color: rgba(255, 255, 255, 0.72);
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      max-width: 380px; /* Constrain the long tagline so it looks neat */
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="logo-card">
+
+    <!-- Bell Media — White Logo -->
+    <div class="bell-media-logo">
+      <img src="https://www.bellmedia.ca/lede/wp-content/uploads/2016/10/bell_media_en_white.png"
+           alt="Bell Media" />
+    </div>
+
+    <!-- Divider -->
+    <div class="divider"></div>
+
+    <!-- Scenalyze -->
+    <div class="scenalyze-block">
+      <!-- Creative AI Video 'B' Mark -->
+      <div class="scenalyze-mark">
+        <!-- The rotating camera/focus ring -->
+        <div class="lens-ring"></div>
+        <!-- The Bell typography B with scanning laser -->
+        <div class="tech-b-container">
+          <span class="tech-b">B</span>
+          <div class="scan-line"></div>
+        </div>
+      </div>
+
+      <!-- Text -->
+      <div class="scenalyze-text">
+        <span class="name">Scenalyze</span>
+        <span class="tagline">Intelligence meets video. Every frame tells a story</span>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

@@ -301,12 +301,16 @@ class CategoryMapper:
         suggested_categories_text: str = "",
         predicted_brand: str = "",
         ocr_summary: str = "",
+        reasoning_summary: str = "",
     ) -> str:
+        raw_norm = str(raw_category or "").strip()
         return select_mapping_input_text(
-            raw_category=raw_category,
+            raw_category=raw_norm,
             suggested_categories_text=suggested_categories_text,
             predicted_brand=predicted_brand,
             ocr_summary=ocr_summary,
+            exact_taxonomy_match=raw_norm in set(self.categories),
+            reasoning_summary=reasoning_summary,
         )
 
     def build_mapper_vector_plot(
@@ -315,6 +319,7 @@ class CategoryMapper:
         selected_category: str,
         predicted_brand: str = "",
         ocr_summary: str = "",
+        reasoning_summary: str = "",
         top_k: int = 10,
     ) -> dict | None:
         if not self.active or self.embedder is None or self.category_embeddings is None:
@@ -324,6 +329,7 @@ class CategoryMapper:
             raw_category=raw_category,
             predicted_brand=predicted_brand,
             ocr_summary=ocr_summary,
+            reasoning_summary=reasoning_summary,
         )
         query_embedding = self.embedder.encode(
             query_text,
@@ -405,6 +411,7 @@ class CategoryMapper:
         raw_category: str,
         predicted_brand: str = "",
         ocr_summary: str = "",
+        reasoning_summary: str = "",
         top_k: int = 8,
     ) -> list[tuple[str, float]]:
         if not self.active or self.embedder is None or self.category_embeddings is None:
@@ -414,6 +421,7 @@ class CategoryMapper:
             raw_category=raw_category,
             predicted_brand=predicted_brand,
             ocr_summary=ocr_summary,
+            reasoning_summary=reasoning_summary,
         )
         query_embedding = self.embedder.encode(
             query_text,
@@ -519,6 +527,7 @@ class CategoryMapper:
         suggested_categories_text="",
         predicted_brand="",
         ocr_summary="",
+        reasoning_summary="",
     ):
         with job_context(str(job_id or "-")):
             raw_value = str(raw_category or "").strip()
@@ -551,6 +560,7 @@ class CategoryMapper:
                 suggested_categories_text=suggested_categories_text,
                 predicted_brand=predicted_brand,
                 ocr_summary=ocr_summary,
+                reasoning_summary=reasoning_summary,
             )
             query_embedding = self.embedder.encode(
                 query_text,
@@ -586,6 +596,7 @@ class CategoryMapper:
         suggested_categories_text="",
         predicted_brand="",
         ocr_summary="",
+        reasoning_summary="",
     ):
         match = self.map_category(
             raw_category=raw_category,
@@ -593,6 +604,7 @@ class CategoryMapper:
             suggested_categories_text=suggested_categories_text,
             predicted_brand=predicted_brand,
             ocr_summary=ocr_summary,
+            reasoning_summary=reasoning_summary,
         )
         if match["category_match_method"] == "disabled":
             with job_context(str(job_id or "-")):

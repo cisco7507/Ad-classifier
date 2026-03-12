@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import concurrent.futures
 from contextvars import copy_context
+from PIL import Image
 from video_service.core.logging_setup import bind_current_log_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.video_io import (
@@ -73,6 +74,15 @@ def _resolve_ocr_frame_similarity_threshold() -> float:
     return max(0.0, min(1.0, value))
 
 
+def _resolve_ocr_prefilter_preserve_last_frames() -> int:
+    raw = os.environ.get("OCR_PREFILTER_PRESERVE_LAST_FRAMES", "3")
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_ocr_prefilter_preserve_last_frames value=%r fallback=3", raw)
+        return 3
+
+
 def _frame_hist_signature(frame_bgr: np.ndarray) -> np.ndarray:
     thumbnail = cv2.resize(frame_bgr, (96, 54), interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(thumbnail, cv2.COLOR_BGR2HSV)
@@ -96,12 +106,27 @@ def _select_frames_for_ocr(frames: list[dict[str, object]]) -> tuple[list[dict[s
         return list(frames), 0
 
     similarity_threshold = _resolve_ocr_frame_similarity_threshold()
+    preserve_recent = _resolve_ocr_prefilter_preserve_last_frames()
+    tail_like_types = {"tail", "backward_ext", "tail_rescue"}
+    preserve_recent_for_tail = any(
+        str(frame.get("type", "") or "").lower() in tail_like_types for frame in frames
+    )
+    protected_indices: set[int] = set()
+    if preserve_recent_for_tail and preserve_recent > 0:
+        protected_start = max(0, len(frames) - preserve_recent)
+        protected_indices = set(range(protected_start, len(frames)))
+
     selected: list[dict[str, object]] = [frames[0]]
     skipped = 0
     last_selected = frames[0]
     last_index = len(frames) - 1
 
     for idx, frame in enumerate(frames[1:], start=1):
+        if idx in protected_indices:
+            if frame is not selected[-1]:
+                selected.append(frame)
+                last_selected = frame
+            continue
         is_last_frame = idx == last_index
         if is_last_frame:
             if frame is not selected[-1]:
@@ -127,7 +152,7 @@ def _select_frames_for_ocr(frames: list[dict[str, object]]) -> tuple[list[dict[s
         selected.append(frame)
         last_selected = frame
 
-    if len(selected) == 2:
+    if len(selected) == 2 and not protected_indices:
         first_image = selected[0].get("ocr_image")
         last_image = selected[1].get("ocr_image")
         if isinstance(first_image, np.ndarray) and isinstance(last_image, np.ndarray):
@@ -1359,6 +1384,15 @@ def _llm_result_allows_ocr_skip(
     return True, f"confidence={confidence:.2f} canonical_category={canonical_category!r}"
 
 
+def _resolve_llm_recent_frame_count() -> int:
+    raw = os.environ.get("LLM_RECENT_FRAME_COUNT", "4")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("invalid_llm_recent_frame_count value=%r fallback=4", raw)
+        return 4
+
+
 def process_single_video(
     url,
     categories,
@@ -1425,6 +1459,21 @@ def process_single_video(
             if len(compact) <= limit:
                 return compact
             return f"{compact[:limit].rstrip()}..."
+
+        def _llm_evidence_images(source_frames: list[dict[str, object]]) -> list[Image.Image]:
+            frame_limit = _resolve_llm_recent_frame_count()
+            tail_like_types = {"tail", "backward_ext", "tail_rescue"}
+            if any(str(frame.get("type", "") or "").lower() in tail_like_types for frame in source_frames):
+                candidate_frames = source_frames[-frame_limit:]
+            else:
+                candidate_frames = source_frames[-1:] if source_frames else []
+            images: list[Image.Image] = []
+            for frame in candidate_frames:
+                try:
+                    images.append(get_pil_image(frame))
+                except Exception:
+                    continue
+            return images
 
         def _result_snapshot(payload: dict[str, object] | None) -> dict[str, object]:
             if not isinstance(payload, dict):
@@ -1826,7 +1875,8 @@ def process_single_video(
                 if frame_ok and vision_ok:
                     if stage_callback:
                         stage_callback("llm", f"evaluating provider={p.lower()} model={m} for OCR skip")
-                    tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
+                    evidence_images = _llm_evidence_images(skip_candidate_frames or frames) if send_llm_frame else []
+                    tail_image = evidence_images[-1] if evidence_images else None
                     prelim_res = llm_engine.query_pipeline(
                         p,
                         m,
@@ -1837,6 +1887,7 @@ def process_single_video(
                         send_llm_frame,
                         ctx,
                         express_mode=False,
+                        evidence_images=evidence_images,
                     )
                     llm_ok, llm_reason = _llm_result_allows_ocr_skip(
                         prelim_res,
@@ -1885,7 +1936,8 @@ def process_single_video(
         if stage_callback:
             stage_callback("llm", f"calling provider={p.lower()} model={m}")
         if res is None:
-            tail_image = get_pil_image(frames[-1]) if send_llm_frame else None
+            evidence_images = _llm_evidence_images(frames) if send_llm_frame else []
+            tail_image = evidence_images[-1] if evidence_images else None
             res = llm_engine.query_pipeline(
                 p,
                 m,
@@ -1896,6 +1948,7 @@ def process_single_video(
                 send_llm_frame,
                 ctx,
                 express_mode=express_mode,
+                evidence_images=evidence_images,
             )
 
         def _apply_fallback_result(
@@ -1993,7 +2046,8 @@ def process_single_video(
                 )
                 return False, fallback_ocr_text
             fallback_llm_text = llm_text_builder(fallback_ocr_text) if llm_text_builder else fallback_ocr_text
-            fallback_tail_image = get_pil_image(fallback_frames[-1]) if send_llm_frame else None
+            fallback_images = _llm_evidence_images(fallback_frames) if send_llm_frame else []
+            fallback_tail_image = fallback_images[-1] if fallback_images else None
             if stage_callback:
                 stage_callback("llm", f"retrying {fallback_type} provider={p.lower()} model={m}")
             fallback_res = llm_engine.query_pipeline(
@@ -2006,6 +2060,7 @@ def process_single_video(
                 send_llm_frame,
                 ctx,
                 express_mode=False,
+                evidence_images=fallback_images,
             )
             fallback_blank, fallback_blank_reason = _llm_result_is_blank(fallback_res)
             if fallback_blank:
@@ -2363,6 +2418,7 @@ def process_single_video(
             suggested_categories_text="",
             predicted_brand=res.get("brand", "Unknown"),
             ocr_summary=ocr_text,
+            reasoning_summary=str(res.get("reasoning", "") or ""),
         )
         category_rerank_needed, category_rerank_reason, category_rerank_candidates, category_rerank_visual_matches = _should_run_category_rerank(
             result_payload=res,
@@ -2597,6 +2653,7 @@ def process_single_video(
                     selected_category=str(cat_out or ""),
                     predicted_brand=str(res.get("brand", "Unknown") or "Unknown"),
                     ocr_summary=ocr_text,
+                    reasoning_summary=str(res.get("reasoning", "") or ""),
                 )
             except Exception as exc:
                 logger.debug("[%s] mapper_vector_plot_failed: %s", url, exc)

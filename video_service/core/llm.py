@@ -336,10 +336,13 @@ class OpenAICompatibleProvider(BaseProvider):
             {"role": "user", "content": user_prompt},
         ]
         if images:
-            msgs[1]["content"] = [
-                {"type": "text", "text": user_prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{images[0]}"}},
-            ]
+            content = [{"type": "text", "text": user_prompt}]
+            content.extend(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                for image_b64 in images
+                if image_b64
+            )
+            msgs[1]["content"] = content
         payload = {
             "model": self.backend_model,
             "messages": msgs,
@@ -400,10 +403,13 @@ class OpenAICompatibleProvider(BaseProvider):
             {"role": "user", "content": prompt},
         ]
         if images:
-            msgs[1]["content"] = [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{images[0]}"}},
-            ]
+            content = [{"type": "text", "text": prompt}]
+            content.extend(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                for image_b64 in images
+                if image_b64
+            )
+            msgs[1]["content"] = content
         payload = {"model": self.backend_model, "messages": msgs, "temperature": 0.1}
         try:
             res = requests.post(OPENAI_COMPAT_URL, json=payload, timeout=LLM_TIMEOUT_SECONDS)
@@ -697,8 +703,10 @@ class ClassificationPipeline:
     def _brand_ambiguity_confidence_threshold(self) -> float:
         return _env_float("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", 0.85)
 
-    def _build_brand_disambiguation_query(self, raw_ocr_text: str) -> str:
+    def _build_brand_disambiguation_query(self, raw_ocr_text: str, current_brand: str = "") -> str:
         query_parts: list[str] = []
+        if current_brand:
+            query_parts.append(f"\"{current_brand.strip()}\"")
         domains = _extract_domains(raw_ocr_text)
         if domains:
             first_domain = domains[0]
@@ -758,9 +766,10 @@ class ClassificationPipeline:
         system_prompt: str,
         current_result: dict,
         raw_ocr_text: str,
+        images: Optional[list[str]] = None,
     ) -> tuple[dict | None, str]:
         current_brand = str(current_result.get("brand", "") or "").strip()
-        query = self._build_brand_disambiguation_query(raw_ocr_text)
+        query = self._build_brand_disambiguation_query(raw_ocr_text, current_brand=current_brand)
         if not query:
             return None, "no_search_query"
 
@@ -776,9 +785,11 @@ class ClassificationPipeline:
                 f"Current Brand Guess: {current_brand}\n"
                 f"Current Category: {current_result.get('category', '')}\n"
                 f"Web Evidence: {snippets}\n"
+                "Attached images are chronological recent frames from the ad. Direct on-frame logos, branded product text, and explicit product naming outweigh loose slogan-only or token-only web matches. "
                 "Confirm or correct the brand. Slogan-only matches are low-trust unless corroborated by exact brand text, a domain, market/country cues, or explicit web evidence. "
                 "Keep the category unless a corrected brand clearly changes it."
             ),
+            images=images,
         )
         if not isinstance(val_res, dict) or "brand" not in val_res:
             return None, "invalid_llm_response"
@@ -822,7 +833,12 @@ class ClassificationPipeline:
         image_b64: Optional[str],
         express_mode: bool = False,
     ) -> dict:
-        images = [image_b64] if (include_image and image_b64 and self.provider.supports_vision) else None
+        images: Optional[list[str]] = None
+        if include_image and self.provider.supports_vision and image_b64:
+            if isinstance(image_b64, list):
+                images = [value for value in image_b64 if value]
+            elif isinstance(image_b64, str):
+                images = [image_b64]
         res = self.provider.generate_json(system_prompt, user_prompt, images=images)
         logger.debug("llm_pipeline_initial_result: %s", res)
         if express_mode:
@@ -836,7 +852,12 @@ class ClassificationPipeline:
                 res["brand_ambiguity_reason"] = guard_reason
                 res["brand_evidence_strength"] = "weak_anchor"
                 if enable_search:
-                    refined, refine_reason = self._attempt_brand_disambiguation(system_prompt, res, raw_ocr_text)
+                    refined, refine_reason = self._attempt_brand_disambiguation(
+                        system_prompt,
+                        res,
+                        raw_ocr_text,
+                        images=images,
+                    )
                     if refined is not None:
                         refined["brand_ambiguity_flag"] = True
                         refined["brand_ambiguity_reason"] = guard_reason
@@ -1142,6 +1163,7 @@ class HybridLLM:
         force_multimodal=False,
         context_size=8192,
         express_mode=False,
+        evidence_images=None,
     ):
         if express_mode:
             system_prompt = (
@@ -1169,7 +1191,13 @@ class HybridLLM:
                 "Output STRICT JSON: {\"brand\": \"...\", \"category\": \"...\", \"confidence\": 0.0, \"reasoning\": \"...\"}"
             )
             user_prompt = f'Override: {override}\nOCR Text: "{text}"'
-        b64_img = self._pil_to_base64(tail_image) if tail_image else None
+
+        image_objects = list(evidence_images or [])
+        if not image_objects and tail_image is not None:
+            image_objects = [tail_image]
+        if image_objects and len(image_objects) > 1:
+            user_prompt += "\nAttached Images: chronological recent frames from earlier evidence to the final frame."
+        b64_img = [self._pil_to_base64(image) for image in image_objects if image is not None]
 
         try:
             provider_plugin = create_provider(provider, backend_model, context_size=int(context_size))
