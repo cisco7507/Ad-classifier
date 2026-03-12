@@ -1,5 +1,8 @@
 import sys
 import types
+import io
+import logging
+import concurrent.futures
 
 import pytest
 import requests
@@ -15,8 +18,10 @@ from video_service.core.llm import (
     HybridLLM,
     OpenAICompatibleProvider,
     OllamaQwenProvider,
+    SearchManager,
     create_provider,
 )
+from video_service.core import logging_setup
 
 pytestmark = pytest.mark.unit
 
@@ -164,6 +169,60 @@ def test_create_provider_routes_llama_server_to_openai_compat_json_mode():
     provider = create_provider("llama-server", "unsloth/Qwen3.5-4B-GGUF", context_size=8192)
     assert isinstance(provider, OpenAICompatibleProvider)
     assert provider.force_json_mode is True
+
+
+def test_search_manager_preserves_job_context_for_search_thread_logs(monkeypatch):
+    class _DummyDDGS:
+        _executor = None
+        threads = None
+
+        @classmethod
+        def get_executor(cls):
+            if cls._executor is None:
+                cls._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="DDGS")
+            return cls._executor
+
+        def text(self, query, max_results=3):
+            def _emit():
+                logging.getLogger("primp").info("response: %s", query)
+                return [{"body": "snippet"}]
+
+            return self.get_executor().submit(_emit).result()
+
+    monkeypatch.setattr("video_service.core.llm.DDGS", _DummyDDGS)
+
+    primp_logger = logging.getLogger("primp")
+    original_level = primp_logger.level
+    original_propagate = primp_logger.propagate
+    primp_logger.setLevel(logging.INFO)
+    primp_logger.propagate = False
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("job_id=%(job_id)s stage=%(stage)s %(message)s"))
+    handler.addFilter(logging_setup.ContextEnricherFilter())
+    primp_logger.addHandler(handler)
+
+    manager = SearchManager()
+    job_token = logging_setup.set_job_context("node-a-search-job")
+    stage_tokens = logging_setup.set_stage_context("llm", "search disambiguation")
+    try:
+        result = manager.search('"onparle" official brand slogan', timeout=2)
+    finally:
+        logging_setup.reset_stage_context(stage_tokens)
+        logging_setup.reset_job_context(job_token)
+        primp_logger.removeHandler(handler)
+        primp_logger.setLevel(original_level)
+        primp_logger.propagate = original_propagate
+
+    assert result == "snippet"
+    out = stream.getvalue()
+    assert "job_id=node-a-search-job" in out
+    assert "stage=llm" in out
+    assert '"onparle" official brand slogan' in out
+
+    if _DummyDDGS._executor is not None:
+        _DummyDDGS._executor.shutdown(wait=False, cancel_futures=True)
 
 
 def test_qwen_ollama_agent_uses_chat_endpoint_and_qwen_options(monkeypatch):

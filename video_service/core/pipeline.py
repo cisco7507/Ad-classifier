@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import concurrent.futures
 from contextvars import copy_context
+from video_service.core.logging_setup import bind_current_log_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.video_io import (
     extract_express_brand_frame,
@@ -1872,8 +1873,8 @@ def process_single_video(
             if res is None and enable_vision_board and not skip_gate_active:
                 parallel_t0 = time.time()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-                    vision_future = pool.submit(_do_vision)
-                    ocr_future = pool.submit(_do_ocr)
+                    vision_future = pool.submit(bind_current_log_context(_do_vision))
+                    ocr_future = pool.submit(bind_current_log_context(_do_ocr))
                     ocr_text = ocr_future.result()
                     sorted_vision, per_frame_vision = vision_future.result()
                 logger.info("parallel_ocr_vision: completed in %.2fs", time.time() - parallel_t0)

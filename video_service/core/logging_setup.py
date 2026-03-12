@@ -3,6 +3,7 @@ import os
 import asyncio
 import threading
 from pathlib import Path
+from functools import wraps
 from logging.handlers import RotatingFileHandler
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -18,6 +19,10 @@ _env_loaded = False
 _debug_enabled = False
 _memory_handler: "MemoryListHandler | None" = None
 _file_handler: RotatingFileHandler | None = None
+_fallback_context_lock = threading.Lock()
+_fallback_job_id = "-"
+_fallback_stage = "-"
+_fallback_stage_detail = "-"
 
 _NOISY_LOGGERS = (
     "uvicorn",
@@ -133,9 +138,23 @@ class MemoryListHandler(logging.Handler):
 
 class ContextEnricherFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.job_id = _job_id_var.get() or "-"
-        record.stage = _stage_var.get() or "-"
-        record.stage_detail = _stage_detail_var.get() or "-"
+        current_job_id = getattr(record, "job_id", None)
+        current_stage = getattr(record, "stage", None)
+        current_stage_detail = getattr(record, "stage_detail", None)
+
+        fallback_job_id, fallback_stage, fallback_stage_detail = get_log_fallback_context()
+
+        record.job_id = current_job_id if current_job_id not in {None, ""} else (_job_id_var.get() or "-")
+        if record.job_id == "-":
+            record.job_id = fallback_job_id or "-"
+
+        record.stage = current_stage if current_stage not in {None, ""} else (_stage_var.get() or "-")
+        if record.stage == "-":
+            record.stage = fallback_stage or "-"
+
+        record.stage_detail = current_stage_detail if current_stage_detail not in {None, ""} else (_stage_detail_var.get() or "-")
+        if record.stage_detail == "-":
+            record.stage_detail = fallback_stage_detail or "-"
         return True
 
 
@@ -340,6 +359,56 @@ def clear_recent_log_lines() -> None:
     if _memory_handler is None:
         return
     _memory_handler.clear()
+
+
+def capture_log_context() -> tuple[str, str, str]:
+    return (
+        _job_id_var.get() or "-",
+        _stage_var.get() or "-",
+        _stage_detail_var.get() or "-",
+    )
+
+
+def get_log_fallback_context() -> tuple[str, str, str]:
+    with _fallback_context_lock:
+        return _fallback_job_id, _fallback_stage, _fallback_stage_detail
+
+
+def set_log_fallback_context(job_id: str, stage: str, stage_detail: str) -> tuple[str, str, str]:
+    global _fallback_job_id, _fallback_stage, _fallback_stage_detail
+    with _fallback_context_lock:
+        previous = (_fallback_job_id, _fallback_stage, _fallback_stage_detail)
+        _fallback_job_id = job_id or "-"
+        _fallback_stage = stage or "-"
+        _fallback_stage_detail = stage_detail or "-"
+        return previous
+
+
+def reset_log_fallback_context(previous: tuple[str, str, str] | None = None) -> None:
+    global _fallback_job_id, _fallback_stage, _fallback_stage_detail
+    with _fallback_context_lock:
+        if previous is None:
+            _fallback_job_id = "-"
+            _fallback_stage = "-"
+            _fallback_stage_detail = "-"
+        else:
+            _fallback_job_id, _fallback_stage, _fallback_stage_detail = previous
+
+
+def bind_current_log_context(func: Callable) -> Callable:
+    job_id, stage, stage_detail = capture_log_context()
+
+    @wraps(func)
+    def _wrapped(*args, **kwargs):
+        job_token = set_job_context(job_id)
+        stage_tokens = set_stage_context(stage, stage_detail)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            reset_stage_context(stage_tokens)
+            reset_job_context(job_token)
+
+    return _wrapped
 
 
 def set_job_context(job_id: str) -> Token:

@@ -17,6 +17,12 @@ import requests
 from PIL import Image
 from ddgs import DDGS
 
+from video_service.core.logging_setup import (
+    bind_current_log_context,
+    capture_log_context,
+    reset_log_fallback_context,
+    set_log_fallback_context,
+)
 from video_service.core.utils import logger
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
@@ -26,40 +32,83 @@ OPENAI_COMPAT_URL = os.environ.get("OPENAI_COMPAT_URL", "http://localhost:1234/v
 
 class SearchManager:
     def __init__(self):
+        self._ensure_ddgs_executor_context()
         self.queue = queue.Queue()
         self.client = DDGS()
         threading.Thread(target=self._worker, daemon=True).start()
 
+    @staticmethod
+    def _ensure_ddgs_executor_context() -> None:
+        if not hasattr(DDGS, "get_executor"):
+            return
+
+        original = getattr(DDGS, "get_executor")
+        if getattr(original, "__name__", "") == "_context_get_executor":
+            return
+
+        class _ContextThreadPoolExecutor(concurrent.futures.ThreadPoolExecutor):
+            def submit(self, fn, /, *args, **kwargs):
+                wrapped = bind_current_log_context(lambda: fn(*args, **kwargs))
+                return super().submit(wrapped)
+
+        def _shutdown_executor(executor) -> None:
+            if executor is None or not hasattr(executor, "shutdown"):
+                return
+            try:
+                executor.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=False)
+            except Exception:
+                pass
+
+        def _context_get_executor(cls):
+            executor = getattr(cls, "_executor", None)
+            if not isinstance(executor, _ContextThreadPoolExecutor):
+                _shutdown_executor(executor)
+                cls._executor = _ContextThreadPoolExecutor(
+                    max_workers=getattr(cls, "threads", None),
+                    thread_name_prefix="DDGS",
+                )
+            return cls._executor
+
+        DDGS.get_executor = classmethod(_context_get_executor)
+
     def _worker(self):
         while True:
-            query, future = self.queue.get()
+            task, fallback_context, future = self.queue.get()
             max_retries = 3
             base_delay = 2.0
             success = False
             attempt = 0
+            fallback_token = set_log_fallback_context(*fallback_context)
 
-            while attempt < max_retries and not success:
-                try:
-                    results = self.client.text(query, max_results=3)
-                    snippets = " | ".join([r.get("body", "") for r in results if isinstance(r, dict)])
-                    future.set_result(snippets if snippets else None)
-                    success = True
-                except Exception as exc:
-                    attempt += 1
-                    if attempt < max_retries:
-                        backoff_sleep = (base_delay**attempt) + random.uniform(0.8, 2.5)
-                        time.sleep(backoff_sleep)
-                        self.client = DDGS()
-                    else:
-                        future.set_exception(exc)
+            try:
+                while attempt < max_retries and not success:
+                    try:
+                        results = task()
+                        snippets = " | ".join([r.get("body", "") for r in results if isinstance(r, dict)])
+                        future.set_result(snippets if snippets else None)
+                        success = True
+                    except Exception as exc:
+                        attempt += 1
+                        if attempt < max_retries:
+                            backoff_sleep = (base_delay**attempt) + random.uniform(0.8, 2.5)
+                            time.sleep(backoff_sleep)
+                            self.client = DDGS()
+                        else:
+                            future.set_exception(exc)
+            finally:
+                reset_log_fallback_context(fallback_token)
+                self.queue.task_done()
 
-            self.queue.task_done()
             if success:
                 time.sleep(random.uniform(0.8, 2.5))
 
     def search(self, query, timeout=45):
         future = concurrent.futures.Future()
-        self.queue.put((query, future))
+        fallback_context = capture_log_context()
+        task = bind_current_log_context(lambda: self.client.text(query, max_results=3))
+        self.queue.put((task, fallback_context, future))
         try:
             return future.result(timeout=timeout)
         except Exception:

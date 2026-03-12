@@ -46,6 +46,7 @@ from video_service.core.logging_setup import (
     clear_recent_log_lines,
     configure_logging,
     get_recent_log_lines,
+    job_context,
     subscribe_log_stream,
 )
 configure_logging()
@@ -1658,13 +1659,14 @@ def _create_job(
                 ),
             )
     _counters["submitted"] += 1
-    logger.info(
-        "job_created: job_id=%s mode=%s url=%s benchmark_suite_id=%s",
-        job_id,
-        mode,
-        url,
-        benchmark_suite_id or "-",
-    )
+    with job_context(job_id):
+        logger.info(
+            "job_created: job_id=%s mode=%s url=%s benchmark_suite_id=%s",
+            job_id,
+            mode,
+            url,
+            benchmark_suite_id or "-",
+        )
     return job_id
 
 
@@ -2344,7 +2346,8 @@ async def stream_job_events(req: Request, job_id: str):
 
         while True:
             if await req.is_disconnected():
-                logger.debug("job_stream_disconnected: job_id=%s", job_id)
+                with job_context(job_id):
+                    logger.debug("job_stream_disconnected: job_id=%s", job_id)
                 break
 
             with closing(get_db()) as conn:
@@ -2440,8 +2443,9 @@ async def delete_job(req: Request, job_id: str):
     with closing(get_db()) as conn:
         with conn:
             conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
-    mark_job_aborted(job_id)
-    logger.info("job_deleted: job_id=%s", job_id)
+    with job_context(job_id):
+        mark_job_aborted(job_id)
+        logger.info("job_deleted: job_id=%s", job_id)
     return {"status": "deleted"}
 
 

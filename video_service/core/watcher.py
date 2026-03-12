@@ -21,6 +21,7 @@ from typing import Optional
 from video_service.app.models.job import JobSettings
 from video_service.core.cluster import cluster
 from video_service.db.database import get_db
+from video_service.core.logging_setup import job_context
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,8 @@ def _submit_watch_job(file_path: str) -> str:
                     "[]",
                 ),
             )
-    logger.info("watch_job_submitted: job_id=%s file=%s", job_id, file_path)
+    with job_context(job_id):
+        logger.info("watch_job_submitted: job_id=%s file=%s", job_id, file_path)
     return job_id
 
 

@@ -1,8 +1,11 @@
 import pytest
 import pandas as pd
 import threading
+import logging
+import io
 
 from video_service.workers import worker
+from video_service.core import logging_setup
 
 pytestmark = pytest.mark.unit
 
@@ -88,3 +91,72 @@ def test_job_heartbeat_updates_updated_at_and_stops(monkeypatch):
 
     assert calls
     assert calls[0][1] == ("node-a-heartbeat-test",)
+
+
+def test_job_heartbeat_logs_with_job_context(monkeypatch):
+    logger = logging.getLogger(worker.__name__)
+    original_level = logger.level
+    original_propagate = logger.propagate
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("job_id=%(job_id)s %(message)s"))
+    handler.addFilter(logging_setup.ContextEnricherFilter())
+    logger.addHandler(handler)
+
+    calls = {"count": 0}
+
+    def _fake_execute(sql: str, params: tuple, *, attempts: int = 10):
+        calls["count"] += 1
+        stop_event.set()
+
+    stop_event = threading.Event()
+    monkeypatch.setattr(worker, "_execute_job_update_with_retry", _fake_execute)
+
+    job_token = logging_setup.set_job_context("node-a-heartbeat-log")
+    stage_tokens = logging_setup.set_stage_context("claim", "worker claimed job")
+    try:
+        hb_thread = worker._start_job_heartbeat(
+            "node-a-heartbeat-log",
+            stop_event,
+            interval_seconds=0.01,
+        )
+        hb_thread.join(timeout=1.0)
+    finally:
+        logging_setup.reset_stage_context(stage_tokens)
+        logging_setup.reset_job_context(job_token)
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+
+    assert calls["count"] == 1
+    assert "job_id=node-a-heartbeat-log" in stream.getvalue()
+
+
+def test_set_stage_logs_with_job_context_without_ambient_state(monkeypatch):
+    logger = logging.getLogger(worker.__name__)
+    original_level = logger.level
+    original_propagate = logger.propagate
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("job_id=%(job_id)s stage=%(stage)s %(message)s"))
+    handler.addFilter(logging_setup.ContextEnricherFilter())
+    logger.addHandler(handler)
+
+    monkeypatch.setattr(worker, "_execute_job_update_with_retry", lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "_append_job_event", lambda *args, **kwargs: None)
+
+    try:
+        worker._set_stage("node-a-stage-log", "ocr", "ocr engine=easyocr")
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+
+    out = stream.getvalue()
+    assert "job_id=node-a-stage-log" in out
+    assert "stage=ocr" in out
+    assert "ocr engine=easyocr" in out

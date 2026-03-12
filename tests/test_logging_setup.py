@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import queue
+from logging.handlers import QueueHandler
 import transformers.utils.logging as hf_logging
 
 import pytest
@@ -20,6 +22,59 @@ def test_noisy_filter_suppresses_httpcore_debug_when_not_debug(monkeypatch):
     assert filt.filter(_record("httpx", logging.INFO)) is False
     assert filt.filter(_record("httpcore.http11", logging.WARNING)) is True
     assert filt.filter(_record("video_service.core", logging.INFO)) is True
+
+
+def test_context_filter_preserves_existing_record_fields(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+
+    filt = logging_setup.ContextEnricherFilter()
+    record = _record("video_service.core", logging.INFO)
+    record.job_id = "node-a-job-1"
+    record.stage = "ocr"
+    record.stage_detail = "running OCR"
+
+    logging_setup.reset_job_context()
+    logging_setup.reset_stage_context()
+    assert filt.filter(record) is True
+    assert record.job_id == "node-a-job-1"
+    assert record.stage == "ocr"
+    assert record.stage_detail == "running OCR"
+
+
+def test_queue_handler_preserves_worker_job_context_across_process_boundary(monkeypatch):
+    monkeypatch.setattr(logging_setup, "_configured", False)
+    monkeypatch.setattr(logging_setup, "_env_loaded", True)
+
+    q: queue.Queue[logging.LogRecord] = queue.Queue()
+    qh = QueueHandler(q)
+    qh.addFilter(logging_setup.ContextEnricherFilter())
+
+    logger = logging.getLogger("tests.queue-context")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.addHandler(qh)
+    logger.setLevel(logging.INFO)
+
+    job_token = logging_setup.set_job_context("node-a-job-queue")
+    stage_tokens = logging_setup.set_stage_context("vision", "parallel task")
+    try:
+        logger.info("queued worker log")
+    finally:
+        logging_setup.reset_stage_context(stage_tokens)
+        logging_setup.reset_job_context(job_token)
+        logger.removeHandler(qh)
+
+    record = q.get_nowait()
+    assert record.job_id == "node-a-job-queue"
+    assert record.stage == "vision"
+    assert record.stage_detail == "parallel task"
+
+    logging_setup.reset_job_context()
+    logging_setup.reset_stage_context()
+    assert logging_setup.ContextEnricherFilter().filter(record) is True
+    assert record.job_id == "node-a-job-queue"
+    assert record.stage == "vision"
 
 
 def test_noisy_filter_allows_noisy_debug_in_debug_mode(monkeypatch):

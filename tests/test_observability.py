@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import sqlite3
+import concurrent.futures
 from pathlib import Path
 
 import pytest
@@ -153,3 +154,38 @@ def test_logging_context_filter_injects_job_and_stage():
     assert "job_id=node-a-job-1" in out
     assert "stage=llm" in out
     assert "classification call" in out
+
+
+def test_bind_current_log_context_preserves_job_id_in_thread_pool():
+    importlib.reload(logging_setup)
+
+    logger = logging.getLogger("tests.observability.thread-pool")
+    logger.handlers.clear()
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("job_id=%(job_id)s stage=%(stage)s %(message)s"))
+    handler.addFilter(logging_setup.ContextEnricherFilter())
+    logger.addHandler(handler)
+
+    job_token = logging_setup.set_job_context("node-a-job-2")
+    stage_tokens = logging_setup.set_stage_context("vision", "parallel vision task")
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                logging_setup.bind_current_log_context(
+                    lambda: logger.info("thread pool task")
+                )
+            )
+            future.result(timeout=1.0)
+    finally:
+        logging_setup.reset_stage_context(stage_tokens)
+        logging_setup.reset_job_context(job_token)
+        logger.removeHandler(handler)
+
+    out = stream.getvalue()
+    assert "job_id=node-a-job-2" in out
+    assert "stage=vision" in out
+    assert "thread pool task" in out

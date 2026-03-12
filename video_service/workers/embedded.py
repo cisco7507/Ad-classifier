@@ -16,6 +16,7 @@ from logging.handlers import QueueHandler, QueueListener
 from multiprocessing.managers import SyncManager
 
 from video_service.core.concurrency import get_worker_processes_config
+from video_service.core.logging_setup import ContextEnricherFilter
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def _worker_child_main(index: int, log_queue: multiprocessing.Queue, abort_dict:
         
     # 2. Pipe all worker logs to the parent process's queue
     qh = QueueHandler(log_queue)
+    qh.addFilter(ContextEnricherFilter())
     # We do NOT want the QueueHandler to format the string here; 
     # we want the parent to format it so it hits the MemoryListHandler identically.
     root.addHandler(qh)

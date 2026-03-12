@@ -6,6 +6,7 @@ from transformers import AutoProcessor, AutoModel
 import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
+from video_service.core.logging_setup import job_context
 from video_service.core.utils import logger, device, TORCH_DTYPE
 from video_service.core.category_mapping import (
     CATEGORY_MAPPING_STATE,
@@ -519,63 +520,64 @@ class CategoryMapper:
         predicted_brand="",
         ocr_summary="",
     ):
-        raw_value = str(raw_category or "").strip()
-        if raw_value.lower() in {"", "unknown", "none", "n/a", "null"}:
+        with job_context(str(job_id or "-")):
+            raw_value = str(raw_category or "").strip()
+            if raw_value.lower() in {"", "unknown", "none", "n/a", "null"}:
+                logger.info(
+                    "category_map job_id=%s raw=%r skipped=unknown_or_empty",
+                    job_id or "",
+                    raw_category,
+                )
+                return {
+                    "canonical_category": raw_value or "Unknown",
+                    "category_id": "",
+                    "category_match_method": "skipped_unknown",
+                    "category_match_score": None,
+                    "mapping_query_text": "",
+                }
+
+            if not self.active and CATEGORY_MAPPING_STATE.enabled:
+                self._attempt_reactivate()
+            if not self.active:
+                return {
+                    "canonical_category": raw_category,
+                    "category_id": "",
+                    "category_match_method": "disabled",
+                    "category_match_score": None,
+                }
+
+            query_text = self._resolve_query_text(
+                raw_category=raw_category,
+                suggested_categories_text=suggested_categories_text,
+                predicted_brand=predicted_brand,
+                ocr_summary=ocr_summary,
+            )
+            query_embedding = self.embedder.encode(
+                query_text,
+                convert_to_tensor=True,
+                show_progress_bar=False,
+            )
+            scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
+            best_match_idx = torch.argmax(scores).item()
+            score = float(scores[best_match_idx].item())
+
+            canonical = self.categories[best_match_idx]
+            category_id = str(self.cat_to_id.get(canonical, ""))
             logger.info(
-                "category_map job_id=%s raw=%r skipped=unknown_or_empty",
+                "category_map job_id=%s raw=%r matched=%r id=%s score=%.6f",
                 job_id or "",
                 raw_category,
+                canonical,
+                category_id,
+                score,
             )
             return {
-                "canonical_category": raw_value or "Unknown",
-                "category_id": "",
-                "category_match_method": "skipped_unknown",
-                "category_match_score": None,
-                "mapping_query_text": "",
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+                "mapping_query_text": query_text,
             }
-
-        if not self.active and CATEGORY_MAPPING_STATE.enabled:
-            self._attempt_reactivate()
-        if not self.active:
-            return {
-                "canonical_category": raw_category,
-                "category_id": "",
-                "category_match_method": "disabled",
-                "category_match_score": None,
-            }
-
-        query_text = self._resolve_query_text(
-            raw_category=raw_category,
-            suggested_categories_text=suggested_categories_text,
-            predicted_brand=predicted_brand,
-            ocr_summary=ocr_summary,
-        )
-        query_embedding = self.embedder.encode(
-            query_text,
-            convert_to_tensor=True,
-            show_progress_bar=False,
-        )
-        scores = util.cos_sim(query_embedding, self.category_embeddings)[0]
-        best_match_idx = torch.argmax(scores).item()
-        score = float(scores[best_match_idx].item())
-
-        canonical = self.categories[best_match_idx]
-        category_id = str(self.cat_to_id.get(canonical, ""))
-        logger.info(
-            "category_map job_id=%s raw=%r matched=%r id=%s score=%.6f",
-            job_id or "",
-            raw_category,
-            canonical,
-            category_id,
-            score,
-        )
-        return {
-            "canonical_category": canonical,
-            "category_id": category_id,
-            "category_match_method": "embeddings",
-            "category_match_score": score,
-            "mapping_query_text": query_text,
-        }
 
     def get_closest_official_category(
         self,
@@ -593,14 +595,15 @@ class CategoryMapper:
             ocr_summary=ocr_summary,
         )
         if match["category_match_method"] == "disabled":
-            logger.info(
-                "category_map job_id=%s raw=%r matched=%r id=%s score=%s",
-                job_id or "",
-                raw_category,
-                raw_category,
-                "",
-                "n/a",
-            )
+            with job_context(str(job_id or "-")):
+                logger.info(
+                    "category_map job_id=%s raw=%r matched=%r id=%s score=%s",
+                    job_id or "",
+                    raw_category,
+                    raw_category,
+                    "",
+                    "n/a",
+                )
         return match["canonical_category"], match["category_id"]
 
     def get_diagnostics(self):

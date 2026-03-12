@@ -26,7 +26,9 @@ import cv2
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from video_service.core.logging_setup import (
+    bind_current_log_context,
     configure_logging,
+    job_context,
     reset_job_context,
     reset_stage_context,
     set_job_context,
@@ -252,35 +254,36 @@ def _record_job_stats(
     category_id: str,
     duration_seconds: float | None,
 ) -> None:
-    source = (source_url or "").strip()
-    source_type = "url" if source.startswith(("http://", "https://")) else "local"
-    try:
-        with closing(get_db()) as conn:
-            with conn:
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO job_stats
-                    (id, status, mode, brand, category, category_id, duration_seconds,
-                     scan_mode, provider, model_name, ocr_engine, source_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        job_id,
-                        status,
-                        mode or "",
-                        brand or "",
-                        category or "",
-                        category_id or "",
-                        duration_seconds,
-                        settings.get("scan_mode", ""),
-                        settings.get("provider", ""),
-                        settings.get("model_name", ""),
-                        settings.get("ocr_engine", ""),
-                        source_type,
-                    ),
-                )
-    except Exception as exc:
-        logger.warning("job_stats_write_failed: %s", exc)
+    with job_context(job_id):
+        source = (source_url or "").strip()
+        source_type = "url" if source.startswith(("http://", "https://")) else "local"
+        try:
+            with closing(get_db()) as conn:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO job_stats
+                        (id, status, mode, brand, category, category_id, duration_seconds,
+                         scan_mode, provider, model_name, ocr_engine, source_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            job_id,
+                            status,
+                            mode or "",
+                            brand or "",
+                            category or "",
+                            category_id or "",
+                            duration_seconds,
+                            settings.get("scan_mode", ""),
+                            settings.get("provider", ""),
+                            settings.get("model_name", ""),
+                            settings.get("ocr_engine", ""),
+                            source_type,
+                        ),
+                    )
+        except Exception as exc:
+            logger.warning("job_stats_write_failed: %s", exc)
 
 
 def _extract_agent_ocr_text(events: list[str]) -> str:
@@ -320,78 +323,80 @@ def _maybe_export_result_json(
     error_message: str | None = None,
 ) -> None:
     """Write JSON result for watch-folder ingested local files when configured."""
-    if not WATCH_OUTPUT_DIR:
-        return
-    if not source_url:
-        return
-    if source_url.startswith(("http://", "https://")):
-        return
-    if not _is_path_within_roots(source_url, WATCH_ROOTS):
-        return
+    with job_context(job_id):
+        if not WATCH_OUTPUT_DIR:
+            return
+        if not source_url:
+            return
+        if source_url.startswith(("http://", "https://")):
+            return
+        if not _is_path_within_roots(source_url, WATCH_ROOTS):
+            return
 
-    try:
-        os.makedirs(WATCH_OUTPUT_DIR, exist_ok=True)
-        source_name = os.path.splitext(os.path.basename(source_url))[0] or job_id
-        safe_name = re.sub(r"[^A-Za-z0-9_.\-]", "_", source_name)
-        output_path = os.path.join(WATCH_OUTPUT_DIR, f"{safe_name}.json")
+        try:
+            os.makedirs(WATCH_OUTPUT_DIR, exist_ok=True)
+            source_name = os.path.splitext(os.path.basename(source_url))[0] or job_id
+            safe_name = re.sub(r"[^A-Za-z0-9_.\-]", "_", source_name)
+            output_path = os.path.join(WATCH_OUTPUT_DIR, f"{safe_name}.json")
 
-        parsed_result = None
-        if result_json:
-            try:
-                parsed_result = json.loads(result_json)
-            except Exception:
-                parsed_result = result_json
+            parsed_result = None
+            if result_json:
+                try:
+                    parsed_result = json.loads(result_json)
+                except Exception:
+                    parsed_result = result_json
 
-        payload = {
-            "job_id": job_id,
-            "source_file": source_url,
-            "status": status,
-            "error": _short(error_message, 1000) if error_message else None,
-            "result": parsed_result,
-        }
+            payload = {
+                "job_id": job_id,
+                "source_file": source_url,
+                "status": status,
+                "error": _short(error_message, 1000) if error_message else None,
+                "result": parsed_result,
+            }
 
-        tmp_path = f"{output_path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, output_path)
+            tmp_path = f"{output_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, output_path)
 
-        logger.info("result_exported: %s", output_path)
-    except Exception as exc:
-        logger.error("result_export_failed: job=%s error=%s", job_id, exc)
+            logger.info("result_exported: %s", output_path)
+        except Exception as exc:
+            logger.error("result_export_failed: job=%s error=%s", job_id, exc)
 
 
 def _append_job_event(job_id: str, message: str) -> None:
-    attempts = 0
-    while attempts < 8:
-        attempts += 1
-        try:
-            with closing(get_db()) as conn:
-                conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                events = []
-                if row and row["events"]:
-                    try:
-                        events = json.loads(row["events"])
-                    except Exception:
-                        events = []
+    with job_context(job_id):
+        attempts = 0
+        while attempts < 8:
+            attempts += 1
+            try:
+                with closing(get_db()) as conn:
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute("SELECT events FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                    events = []
+                    if row and row["events"]:
+                        try:
+                            events = json.loads(row["events"])
+                        except Exception:
+                            events = []
 
-                events.append(message)
-                # Keep event payload bounded.
-                events = events[-400:]
-                conn.execute(
-                    "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (json.dumps(events), job_id),
-                )
-                conn.commit()
-            return
-        except sqlite3.OperationalError as exc:
-            if "locked" not in str(exc).lower() or attempts >= 8:
+                    events.append(message)
+                    # Keep event payload bounded.
+                    events = events[-400:]
+                    conn.execute(
+                        "UPDATE jobs SET events = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (json.dumps(events), job_id),
+                    )
+                    conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempts >= 8:
+                    logger.warning("event_append_failed: %s", exc)
+                    return
+                time.sleep(0.05 * attempts)
+            except Exception as exc:
                 logger.warning("event_append_failed: %s", exc)
                 return
-            time.sleep(0.05 * attempts)
-        except Exception as exc:
-            logger.warning("event_append_failed: %s", exc)
-            return
 
 
 def _execute_job_update_with_retry(sql: str, params: tuple, *, attempts: int = 10) -> None:
@@ -430,7 +435,7 @@ def _start_job_heartbeat(
                 logger.warning("job_heartbeat_failed: %s", exc)
 
     thread = threading.Thread(
-        target=_heartbeat_loop,
+        target=bind_current_log_context(_heartbeat_loop),
         name=f"job-heartbeat-{_sanitize_job_id(job_id)}",
         daemon=True,
     )
@@ -446,28 +451,29 @@ def _set_stage(
     status: str | None = None,
     error: str | None = None,
 ) -> None:
-    stage_name = stage or "-"
-    detail_msg = _short(detail)
-    set_stage_context(stage_name, detail_msg)
+    with job_context(job_id):
+        stage_name = stage or "-"
+        detail_msg = _short(detail)
+        set_stage_context(stage_name, detail_msg)
 
-    sql = "UPDATE jobs SET stage = ?, stage_detail = ?, updated_at = CURRENT_TIMESTAMP"
-    params: list[str] = [stage_name, detail_msg]
-    if status is not None:
-        sql += ", status = ?"
-        params.append(status)
-    if error is not None:
-        sql += ", error = ?"
-        params.append(error[:4096])
-    sql += " WHERE id = ?"
-    params.append(job_id)
+        sql = "UPDATE jobs SET stage = ?, stage_detail = ?, updated_at = CURRENT_TIMESTAMP"
+        params: list[str] = [stage_name, detail_msg]
+        if status is not None:
+            sql += ", status = ?"
+            params.append(status)
+        if error is not None:
+            sql += ", error = ?"
+            params.append(error[:4096])
+        sql += " WHERE id = ?"
+        params.append(job_id)
 
-    _execute_job_update_with_retry(sql, tuple(params))
+        _execute_job_update_with_retry(sql, tuple(params))
 
-    logger.info("%s", detail_msg)
-    _append_job_event(
-        job_id,
-        f"{datetime.now(timezone.utc).isoformat()} {stage_name}: {detail_msg}",
-    )
+        logger.info("%s", detail_msg)
+        _append_job_event(
+            job_id,
+            f"{datetime.now(timezone.utc).isoformat()} {stage_name}: {detail_msg}",
+        )
 
 
 def _stage_callback(job_id: str):
@@ -510,12 +516,11 @@ def claim_and_process_job() -> bool:
         claim_conn.commit()
         claim_conn.close()
         claim_conn = None
+        job_token = set_job_context(job_id)
+        set_stage_context("claim", "worker claimed job")
         processing_start = time.monotonic()
         heartbeat_stop_event = threading.Event()
         heartbeat_thread = _start_job_heartbeat(job_id, heartbeat_stop_event, interval_seconds=60.0)
-
-        job_token = set_job_context(job_id)
-        set_stage_context("claim", "worker claimed job")
         logger.info("worker claimed job (device=%s)", DEVICE)
         _append_job_event(
             job_id,
