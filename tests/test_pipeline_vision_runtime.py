@@ -469,6 +469,137 @@ def test_pipeline_skips_category_rerank_for_confident_mapping(monkeypatch):
     assert not any(attempt.get("attempt_type") == "category_rerank" for attempt in attempts)
 
 
+def test_pipeline_category_rerank_refines_broad_family_mapping_with_local_evidence(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Detergents",
+            "Dry Cleaning and Laundry Facilities",
+            "Household cleaners",
+            "Household Products",
+            "Laundry Care",
+        ]
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            if raw == "Consumer Goods / Household Cleaning & Laundry":
+                return {
+                    "canonical_category": "Household cleaners",
+                    "category_id": "5233",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 0.7430,
+                }
+            if raw == "Laundry Care":
+                return {
+                    "canonical_category": "Laundry Care",
+                    "category_id": "9275",
+                    "category_match_method": "embeddings",
+                    "category_match_score": 1.0,
+                }
+            return {
+                "canonical_category": raw or "Unknown",
+                "category_id": "",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.5,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=8,
+        ):
+            query = str(raw_category or "")
+            if query == "Consumer Goods / Household Cleaning & Laundry":
+                return [
+                    ("Household cleaners", 0.7430),
+                    ("Laundry Care", 0.6909),
+                    ("Dry Cleaning and Laundry Facilities", 0.6820),
+                    ("Household Products", 0.6591),
+                    ("Detergents", 0.6300),
+                ][:top_k]
+            if "Tide" in query and "Downy" in query and "laundry" in query.lower():
+                return [
+                    ("Laundry Care", 0.6909),
+                    ("Detergents", 0.6300),
+                    ("Household cleaners", 0.5810),
+                ][:top_k]
+            return [
+                ("Household cleaners", 0.7430),
+                ("Laundry Care", 0.6909),
+            ][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "Concours Tide & Downy pour la rentrée scolaire."
+
+    rerank_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Tide & Downy",
+                "category": "Consumer Goods / Household Cleaning & Laundry",
+                "confidence": 1.0,
+                "reasoning": (
+                    "The ad promotes Tide detergent and Downy fabric softener products "
+                    "for back-to-school laundry use."
+                ),
+            }
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls.append({"args": args, "kwargs": kwargs})
+            return (
+                {
+                    "brand": "Tide & Downy",
+                    "category": "Laundry Care",
+                    "confidence": 0.95,
+                    "reasoning": "Laundry Care is the strongest nearby in-family category.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/tide-downy.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-rerank-4",
+    )
+
+    assert len(rerank_calls) == 1
+    assert row[2] == "9275"
+    assert row[3] == "Laundry Care"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and "family_evidence_prefers='Laundry Care'" in str(attempt.get("trigger_reason", ""))
+        and attempt.get("status") == "accepted"
+        for attempt in attempts
+    )
+
+
 def test_pipeline_category_rerank_triggers_for_weak_freeform_mapping_without_extra_probe_contradiction(monkeypatch):
     class _DummyMapper:
         categories = [
@@ -2542,7 +2673,7 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
 
     monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
 
-    candidates, evidence_neighbors = pipeline_module._build_category_rerank_candidates(
+    candidates, evidence_neighbors, primary_candidates = pipeline_module._build_category_rerank_candidates(
         raw_category="Hair Care",
         current_match={
             "canonical_category": "Haircare products",
@@ -2561,5 +2692,6 @@ def test_category_rerank_candidates_include_evidence_neighbors(monkeypatch):
         "Hair Care Services",
         "Hair removal product",
     ]
+    assert primary_candidates[0][0] == "Haircare products"
     assert "Shampoo/Conditioner" in labels
     assert evidence_neighbors[0][0] == "Shampoo/Conditioner"
