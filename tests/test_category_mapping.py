@@ -68,3 +68,39 @@ def test_select_mapping_input_text_fallback_order_without_suggested_categories_b
         )
         == "Long OCR summary text"
     )
+
+
+def test_select_mapping_input_text_prefers_evidence_for_generic_freeform_category():
+    assert (
+        select_mapping_input_text(
+            raw_category="Technology / Internet Services",
+            predicted_brand="Google",
+            ocr_summary="Google Pixel 9",
+            exact_taxonomy_match=False,
+        )
+        == "Google\nGoogle Pixel 9"
+    )
+
+
+def test_select_mapping_input_text_preserves_exact_taxonomy_match():
+    assert (
+        select_mapping_input_text(
+            raw_category="Language Learning",
+            predicted_brand="OnParle",
+            ocr_summary="French lessons",
+            exact_taxonomy_match=True,
+        )
+        == "Language Learning"
+    )
+
+
+def test_select_mapping_input_text_keeps_specific_freeform_category():
+    assert (
+        select_mapping_input_text(
+            raw_category="Consumer Goods / Household Cleaning & Laundry",
+            predicted_brand="Tide & Downy",
+            ocr_summary="Tide Downy laundry detergent",
+            exact_taxonomy_match=False,
+        )
+        == "Consumer Goods / Household Cleaning & Laundry"
+    )

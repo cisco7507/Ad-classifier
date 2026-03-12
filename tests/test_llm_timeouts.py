@@ -6,6 +6,7 @@ import concurrent.futures
 
 import pytest
 import requests
+from PIL import Image
 
 # `video_service.core.llm` imports `ddgs`; stub it for unit tests.
 if "ddgs" not in sys.modules:
@@ -113,6 +114,33 @@ def test_query_pipeline_timeout_returns_structured_error(monkeypatch):
 
     assert isinstance(result, dict)
     assert result.get("error") == "Timeout after 300s"
+
+
+def test_query_pipeline_openai_compat_includes_all_recent_images(monkeypatch):
+    calls: list[dict] = []
+
+    def _fake_post(url, json=None, timeout=None):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _DummyResponse({"choices": [{"message": {"content": '{"brand":"B","category":"C","confidence":0.9,"reasoning":"ok"}'}}]})
+
+    llm = HybridLLM()
+    monkeypatch.setattr("video_service.core.llm.requests.post", _fake_post)
+
+    image_one = Image.new("RGB", (80, 80), color="red")
+    image_two = Image.new("RGB", (80, 80), color="blue")
+    llm.query_pipeline(
+        provider="LM Studio",
+        backend_model="local-model",
+        text="sample",
+        evidence_images=[image_one, image_two],
+        enable_search=False,
+        force_multimodal=True,
+    )
+
+    payload = calls[0]["json"]
+    content = payload["messages"][1]["content"]
+    assert content[0]["type"] == "text"
+    assert len([item for item in content if item["type"] == "image_url"]) == 2
 
 
 def test_query_agent_timeout_returns_tool_error(monkeypatch):
@@ -428,8 +456,47 @@ def test_brand_ambiguity_guard_triggers_web_disambiguation(monkeypatch):
     assert result["brand_disambiguation_reason"] == "brand_corrected_by_web"
     assert len(provider.calls) == 2
     assert len(search_client.queries) == 1
-    assert "Telus" not in search_client.queries[0]
+    assert '"Telus"' in search_client.queries[0]
     assert "whereverwego" in search_client.queries[0]
+
+
+def test_brand_ambiguity_guard_disambiguation_uses_current_brand_and_images(monkeypatch):
+    provider = _FakeProvider(
+        [
+            {
+                "brand": "Google",
+                "category": "Technology / Internet Services",
+                "confidence": 0.99,
+                "reasoning": "The final frame shows the Google G logo.",
+            },
+            {
+                "brand": "Google",
+                "category": "Technology / Internet Services",
+                "confidence": 0.95,
+                "reasoning": "Recent frames and the logo confirm Google.",
+            },
+        ]
+    )
+    provider.supports_vision = True
+    search_client = _FakeSearchClient("Google Pixel official slogan")
+    pipeline = ClassificationPipeline(provider=provider, search_client=search_client, validation_threshold=0.7)
+
+    monkeypatch.setenv("BRAND_AMBIGUITY_GUARD", "true")
+    monkeypatch.setenv("BRAND_AMBIGUITY_CONFIDENCE_THRESHOLD", "0.85")
+
+    result = pipeline.classify(
+        system_prompt="sys",
+        user_prompt="user",
+        raw_ocr_text="onparle",
+        enable_search=True,
+        include_image=True,
+        image_b64=["image-a", "image-b"],
+    )
+
+    assert result["brand"] == "Google"
+    assert len(search_client.queries) == 1
+    assert '"Google"' in search_client.queries[0]
+    assert provider.calls[1]["images"] == ["image-a", "image-b"]
 
 
 def test_brand_ambiguity_guard_skips_when_exact_brand_anchor_present(monkeypatch):

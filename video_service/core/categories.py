@@ -302,11 +302,13 @@ class CategoryMapper:
         predicted_brand: str = "",
         ocr_summary: str = "",
     ) -> str:
+        raw_norm = str(raw_category or "").strip()
         return select_mapping_input_text(
-            raw_category=raw_category,
+            raw_category=raw_norm,
             suggested_categories_text=suggested_categories_text,
             predicted_brand=predicted_brand,
             ocr_summary=ocr_summary,
+            exact_taxonomy_match=raw_norm in set(self.categories),
         )
 
     def build_mapper_vector_plot(

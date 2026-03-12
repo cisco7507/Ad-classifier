@@ -21,6 +21,46 @@ def normalize_whitespace(value: str) -> str:
     return " ".join(str(value).split())
 
 
+def _mapping_text_has_signal(value: str) -> bool:
+    tokens = [token for token in normalize_whitespace(value).split() if token]
+    if not tokens:
+        return False
+    return len("".join(tokens)) >= 4
+
+
+def _looks_generic_freeform_category(value: str) -> bool:
+    normalized = normalize_whitespace(value).lower()
+    if not normalized or normalized in UNKNOWN_CATEGORY_VALUES:
+        return False
+
+    generic_terms = {
+        "technology",
+        "internet",
+        "service",
+        "services",
+        "consumer",
+        "electronics",
+        "retail",
+        "financial",
+        "banking",
+        "insurance",
+        "healthcare",
+        "travel",
+        "media",
+        "entertainment",
+        "telecommunications",
+        "telecommunication",
+        "educational",
+        "education",
+        "search",
+        "engine",
+    }
+    tokens = {token for token in normalized.replace("/", " ").split() if token}
+    if not tokens:
+        return False
+    return tokens.issubset(generic_terms)
+
+
 def _log_critical_once(message: str) -> None:
     if message in _critical_messages_logged:
         return
@@ -34,16 +74,36 @@ def select_mapping_input_text(
     predicted_brand: str = "",
     ocr_summary: str = "",
     ocr_max_chars: int = 400,
+    exact_taxonomy_match: bool = False,
 ) -> str:
     raw_norm = normalize_whitespace(raw_category)
+    brand_norm = normalize_whitespace(predicted_brand)
+    ocr_norm = normalize_whitespace(ocr_summary)
+
+    if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES and exact_taxonomy_match:
+        return raw_norm
+
+    evidence_parts: list[str] = []
+    if brand_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
+        evidence_parts.append(brand_norm)
+    if _mapping_text_has_signal(ocr_norm):
+        evidence_parts.append(ocr_norm[:ocr_max_chars])
+    evidence_text = "\n".join(evidence_parts)
+
+    if (
+        raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES
+        and not exact_taxonomy_match
+        and _looks_generic_freeform_category(raw_norm)
+        and evidence_text
+    ):
+        return evidence_text
+
     if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return raw_norm
 
-    brand_norm = normalize_whitespace(predicted_brand)
     if brand_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return brand_norm
 
-    ocr_norm = normalize_whitespace(ocr_summary)
     if ocr_norm:
         return ocr_norm[:ocr_max_chars]
 

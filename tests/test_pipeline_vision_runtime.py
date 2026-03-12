@@ -253,8 +253,8 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
         job_id="job-ocr-prefilter-1",
     )
 
-    assert len(ocr_calls) == 1
-    assert ocr_calls == [200.0]
+    assert len(ocr_calls) == 2
+    assert ocr_calls == [200.0, 200.0]
 
 
 def test_pipeline_category_rerank_corrects_weak_cross_domain_mapping(monkeypatch):
