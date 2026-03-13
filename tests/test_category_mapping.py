@@ -7,6 +7,7 @@ from video_service.core.category_mapping import (
     load_category_mapping,
     select_mapping_input_text,
 )
+from video_service.core.categories import _prepare_query_text_for_embedding
 
 pytestmark = pytest.mark.unit
 
@@ -132,12 +133,24 @@ def test_select_mapping_input_text_appends_reasoning_for_broad_exact_taxonomy():
             reasoning_summary="upset stomach indigestion nausea diarrhea",
             exact_taxonomy_match=True,
         )
-        == (
-            "Pharmaceutical Manufacture and Sale - over the counter\n"
-            "Pepto-Bismol\n"
-            "upset stomach indigestion nausea diarrhea"
-        )
+        == "Pepto-Bismol upset stomach indigestion nausea diarrhea"
     )
+
+
+def test_select_mapping_input_text_compacts_otc_disclaimer_noise():
+    result = select_mapping_input_text(
+        raw_category="Pharmaceutical Manufacture and Sale - over the counter",
+        predicted_brand="Vicks",
+        ocr_summary=(
+            "VICKS VapoCOOL VAPORIZE MAX Honey Lemon Chill SORE THROAT PAIN. "
+            "miel Citron GLACIAL TO ENSURE THIS PRODUCT IS RIGHT FOR YOU, "
+            "ALWAYS READ AND FOLLOW THE LABEL"
+        ),
+        reasoning_summary="The product shown is Vicks VapoCOOL Vaporize Max Honey Lemon for sore throat pain.",
+        exact_taxonomy_match=True,
+    )
+
+    assert result == "Vicks VapoCOOL Vaporize Max Honey Lemon sore throat pain"
 
 
 def test_build_product_cue_query_text_prefers_compact_reasoning_over_noisy_ocr():
@@ -179,3 +192,56 @@ def test_build_product_cue_query_text_drops_marketing_language_for_laundry_famil
         )
         == "Tide & Downy laundry detergent fabric softener"
     )
+
+
+def test_build_product_cue_query_text_drops_otc_reasoning_narration():
+    reasoning = (
+        "The ad clearly promotes a Vicks OTC product (VapoCOOL VAPORIZE MAX) designed "
+        "to treat sore throat pain, which is a classic over-the-counter medication. "
+        "While Drug Stores and Drugstores are retail categories, the ad is promoting "
+        "the manufacturer's product, not the store itself."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Vicks",
+            ocr_summary="VICKS OTC VapoCOOL VAPORIZE MAX treat sore throat pain classic over-the-counter",
+            reasoning_summary=reasoning,
+            family_context="Pharmaceutical Manufacture and Sale - over the counter",
+        )
+        == "Vicks VapoCOOL VAPORIZE MAX sore throat pain over-the-counter"
+    )
+
+
+def test_build_product_cue_query_text_drops_meta_reasoning_tokens_for_haircare():
+    reasoning = (
+        "The OCR text and visual frames clearly show the product: a bottle labeled head "
+        "& shoulders with the specific product name BARE and the French slogan Une "
+        "protection antipelliculaire (anti-dandruff protection). The visual of a person "
+        "with healthy hair and the product packaging confirm this is a hair care product. "
+        "The category is Hair Care as the primary product being promoted is a shampoo or "
+        "conditioner for dandruff control."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Head & Shoulders",
+            ocr_summary="head & shoulders BARE Une protection antipelliculaire",
+            reasoning_summary=reasoning,
+            family_context="Hair Care",
+        )
+        == "Head & Shoulders BARE protection antipelliculaire anti-dandruff shampoo conditioner dandruff control"
+    )
+
+
+def test_prepare_query_text_for_embedding_prefixes_only_bge_large_en_v15():
+    raw_query = "Over-the-Counter Medication"
+
+    assert _prepare_query_text_for_embedding(
+        raw_query,
+        "BAAI/bge-large-en-v1.5",
+    ) == "Represent this sentence for searching relevant passages: Over-the-Counter Medication"
+    assert _prepare_query_text_for_embedding(
+        raw_query,
+        "sentence-transformers/all-mpnet-base-v2",
+    ) == raw_query
