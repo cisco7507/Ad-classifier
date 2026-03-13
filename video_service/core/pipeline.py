@@ -1594,6 +1594,107 @@ def _resolve_llm_recent_frame_count() -> int:
         return 4
 
 
+def _frame_visual_richness_metrics(frame: dict[str, object]) -> dict[str, float | bool]:
+    frame_bgr = frame.get("ocr_image")
+    if frame_bgr is None or not hasattr(frame_bgr, "shape"):
+        return {
+            "dark_ratio": 0.0,
+            "edge_density": 0.0,
+            "saturation_mean": 0.0,
+            "richness": 0.0,
+            "logo_like": False,
+        }
+
+    try:
+        resized = cv2.resize(frame_bgr, (96, 96), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    except Exception:
+        return {
+            "dark_ratio": 0.0,
+            "edge_density": 0.0,
+            "saturation_mean": 0.0,
+            "richness": 0.0,
+            "logo_like": False,
+        }
+
+    dark_ratio = float(np.mean(gray < 28))
+    edges = cv2.Canny(gray, 80, 180)
+    edge_density = float(np.mean(edges > 0))
+    saturation_mean = float(np.mean(hsv[..., 1]) / 255.0)
+    richness = (edge_density * 3.0) + (saturation_mean * 0.7) + ((1.0 - dark_ratio) * 0.25)
+    logo_like = dark_ratio >= 0.7 and edge_density <= 0.035 and saturation_mean <= 0.18
+    return {
+        "dark_ratio": dark_ratio,
+        "edge_density": edge_density,
+        "saturation_mean": saturation_mean,
+        "richness": richness,
+        "logo_like": logo_like,
+    }
+
+
+def _select_llm_evidence_frames(source_frames: list[dict[str, object]], frame_limit: int) -> list[dict[str, object]]:
+    if frame_limit <= 0 or not source_frames:
+        return []
+
+    tail_like_types = {"tail", "backward_ext", "tail_rescue"}
+    if any(str(frame.get("type", "") or "").lower() in tail_like_types for frame in source_frames):
+        candidate_window = min(len(source_frames), max(frame_limit + 2, frame_limit))
+        candidate_frames = list(source_frames[-candidate_window:])
+    else:
+        candidate_frames = list(source_frames[-1:])
+    if len(candidate_frames) <= 2:
+        return candidate_frames
+
+    metrics_by_index = {
+        idx: _frame_visual_richness_metrics(frame)
+        for idx, frame in enumerate(candidate_frames)
+    }
+
+    selected_indices: set[int] = {len(candidate_frames) - 1}
+    latest_index = len(candidate_frames) - 1
+
+    non_logo_candidates = [
+        idx for idx, metrics in metrics_by_index.items()
+        if idx != latest_index and not bool(metrics.get("logo_like", False))
+    ]
+    if non_logo_candidates:
+        richest_product_idx = max(
+            non_logo_candidates,
+            key=lambda idx: (
+                float(metrics_by_index[idx].get("richness", 0.0)),
+                -abs(idx - latest_index),
+            ),
+        )
+        selected_indices.add(richest_product_idx)
+
+    max_logo_like_frames = 1
+    logo_like_selected = sum(
+        1 for idx in selected_indices if bool(metrics_by_index[idx].get("logo_like", False))
+    )
+
+    ranked_remaining = sorted(
+        (idx for idx in range(len(candidate_frames)) if idx not in selected_indices),
+        key=lambda idx: (
+            bool(metrics_by_index[idx].get("logo_like", False)),
+            -float(metrics_by_index[idx].get("richness", 0.0)),
+            -idx,
+        ),
+    )
+
+    for idx in ranked_remaining:
+        is_logo_like = bool(metrics_by_index[idx].get("logo_like", False))
+        if is_logo_like and logo_like_selected >= max_logo_like_frames:
+            continue
+        selected_indices.add(idx)
+        if is_logo_like:
+            logo_like_selected += 1
+        if len(selected_indices) >= frame_limit:
+            break
+
+    return [candidate_frames[idx] for idx in sorted(selected_indices)]
+
+
 def process_single_video(
     url,
     categories,
@@ -1663,11 +1764,7 @@ def process_single_video(
 
         def _llm_evidence_images(source_frames: list[dict[str, object]]) -> list[Image.Image]:
             frame_limit = _resolve_llm_recent_frame_count()
-            tail_like_types = {"tail", "backward_ext", "tail_rescue"}
-            if any(str(frame.get("type", "") or "").lower() in tail_like_types for frame in source_frames):
-                candidate_frames = source_frames[-frame_limit:]
-            else:
-                candidate_frames = source_frames[-1:] if source_frames else []
+            candidate_frames = _select_llm_evidence_frames(source_frames, frame_limit)
             images: list[Image.Image] = []
             for frame in candidate_frames:
                 try:
@@ -2847,6 +2944,7 @@ def process_single_video(
             "mapper_plot": None,
             "visual_plot": None,
             "processing_trace": None,
+            "llm_evidence_gallery": [],
         }
         if hasattr(category_mapper, "build_mapper_vector_plot"):
             try:
@@ -2876,6 +2974,16 @@ def process_single_video(
                 logger.debug("[%s] visual_vector_plot_failed: %s", url, exc)
         _finalize_processing_trace()
         signal_artifacts["processing_trace"] = processing_trace
+        if send_llm_frame:
+            selected_llm_frames = _select_llm_evidence_frames(
+                frames,
+                _resolve_llm_recent_frame_count(),
+            )
+            signal_artifacts["llm_evidence_gallery"] = [
+                (frame.get("ocr_image"), f"{frame.get('time')}s")
+                for frame in selected_llm_frames
+                if frame.get("ocr_image") is not None and frame.get("time") is not None
+            ]
         row = [
             url,
             res.get("brand", "Unknown"),
@@ -2898,7 +3006,7 @@ def process_single_video(
             "accepted_attempt_type": "",
             "trigger_reason": "pipeline_exception",
         }
-        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace}
+        return {}, [], "Err", str(e), [], [url, "Err", "", "Err", 0, str(e), "none", None], {"mapper_plot": None, "visual_plot": None, "processing_trace": processing_trace, "llm_evidence_gallery": []}
 
 def run_pipeline_job(
     src,

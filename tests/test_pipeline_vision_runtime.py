@@ -257,6 +257,106 @@ def test_pipeline_prefilters_visually_duplicate_tail_frames_before_ocr(monkeypat
     assert ocr_calls == [200.0, 200.0]
 
 
+def test_select_llm_evidence_frames_keeps_product_frame_and_single_latest_logo_endcard():
+    product_frame = np.full((72, 96, 3), (0, 140, 255), dtype=np.uint8)
+    cv2.putText(product_frame, "iPhone", (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+
+    logo_frame = np.zeros((72, 96, 3), dtype=np.uint8)
+    cv2.circle(logo_frame, (48, 24), 5, (255, 255, 255), -1)
+
+    frames = [
+        {"ocr_image": product_frame.copy(), "time": 10.0, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 10.5, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 11.0, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 11.5, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 12.0, "type": "tail"},
+    ]
+
+    selected = pipeline_module._select_llm_evidence_frames(frames, frame_limit=4)
+
+    assert [round(frame["time"], 1) for frame in selected] == [10.0, 12.0]
+
+
+def test_pipeline_passes_representative_frame_pack_to_llm(monkeypatch):
+    class _DummyMapper:
+        categories = ["Category One"]
+
+        @staticmethod
+        def map_category(**kwargs):
+            return {
+                "canonical_category": "Category One",
+                "category_id": "101",
+                "category_match_method": "embeddings",
+                "category_match_score": 0.99,
+            }
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "ROGERS"
+
+    product_frame = np.full((72, 96, 3), (0, 140, 255), dtype=np.uint8)
+    cv2.putText(product_frame, "iPhone", (8, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+
+    logo_frame = np.zeros((72, 96, 3), dtype=np.uint8)
+    cv2.circle(logo_frame, (48, 24), 5, (255, 255, 255), -1)
+
+    frames = [
+        {"ocr_image": product_frame.copy(), "time": 10.0, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 10.5, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 11.0, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 11.5, "type": "tail"},
+        {"ocr_image": logo_frame.copy(), "time": 12.0, "type": "tail"},
+    ]
+
+    llm_calls: list[dict[str, object]] = []
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            llm_calls.append({"args": args, "kwargs": kwargs})
+            return {
+                "brand": "Rogers",
+                "category": "Telecommunications",
+                "confidence": 1.0,
+                "reasoning": "ok",
+            }
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: (frames, None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, gallery, _, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/rogers-iphone.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        enable_llm_frame=True,
+        ctx=8192,
+        job_id="job-llm-frame-pack-1",
+    )
+
+    assert len(llm_calls) == 1
+    evidence_images = llm_calls[0]["kwargs"]["evidence_images"]
+    assert len(evidence_images) == 2
+    first_mean = float(np.array(evidence_images[0]).mean())
+    second_mean = float(np.array(evidence_images[1]).mean())
+    assert first_mean > second_mean
+    assert len(gallery) == 5
+    assert [label for _, label in signal_artifacts["llm_evidence_gallery"]] == ["10.0s", "12.0s"]
+
+
 def test_pipeline_category_rerank_corrects_weak_cross_domain_mapping(monkeypatch):
     class _DummyMapper:
         categories = [
