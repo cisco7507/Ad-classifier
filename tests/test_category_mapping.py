@@ -191,3 +191,43 @@ def test_build_product_cue_query_text_drops_marketing_language_for_laundry_famil
         )
         == "Tide & Downy laundry detergent fabric softener"
     )
+
+
+def test_build_product_cue_query_text_drops_otc_reasoning_narration():
+    reasoning = (
+        "The ad clearly promotes a Vicks OTC product (VapoCOOL VAPORIZE MAX) designed "
+        "to treat sore throat pain, which is a classic over-the-counter medication. "
+        "While Drug Stores and Drugstores are retail categories, the ad is promoting "
+        "the manufacturer's product, not the store itself."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Vicks",
+            ocr_summary="VICKS OTC VapoCOOL VAPORIZE MAX treat sore throat pain classic over-the-counter",
+            reasoning_summary=reasoning,
+            family_context="Pharmaceutical Manufacture and Sale - over the counter",
+        )
+        == "Vicks VapoCOOL VAPORIZE MAX sore throat pain over-the-counter"
+    )
+
+
+def test_build_product_cue_query_text_drops_meta_reasoning_tokens_for_haircare():
+    reasoning = (
+        "The OCR text and visual frames clearly show the product: a bottle labeled head "
+        "& shoulders with the specific product name BARE and the French slogan Une "
+        "protection antipelliculaire (anti-dandruff protection). The visual of a person "
+        "with healthy hair and the product packaging confirm this is a hair care product. "
+        "The category is Hair Care as the primary product being promoted is a shampoo or "
+        "conditioner for dandruff control."
+    )
+
+    assert (
+        build_product_cue_query_text(
+            predicted_brand="Head & Shoulders",
+            ocr_summary="head & shoulders BARE Une protection antipelliculaire",
+            reasoning_summary=reasoning,
+            family_context="Hair Care",
+        )
+        == "Head & Shoulders BARE protection antipelliculaire anti-dandruff shampoo conditioner dandruff control"
+    )
