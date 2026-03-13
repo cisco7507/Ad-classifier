@@ -25,6 +25,7 @@ _PRODUCT_CUE_STOPWORDS = {
     "and",
     "are",
     "attached",
+    "always",
     "bilingual",
     "but",
     "brand",
@@ -44,6 +45,7 @@ _PRODUCT_CUE_STOPWORDS = {
     "corner",
     "correct",
     "correctly",
+    "classic",
     "designed",
     "despite",
     "evidence",
@@ -52,6 +54,7 @@ _PRODUCT_CUE_STOPWORDS = {
     "educational",
     "english",
     "enough",
+    "ensure",
     "final",
     "financial",
     "five",
@@ -85,6 +88,7 @@ _PRODUCT_CUE_STOPWORDS = {
     "offer",
     "offers",
     "ocr",
+    "otc",
     "overall",
     "packaging",
     "parent",
@@ -98,6 +102,7 @@ _PRODUCT_CUE_STOPWORDS = {
     "program",
     "programs",
     "proudly",
+    "read",
     "school",
     "schools",
     "scholarship",
@@ -151,10 +156,12 @@ _PRODUCT_CUE_STOPWORDS = {
     "bursary",
     "bursaries",
     "study",
+    "treat",
     "back",
     "known",
     "tied",
     "promoting",
+    "follow",
 }
 _PRODUCT_CUE_SINGULARS = {
     "conditioners": "conditioner",
@@ -461,6 +468,15 @@ def select_mapping_input_text(
         if (
             _exact_taxonomy_category_accepts_specificity_hint(raw_norm)
         ):
+            compact_cues = build_product_cue_query_text(
+                predicted_brand=brand_norm,
+                ocr_summary=ocr_norm,
+                reasoning_summary=reasoning_norm,
+                family_context=raw_norm,
+                max_chars=ocr_max_chars,
+            )
+            if compact_cues and compact_cues.casefold() != brand_norm.casefold():
+                return compact_cues
             if evidence_text:
                 return f"{raw_norm}\n{evidence_text}"
             if support_text:

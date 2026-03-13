@@ -132,12 +132,24 @@ def test_select_mapping_input_text_appends_reasoning_for_broad_exact_taxonomy():
             reasoning_summary="upset stomach indigestion nausea diarrhea",
             exact_taxonomy_match=True,
         )
-        == (
-            "Pharmaceutical Manufacture and Sale - over the counter\n"
-            "Pepto-Bismol\n"
-            "upset stomach indigestion nausea diarrhea"
-        )
+        == "Pepto-Bismol upset stomach indigestion nausea diarrhea"
     )
+
+
+def test_select_mapping_input_text_compacts_otc_disclaimer_noise():
+    result = select_mapping_input_text(
+        raw_category="Pharmaceutical Manufacture and Sale - over the counter",
+        predicted_brand="Vicks",
+        ocr_summary=(
+            "VICKS VapoCOOL VAPORIZE MAX Honey Lemon Chill SORE THROAT PAIN. "
+            "miel Citron GLACIAL TO ENSURE THIS PRODUCT IS RIGHT FOR YOU, "
+            "ALWAYS READ AND FOLLOW THE LABEL"
+        ),
+        reasoning_summary="The product shown is Vicks VapoCOOL Vaporize Max Honey Lemon for sore throat pain.",
+        exact_taxonomy_match=True,
+    )
+
+    assert result == "Vicks VapoCOOL Vaporize Max Honey Lemon sore throat pain"
 
 
 def test_build_product_cue_query_text_prefers_compact_reasoning_over_noisy_ocr():
