@@ -114,6 +114,7 @@ def _build_default_artifacts(job_id: str) -> dict:
             "method": "",
             "score": None,
             "confidence": None,
+            "query_fragments": [],
             "top_matches": [],
             "vector_plot": None,
         },
@@ -242,6 +243,7 @@ def _category_mapper_from_row(row: dict | None) -> dict:
         "method": str(row.get("category_match_method") or row.get("match_method") or ""),
         "score": row.get("category_match_score"),
         "confidence": row.get("Confidence") if "Confidence" in row else row.get("confidence"),
+        "query_fragments": row.get("mapping_query_fragments") or [],
         "top_matches": [],
         "vector_plot": None,
     }
@@ -765,6 +767,9 @@ def _run_pipeline(job_id: str, url: str, settings: dict) -> tuple[str | None, di
             artifacts_payload["category_mapper"]["vector_plot"] = latest_signal_artifacts.get("mapper_plot")
             artifacts_payload["category_mapper"]["top_matches"] = (
                 latest_signal_artifacts.get("mapper_top_matches") or []
+            )
+            artifacts_payload["category_mapper"]["query_fragments"] = (
+                latest_signal_artifacts.get("mapper_query_fragments") or []
             )
         result = json.dumps(final_df.to_dict(orient="records"))
         logger.info("pipeline_done: rows=%d", len(final_df))

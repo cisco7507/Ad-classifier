@@ -3115,6 +3115,7 @@ def process_single_video(
         signal_artifacts = {
             "mapper_plot": None,
             "mapper_top_matches": list(category_match.get("top_matches") or []),
+            "mapper_query_fragments": list(category_match.get("mapping_query_fragments") or []),
             "visual_plot": None,
             "processing_trace": None,
             "llm_evidence_gallery": [],

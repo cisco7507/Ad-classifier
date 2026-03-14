@@ -508,9 +508,17 @@ def select_mapping_input_text(
         raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES
         and not exact_taxonomy_match
         and _looks_generic_freeform_category(raw_norm)
-        and evidence_text
     ):
-        return evidence_text
+        compact_cues = build_product_cue_query_text(
+            predicted_brand=brand_norm,
+            ocr_summary=ocr_norm,
+            reasoning_summary=reasoning_norm,
+            family_context=raw_norm,
+            max_chars=ocr_max_chars,
+        )
+        if compact_cues:
+            return f"{raw_norm}\n{compact_cues}"
+        return raw_norm
 
     if (
         raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES
@@ -526,10 +534,7 @@ def select_mapping_input_text(
         )
         if compact_cues:
             return f"{raw_norm}\n{compact_cues}"
-        if ocr_support_text:
-            return f"{raw_norm}\n{ocr_support_text}"
-        if support_text:
-            return f"{raw_norm}\n{support_text}"
+        return raw_norm
 
     if raw_norm.lower() not in UNKNOWN_CATEGORY_VALUES:
         return raw_norm

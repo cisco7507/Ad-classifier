@@ -2007,6 +2007,16 @@ export function JobDetail() {
       : vectorPlotSpaces[0] || "mapper";
   const activeVectorPlot =
     effectiveVectorSpace === "visual" ? visualVectorPlot : mapperVectorPlot;
+  const mapperQueryFragments = Array.isArray(mapperArtifact?.query_fragments)
+    ? mapperArtifact.query_fragments.filter(
+        (fragment): fragment is string => typeof fragment === "string" && fragment.trim().length > 0,
+      )
+    : [];
+  const activeQueryFragments =
+    Array.isArray(activeVectorPlot?.query_fragments) &&
+    activeVectorPlot.query_fragments.length > 0
+      ? activeVectorPlot.query_fragments
+      : mapperQueryFragments;
   const vectorPlotOption = buildSignalPlotOption(activeVectorPlot);
   const effectiveExplanation = explanation || localExplanation;
   const explanationAttempts = Array.isArray(effectiveExplanation?.attempts)
@@ -2820,6 +2830,11 @@ export function JobDetail() {
                   <span className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-primary-700">
                     Query: {activeVectorPlot.query_label || "signal"}
                   </span>
+                  {activeQueryFragments.length > 0 && (
+                    <span className="rounded-full border border-primary-200 bg-white px-2.5 py-1 text-primary-800">
+                      Fragments: {activeQueryFragments.join(" | ")}
+                    </span>
+                  )}
                   <span className="rounded-full border border-primary-300 bg-white px-2.5 py-1 text-primary-800">
                     Final: {activeVectorPlot.selected_label || mapperCategoryText || "—"}
                   </span>

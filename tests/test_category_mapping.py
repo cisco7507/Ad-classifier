@@ -7,7 +7,12 @@ from video_service.core.category_mapping import (
     load_category_mapping,
     select_mapping_input_text,
 )
-from video_service.core.categories import _prepare_query_text_for_embedding
+from video_service.core.categories import (
+    _prepare_query_text_for_embedding,
+    _split_embedding_query_fragments,
+    _translate_embedding_fragment_to_english,
+    _summarize_mapping_query_for_log,
+)
 from video_service.core.embedding_models import (
     category_embedding_model_requires_remote_code,
     resolve_category_embedding_device,
@@ -80,15 +85,16 @@ def test_select_mapping_input_text_fallback_order_without_suggested_categories_b
     )
 
 
-def test_select_mapping_input_text_prefers_evidence_for_generic_freeform_category():
+def test_select_mapping_input_text_uses_compact_cues_for_generic_freeform_category():
     assert (
         select_mapping_input_text(
             raw_category="Technology / Internet Services",
             predicted_brand="Google",
             ocr_summary="Google Pixel 9",
+            reasoning_summary="Google Pixel 9 smartphone mobile device",
             exact_taxonomy_match=False,
         )
-        == "Google\nGoogle Pixel 9"
+        == "Technology / Internet Services\nGoogle Pixel smartphone mobile device"
     )
 
 
@@ -286,6 +292,43 @@ def test_prepare_query_text_for_embedding_prefixes_long_multiline_bge_queries():
         enriched_query,
         "sentence-transformers/all-mpnet-base-v2",
     ) == enriched_query
+
+
+def test_translate_embedding_fragment_to_english_normalizes_common_french_terms():
+    raw_fragment = "Tangerine Changoz dèro bancairo La banque officielle des Raptors de Toronto"
+
+    assert _translate_embedding_fragment_to_english(raw_fragment) == (
+        "Tangerine Changoz bank official Raptors Toronto"
+    )
+
+
+def test_split_embedding_query_fragments_includes_raw_label_and_translated_candidates():
+    fragments = _split_embedding_query_fragments(
+        "Banking",
+        "Tangerine\nTangerine Changoz dèro bancairo La banque officielle des Raptors de Toronto. Et de leurs fans.",
+    )
+
+    assert fragments == [
+        "Banking",
+        "Tangerine",
+        "Tangerine Changoz bank official Raptors Toronto their fans",
+    ]
+
+
+def test_summarize_mapping_query_for_log_normalizes_and_truncates():
+    long_query = (
+        "Tangerine\n"
+        "Tangerine Tangerine Changoz dèro bancairo La banque officielle des Raptors de Toronto. "
+        "Et de leurs fans. Tangerine Changoz dàro bancairo La banque officielle des Raptors de Toronto. "
+        "Et de leurs fans."
+    )
+
+    summarized = _summarize_mapping_query_for_log(long_query)
+
+    assert "\n" not in summarized
+    assert summarized.startswith("Tangerine Tangerine Tangerine Changoz dèro bancairo")
+    assert summarized.endswith("...")
+    assert len(summarized) <= 180
 
 
 def test_category_embedding_model_allowlist_resolution():

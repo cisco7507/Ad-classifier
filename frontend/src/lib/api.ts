@@ -95,6 +95,7 @@ export interface SignalVectorPlot {
   subtitle?: string;
   backend?: string;
   query_label?: string;
+  query_fragments?: string[];
   selected_label?: string;
   selected_category_id?: string | null;
   points: SignalVectorPlotPoint[];
@@ -116,6 +117,7 @@ export interface ArtifactCategoryMapper {
   method?: string;
   score?: number | null;
   confidence?: number | null;
+  query_fragments?: string[];
   top_matches?: ArtifactVisionMatch[];
   vector_plot?: SignalVectorPlot | null;
 }
