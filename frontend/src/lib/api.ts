@@ -162,6 +162,7 @@ export interface ProcessingTraceAttempt {
   llm_mode?: string;
   evidence_note?: string;
   result?: ProcessingTraceResult;
+  comparison_result?: ProcessingTraceResult | null;
 }
 
 export interface ProcessingTraceSummary {

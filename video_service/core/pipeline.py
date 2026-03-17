@@ -508,6 +508,39 @@ def _specificity_search_generic_raw_categories() -> set[str]:
     return values or {"Movie"}
 
 
+_ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES = {
+    "movie",
+    "movies",
+    "film",
+    "films",
+    "cinema",
+    "tv",
+    "television",
+    "entertainment",
+    "performance arts",
+    "theater",
+    "theatre",
+}
+_BROAD_MEDIA_TAXONOMY_LABELS = {
+    "Movies & TV Production and Distribution",
+    "Movies & TV Production and Distribution - All else",
+    "Cinema Genre",
+    "DVD/video Genre",
+    "Entertainment and Performance Arts",
+    "Entertainment and Performance Arts - All else",
+    "Event",
+    "TV Cable, Pay & Broadcast Networks",
+    "TV Cable, Pay & Broadcast Networks - All else",
+}
+_ENTITY_KIND_PRIMARY_BRANCH = {
+    "film_release": "Cinema Genre",
+    "stage_production": "Theater",
+    "venue_exhibitor": "Movie Theatres",
+    "tv_program": "DVD/video Genre",
+    "live_event": "Event",
+}
+
+
 def _is_valid_search_domain(domain: str) -> bool:
     labels = [label for label in (domain or "").strip().lower().split(".") if label]
     if len(labels) < 2:
@@ -520,6 +553,141 @@ def _is_valid_search_domain(domain: str) -> bool:
     if len(labels) == 2 and len(tld) > 10:
         return False
     return True
+
+
+def _entity_search_rescue_enabled(enable_search: bool, express_mode: bool) -> bool:
+    raw = os.environ.get("ENTITY_SEARCH_RESCUE_ENABLED", "true").strip().lower()
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if express_mode:
+        return False
+    return bool(enable_search)
+
+
+def _looks_like_generic_media_category(value: str) -> bool:
+    normalized = " ".join(str(value or "").lower().split())
+    if not normalized:
+        return False
+    if normalized in _ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES:
+        return True
+    return any(token in normalized for token in _ENTITY_SEARCH_GENERIC_MEDIA_CATEGORIES)
+
+
+def _text_has_any_cue(text: str, cues: set[str]) -> bool:
+    normalized = " ".join(str(text or "").lower().split())
+    return any(cue in normalized for cue in cues)
+
+
+def _iter_taxonomy_records():
+    mapping_state = getattr(category_mapper, "mapping_state", None)
+    return tuple(getattr(mapping_state, "records", ()) or ())
+
+
+def _taxonomy_record_for_label(label_name: str):
+    target = str(label_name or "").strip().casefold()
+    for record in _iter_taxonomy_records():
+        label = str(record.name or "").strip()
+        if label.casefold() == target:
+            return record
+    return None
+
+
+def _taxonomy_path_names_for_label(label_name: str) -> tuple[str, ...]:
+    record = _taxonomy_record_for_label(label_name)
+    if record is None:
+        return tuple()
+    return tuple(str(name or "").strip() for name in getattr(record, "path_names", ()) or ())
+
+
+def _taxonomy_descendants_for_path_name(path_name: str, *, leaf_only: bool = True) -> list[str]:
+    records = _iter_taxonomy_records()
+    if not records:
+        return []
+    parent_ids = {
+        str(record.parent_id or "").strip()
+        for record in records
+        if str(record.parent_id or "").strip() not in {"", "0"}
+    }
+    path_name_folded = str(path_name or "").strip().casefold()
+    labels: list[str] = []
+    for record in records:
+        path_names = {str(name or "").strip().casefold() for name in record.path_names}
+        if path_name_folded not in path_names:
+            continue
+        if leaf_only and str(record.category_id or "").strip() in parent_ids:
+            continue
+        if "all else" in str(record.name or "").lower():
+            continue
+        label = str(record.name or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _find_taxonomy_label(label_name: str) -> str:
+    target = str(label_name or "").strip().casefold()
+    for record in _iter_taxonomy_records():
+        label = str(record.name or "").strip()
+        if label.casefold() == target:
+            return label
+    return ""
+
+
+def _label_in_taxonomy_branch(label_name: str, branch_name: str) -> bool:
+    path_names = {name.casefold() for name in _taxonomy_path_names_for_label(label_name)}
+    branch_folded = str(branch_name or "").strip().casefold()
+    return bool(branch_folded and branch_folded in path_names)
+
+
+def _is_broad_media_taxonomy_label(label_name: str) -> bool:
+    clean = str(label_name or "").strip()
+    if not clean:
+        return False
+    if clean in _BROAD_MEDIA_TAXONOMY_LABELS:
+        return True
+    path_names = _taxonomy_path_names_for_label(clean)
+    if not path_names:
+        return False
+    terminal = path_names[-1]
+    return terminal in _BROAD_MEDIA_TAXONOMY_LABELS
+
+
+def _is_specific_media_taxonomy_label(label_name: str) -> bool:
+    clean = str(label_name or "").strip()
+    if not clean or _is_broad_media_taxonomy_label(clean):
+        return False
+    if clean == _find_taxonomy_label("Movie Theatres"):
+        return True
+    return any(
+        _label_in_taxonomy_branch(clean, branch_name)
+        for branch_name in ("Cinema Genre", "DVD/video Genre", "Theater", "Event")
+    )
+
+
+def _rank_entity_branch_labels(
+    labels: list[str],
+    *,
+    genres: list[str],
+    sorted_vision: dict[str, float],
+) -> list[str]:
+    visual_ranks = {str(label or "").strip(): idx for idx, (label, _score) in enumerate(_top_visual_matches(sorted_vision, limit=6), start=1)}
+
+    def _score(label: str) -> tuple[int, int, str]:
+        normalized_label = " ".join(str(label or "").strip().lower().split())
+        genre_score = 0
+        for genre in genres:
+            normalized_genre = " ".join(str(genre or "").strip().lower().split())
+            if not normalized_genre:
+                continue
+            if normalized_genre in normalized_label or normalized_label in normalized_genre:
+                genre_score += 4
+        visual_bonus = 0
+        if label in visual_ranks:
+            visual_bonus = max(0, 3 - visual_ranks[label])
+        parent_penalty = -2 if normalized_label in {"cinema genre", "dvd/video genre", "event"} else 0
+        return (genre_score + visual_bonus + parent_penalty, -visual_ranks.get(label, 99), normalized_label)
+
+    return sorted(labels, key=_score, reverse=True)
 
 
 def _extract_ocr_domains(text: str) -> list[str]:
@@ -1687,6 +1855,151 @@ def _build_specificity_search_candidates(
     return candidates
 
 
+def _build_entity_search_candidates(
+    *,
+    grounding: dict[str, object],
+    current_match: dict[str, object],
+    sorted_vision: dict[str, float],
+) -> tuple[str, list[str]]:
+    candidates: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidates:
+            candidates.append(clean)
+
+    current_canonical = str(current_match.get("canonical_category", "") or "").strip()
+    entity_kind = str(grounding.get("entity_kind", "") or "").strip().lower()
+    genres = [
+        " ".join(str(genre or "").strip().lower().split())
+        for genre in (grounding.get("genres") or [])
+        if str(genre or "").strip()
+    ]
+
+    branch_label = _find_taxonomy_label(_ENTITY_KIND_PRIMARY_BRANCH.get(entity_kind, ""))
+    if not branch_label:
+        return "", []
+
+    branch_descendants: list[str] = []
+    if entity_kind == "film_release":
+        branch_descendants = _rank_entity_branch_labels(
+            _taxonomy_descendants_for_path_name(branch_label, leaf_only=True),
+            genres=genres,
+            sorted_vision=sorted_vision,
+        )
+        _append(branch_label)
+        for label in branch_descendants:
+            _append(label)
+    elif entity_kind == "tv_program":
+        branch_descendants = _rank_entity_branch_labels(
+            _taxonomy_descendants_for_path_name(branch_label, leaf_only=True),
+            genres=genres,
+            sorted_vision=sorted_vision,
+        )
+        _append(branch_label)
+        for label in branch_descendants:
+            _append(label)
+        _append(_find_taxonomy_label("Movies & TV Production and Distribution - All else"))
+    elif entity_kind == "stage_production":
+        _append(branch_label)
+        _append(_find_taxonomy_label("Event"))
+        _append(_find_taxonomy_label("Entertainment and Performance Arts - All else"))
+    elif entity_kind == "live_event":
+        _append(branch_label)
+        _append(_find_taxonomy_label("Theater"))
+        _append(_find_taxonomy_label("Entertainment and Performance Arts - All else"))
+    elif entity_kind == "venue_exhibitor":
+        _append(branch_label)
+    else:
+        return "", []
+
+    if current_canonical and _label_in_taxonomy_branch(current_canonical, branch_label):
+        _append(current_canonical)
+
+    for label, _score in _top_visual_matches(sorted_vision, limit=4):
+        if label == branch_label or _label_in_taxonomy_branch(label, branch_label):
+            _append(label)
+
+    return branch_label, candidates[:12]
+
+
+def _should_run_entity_search_rescue(
+    enable_search: bool,
+    express_mode: bool,
+    result_payload: dict[str, object] | None,
+    category_match: dict[str, object],
+    ocr_text: str,
+    sorted_vision: dict[str, float],
+) -> tuple[bool, str]:
+    if not _entity_search_rescue_enabled(enable_search, express_mode):
+        return False, "disabled"
+    if not isinstance(result_payload, dict):
+        return False, "invalid_result"
+
+    brand = str(result_payload.get("brand", "") or "").strip()
+    raw_category = str(result_payload.get("category", "") or "").strip()
+    canonical = str(category_match.get("canonical_category", "") or "").strip()
+    if not brand or brand.lower() in {"unknown", "none", "n/a"}:
+        return False, "brand_missing"
+
+    raw_generic = _looks_like_generic_media_category(raw_category)
+    canonical_broad = _is_broad_media_taxonomy_label(canonical)
+    domain = _extract_ocr_domains(ocr_text)
+
+    visual_matches = _top_visual_matches(sorted_vision, limit=2)
+    visual_media = any(
+        (
+            _is_broad_media_taxonomy_label(str(label or ""))
+            or _is_specific_media_taxonomy_label(str(label or ""))
+            or "movie" in str(label or "").lower()
+        )
+        for label, _score in visual_matches
+    )
+
+    score_raw = category_match.get("category_match_score", 0.0)
+    try:
+        mapper_score = float(score_raw or 0.0)
+    except (TypeError, ValueError):
+        mapper_score = 0.0
+
+    if not any((raw_generic, canonical_broad, visual_media, domain)):
+        return False, "no_entity_signal"
+
+    if mapper_score >= 0.95 and canonical and _is_specific_media_taxonomy_label(canonical):
+        return False, f"confident_specific_mapping={canonical!r}@{mapper_score:.4f}"
+
+    reasons: list[str] = [
+        f"raw={raw_category!r}",
+        f"canonical={canonical!r}",
+        f"mapper_score={mapper_score:.4f}",
+    ]
+    if domain:
+        reasons.append(f"domain_hint={domain[0]!r}")
+    if raw_generic:
+        reasons.append("generic_media_raw")
+    if canonical_broad:
+        reasons.append("broad_media_canonical")
+    if visual_media:
+        reasons.append("visual_media_hint")
+    return True, ";".join(reasons)
+
+
+def _accept_entity_search_result(
+    current_match: dict[str, object],
+    refined_match: dict[str, object],
+    candidate_categories: list[str],
+) -> tuple[bool, str]:
+    current_canonical = str(current_match.get("canonical_category", "") or "")
+    refined_canonical = str(refined_match.get("canonical_category", "") or "")
+    if not refined_canonical:
+        return False, "entity_category_empty"
+    if candidate_categories and refined_canonical not in candidate_categories:
+        return False, f"outside_candidate_set={refined_canonical!r}"
+    if refined_canonical == current_canonical:
+        return False, f"unchanged_category={refined_canonical!r}"
+    return True, f"entity_refined_to={refined_canonical!r}"
+
+
 def _should_run_specificity_search_rescue(
     enable_search: bool,
     express_mode: bool,
@@ -2490,11 +2803,15 @@ def process_single_video(
 
         def _result_snapshot(payload: dict[str, object] | None) -> dict[str, object]:
             if not isinstance(payload, dict):
-                return {"brand": "", "category": "", "confidence": 0.0}
-            try:
-                confidence = float(payload.get("confidence", 0.0) or 0.0)
-            except Exception:
-                confidence = 0.0
+                return {"brand": "", "category": "", "confidence": None}
+            raw_confidence = payload.get("confidence")
+            if raw_confidence in (None, ""):
+                confidence = None
+            else:
+                try:
+                    confidence = float(raw_confidence)
+                except Exception:
+                    confidence = None
             return {
                 "brand": str(payload.get("brand", "") or ""),
                 "category": str(payload.get("category", "") or ""),
@@ -2505,6 +2822,18 @@ def process_single_video(
                 "brand_disambiguation_reason": str(payload.get("brand_disambiguation_reason", "") or ""),
                 "brand_evidence_strength": str(payload.get("brand_evidence_strength", "") or ""),
             }
+
+        def _category_match_snapshot(
+            payload: dict[str, object] | None,
+            match: dict[str, object] | None,
+        ) -> dict[str, object]:
+            snapshot = _result_snapshot(payload)
+            if isinstance(match, dict):
+                canonical_category = str(match.get("canonical_category", "") or "").strip()
+                if canonical_category:
+                    snapshot["category"] = canonical_category
+                snapshot["confidence"] = None
+            return snapshot
 
         def _append_trace_attempt(
             *,
@@ -2520,6 +2849,7 @@ def process_single_video(
             llm_mode: str = "standard",
             evidence_note: str = "",
             elapsed_ms: float | None = None,
+            comparison_payload: dict[str, object] | None = None,
         ) -> None:
             attempts = processing_trace.setdefault("attempts", [])
             if not isinstance(attempts, list):
@@ -2540,6 +2870,7 @@ def process_single_video(
                     "evidence_note": evidence_note,
                     "elapsed_ms": round(float(elapsed_ms), 1) if elapsed_ms is not None else None,
                     "result": _result_snapshot(result_payload),
+                    "comparison_result": _result_snapshot(comparison_payload) if comparison_payload else None,
                 }
             )
 
@@ -3516,6 +3847,7 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=(
                             f"Reranked within mapper candidates because {rerank_accept_reason}. "
                             f"Candidates: {', '.join(category_rerank_candidates)}."
@@ -3539,6 +3871,7 @@ def process_single_video(
                         result_payload=reranked_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=(
                             f"Rerank was rejected because {rerank_accept_reason}. "
                             f"Candidates: {', '.join(category_rerank_candidates)}."
@@ -3567,13 +3900,177 @@ def process_single_video(
                         f"Candidates: {', '.join(category_rerank_candidates)}."
                     ),
                 )
-        specificity_needed, specificity_reason = _should_run_specificity_search_rescue(
+        entity_rescue_accepted = False
+        entity_search_needed, entity_search_reason = _should_run_entity_search_rescue(
             enable_search=bool(enable_search),
             express_mode=express_mode,
             result_payload=res,
             category_match=category_match,
             ocr_text=ocr_text,
             sorted_vision=sorted_vision,
+        )
+        if entity_search_needed:
+            if stage_callback:
+                stage_callback("llm", f"entity search rescue provider={p.lower()} model={m}")
+            logger.info("[%s] fallback_triggered type=entity_search_rescue reason=%s", url, entity_search_reason)
+            entity_visual_matches = _top_visual_matches(sorted_vision, limit=4)
+            entity_candidates: list[str] = []
+            entity_grounding_fn = getattr(llm_engine, "query_entity_grounding", None)
+            entity_rescue_fn = getattr(llm_engine, "query_entity_search_rescue", None)
+            if not callable(entity_grounding_fn) or not callable(entity_rescue_fn):
+                entity_res, entity_reason = None, "unsupported"
+            else:
+                grounding_res, grounding_reason = entity_grounding_fn(
+                    p,
+                    m,
+                    brand=str(res.get("brand", "") or ""),
+                    raw_category=str(res.get("category", "") or ""),
+                    ocr_text=ocr_text,
+                    visual_matches=entity_visual_matches,
+                    context_size=ctx,
+                )
+                if isinstance(grounding_res, dict):
+                    entity_branch, entity_candidates = _build_entity_search_candidates(
+                        grounding=grounding_res,
+                        current_match=category_match,
+                        sorted_vision=sorted_vision,
+                    )
+                    logger.info(
+                        "[%s] entity_branch_selected entity_name=%r entity_kind=%r branch=%r genres=%r candidates=%s",
+                        url,
+                        str(grounding_res.get("entity_name", "") or ""),
+                        str(grounding_res.get("entity_kind", "") or ""),
+                        entity_branch,
+                        list(grounding_res.get("genres") or []),
+                        entity_candidates,
+                    )
+                    if not entity_branch or not entity_candidates:
+                        entity_res, entity_reason = None, "unsupported_entity_kind"
+                    elif len(entity_candidates) == 1:
+                        entity_res = {
+                            "brand": str(res.get("brand", "") or ""),
+                            "entity_name": str(grounding_res.get("entity_name", "") or ""),
+                            "entity_kind": str(grounding_res.get("entity_kind", "") or ""),
+                            "genres": list(grounding_res.get("genres") or []),
+                            "category": entity_candidates[0],
+                            "confidence": grounding_res.get("confidence", 0.0),
+                            "reasoning": str(grounding_res.get("reasoning", "") or ""),
+                        }
+                        entity_reason = "ok"
+                    else:
+                        entity_res, entity_reason = entity_rescue_fn(
+                            p,
+                            m,
+                            brand=str(res.get("brand", "") or ""),
+                            raw_category=str(res.get("category", "") or ""),
+                            current_category=str(category_match.get("canonical_category", "") or ""),
+                            entity_name=str(grounding_res.get("entity_name", "") or ""),
+                            entity_kind=str(grounding_res.get("entity_kind", "") or ""),
+                            ocr_text=ocr_text,
+                            genres=list(grounding_res.get("genres") or []),
+                            branch_label=entity_branch,
+                            search_results=list(grounding_res.get("_search_results") or []),
+                            candidate_categories=entity_candidates,
+                            candidate_category_contexts=category_mapper.get_category_context_map(
+                                entity_candidates
+                            )
+                            if hasattr(category_mapper, "get_category_context_map")
+                            else None,
+                            visual_matches=entity_visual_matches,
+                            context_size=ctx,
+                        )
+                else:
+                    entity_res, entity_reason = None, grounding_reason
+            if isinstance(entity_res, dict):
+                entity_candidates = list(entity_candidates or [])
+                entity_match = category_mapper.map_category(
+                    raw_category=entity_res.get("category", "Unknown"),
+                    job_id=job_id,
+                    suggested_categories_text="",
+                    predicted_brand=entity_res.get("brand", "Unknown"),
+                    ocr_summary=ocr_text,
+                )
+                entity_ok, entity_accept_reason = _accept_entity_search_result(
+                    current_match=category_match,
+                    refined_match=entity_match,
+                    candidate_categories=entity_candidates,
+                )
+                if entity_ok:
+                    res = entity_res
+                    category_match = entity_match
+                    entity_rescue_accepted = True
+                    logger.info(
+                        "[%s] fallback_accepted type=entity_search_rescue reason=%s",
+                        url,
+                        entity_accept_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="entity_search_rescue",
+                        title="Entity Search Rescue",
+                        status="accepted",
+                        source_frames=frames,
+                        detail="web entity refinement",
+                        trigger_reason=entity_search_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=entity_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
+                        evidence_note=f"Entity grounding + branch selection refined the category because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                    )
+                else:
+                    logger.info(
+                        "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                        url,
+                        entity_accept_reason,
+                        entity_search_reason,
+                    )
+                    _append_trace_attempt(
+                        attempt_type="entity_search_rescue",
+                        title="Entity Search Rescue",
+                        status="rejected",
+                        source_frames=frames,
+                        detail="web entity refinement",
+                        trigger_reason=entity_search_reason,
+                        ocr_text_value=ocr_text,
+                        result_payload=entity_res,
+                        ocr_mode_used="" if express_mode else om,
+                        llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
+                        evidence_note=f"Entity grounding + branch selection was rejected because {entity_accept_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                    )
+            else:
+                logger.info(
+                    "[%s] fallback_rejected type=entity_search_rescue reason=%s trigger=%s",
+                    url,
+                    entity_reason,
+                    entity_search_reason,
+                )
+                _append_trace_attempt(
+                    attempt_type="entity_search_rescue",
+                    title="Entity Search Rescue",
+                    status="rejected",
+                    source_frames=frames,
+                    detail="web entity refinement",
+                    trigger_reason=entity_search_reason,
+                    ocr_text_value=ocr_text,
+                    result_payload=None,
+                    ocr_mode_used="" if express_mode else om,
+                    llm_mode="standard",
+                    evidence_note=f"Entity grounding + branch selection did not run: {entity_reason}. Candidates: {', '.join(entity_candidates[:6])}.",
+                )
+
+        specificity_needed, specificity_reason = (
+            (False, "entity_search_rescue_accepted")
+            if entity_rescue_accepted
+            else _should_run_specificity_search_rescue(
+                enable_search=bool(enable_search),
+                express_mode=express_mode,
+                result_payload=res,
+                category_match=category_match,
+                ocr_text=ocr_text,
+                sorted_vision=sorted_vision,
+            )
         )
         if specificity_needed:
             if stage_callback:
@@ -3635,6 +4132,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=f"Search refinement narrowed the category because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
                 else:
@@ -3655,6 +4153,7 @@ def process_single_video(
                         result_payload=refined_res,
                         ocr_mode_used="" if express_mode else om,
                         llm_mode="standard",
+                        comparison_payload=_category_match_snapshot(res, category_match),
                         evidence_note=f"Search refinement was rejected because {specificity_accept_reason}. Candidates: {', '.join(specificity_candidates[:6])}.",
                     )
             else:

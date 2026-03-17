@@ -781,15 +781,16 @@ function summarizeAttemptDelta(
   previous: ProcessingTraceAttempt | null,
   current: ProcessingTraceAttempt,
 ): string[] {
-  if (!previous) return [];
+  const baseline = current.comparison_result ? { result: current.comparison_result } : previous;
+  if (!baseline) return [];
   const deltas: string[] = [];
-  const prevBrand = (previous.result?.brand || "").trim();
+  const prevBrand = (baseline.result?.brand || "").trim();
   const currBrand = (current.result?.brand || "").trim();
-  const prevCategory = (previous.result?.category || "").trim();
+  const prevCategory = (baseline.result?.category || "").trim();
   const currCategory = (current.result?.category || "").trim();
   const prevConfidence =
-    typeof previous.result?.confidence === "number"
-      ? previous.result.confidence
+    typeof baseline.result?.confidence === "number"
+      ? baseline.result.confidence
       : null;
   const currConfidence =
     typeof current.result?.confidence === "number"
@@ -802,9 +803,13 @@ function summarizeAttemptDelta(
   if (prevCategory !== currCategory && currCategory) {
     deltas.push(`Category: ${prevCategory || "—"} -> ${currCategory}`);
   }
-  if (prevConfidence !== currConfidence && currConfidence !== null) {
+  if (
+    prevConfidence !== null &&
+    currConfidence !== null &&
+    prevConfidence !== currConfidence
+  ) {
     deltas.push(
-      `Confidence: ${prevConfidence !== null ? prevConfidence.toFixed(2) : "—"} -> ${currConfidence.toFixed(2)}`,
+      `Confidence: ${prevConfidence.toFixed(2)} -> ${currConfidence.toFixed(2)}`,
     );
   }
   return deltas;
