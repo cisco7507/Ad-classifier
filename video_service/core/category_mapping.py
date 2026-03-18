@@ -241,6 +241,9 @@ def _looks_generic_freeform_category(value: str) -> bool:
         return False
 
     generic_terms = {
+        "food",
+        "beverage",
+        "beverages",
         "technology",
         "internet",
         "service",
@@ -262,7 +265,11 @@ def _looks_generic_freeform_category(value: str) -> bool:
         "search",
         "engine",
     }
-    tokens = {token for token in normalized.replace("/", " ").split() if token}
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized.replace("/", " "))
+        if token
+    }
     if not tokens:
         return False
     return tokens.issubset(generic_terms)

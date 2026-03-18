@@ -112,6 +112,20 @@ def test_select_mapping_input_text_uses_compact_cues_for_generic_freeform_catego
     )
 
 
+def test_select_mapping_input_text_uses_compact_cues_for_food_and_beverage():
+    result = select_mapping_input_text(
+        raw_category="Food & Beverage",
+        predicted_brand="Avocados From Mexico",
+        ocr_summary="FOOTBALL and GUAC Avocados From Mexico ALWAYS GOOD",
+        reasoning_summary="The ad promotes avocados and guacamole as a food product.",
+        exact_taxonomy_match=False,
+    )
+
+    assert result.startswith("Food & Beverage\nAvocados From Mexico")
+    assert "guacamole" in result.lower()
+    assert "guac" in result.lower()
+
+
 def test_select_mapping_input_text_preserves_exact_taxonomy_match():
     assert (
         select_mapping_input_text(

@@ -1275,6 +1275,65 @@ def _resolve_category_rerank_visual_score_threshold() -> float:
         return 0.55
 
 
+def _resolve_category_rerank_family_dispersion_margin_threshold() -> float:
+    raw = os.environ.get("CATEGORY_RERANK_FAMILY_DISPERSION_MARGIN_THRESHOLD", "0.05")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        logger.warning(
+            "invalid_category_rerank_family_dispersion_margin_threshold value=%r fallback=0.05",
+            raw,
+        )
+        return 0.05
+
+
+def _broad_neighbor_dispersion_reason(
+    *,
+    current_canonical: str,
+    raw_category: str,
+    exact_taxonomy_match: bool,
+    primary_candidates: list[tuple[str, float]],
+) -> str | None:
+    if exact_taxonomy_match:
+        return None
+    if not current_canonical or not raw_category or len(primary_candidates) < 2:
+        return None
+    if not _looks_generic_freeform_category(raw_category):
+        return None
+
+    try:
+        top1_score = float(primary_candidates[0][1] or 0.0)
+    except (TypeError, ValueError):
+        top1_score = 0.0
+    if top1_score >= 0.92:
+        return None
+
+    margin = _resolve_category_rerank_family_dispersion_margin_threshold()
+    considered = [
+        str(label or "").strip()
+        for label, score_raw in primary_candidates[:5]
+        if str(label or "").strip()
+        and (top1_score - float(score_raw or 0.0)) <= margin
+    ]
+    if len(considered) < 2:
+        return None
+
+    family_labels: list[str] = []
+    for label in considered:
+        family_label = _taxonomy_parent_label_for_label(label)
+        if not family_label:
+            family_label = label
+        if family_label not in family_labels:
+            family_labels.append(family_label)
+    if len(family_labels) < 2:
+        return None
+
+    return (
+        f"broad_neighbor_dispersion raw={raw_category!r};mapped={current_canonical!r};"
+        f"families={family_labels!r};top1_score={top1_score:.4f}"
+    )
+
+
 def _build_category_rerank_probe_specs(
     *,
     raw_category: str,
@@ -1819,6 +1878,12 @@ def _should_run_category_rerank(
         exact_taxonomy_match=exact_taxonomy_match,
         primary_candidates=primary_candidates,
     )
+    broad_dispersion_reason = _broad_neighbor_dispersion_reason(
+        current_canonical=canonical,
+        raw_category=raw_category,
+        exact_taxonomy_match=exact_taxonomy_match,
+        primary_candidates=primary_candidates,
+    )
     freeform_mismatch_reason = _freeform_label_mismatch_reason(
         current_canonical=canonical,
         raw_category=raw_category,
@@ -1835,6 +1900,7 @@ def _should_run_category_rerank(
         not uncertainty_reasons
         and not family_preference_reason
         and not family_primary_reason
+        and not broad_dispersion_reason
         and not freeform_mismatch_reason
         and not head_mismatch_reason
     ):
@@ -1870,6 +1936,8 @@ def _should_run_category_rerank(
             return True, family_preference_reason, candidate_categories, visual_matches
         if family_primary_reason:
             return True, family_primary_reason, candidate_categories, visual_matches
+        if broad_dispersion_reason:
+            return True, broad_dispersion_reason, candidate_categories, visual_matches
         if freeform_mismatch_reason:
             return True, freeform_mismatch_reason, candidate_categories, visual_matches
         if head_mismatch_reason:
@@ -1881,6 +1949,8 @@ def _should_run_category_rerank(
         reason_parts.append(family_preference_reason)
     if family_primary_reason:
         reason_parts.append(family_primary_reason)
+    if broad_dispersion_reason:
+        reason_parts.append(broad_dispersion_reason)
     if freeform_mismatch_reason:
         reason_parts.append(freeform_mismatch_reason)
     if head_mismatch_reason:

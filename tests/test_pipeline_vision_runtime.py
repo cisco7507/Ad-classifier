@@ -3877,6 +3877,67 @@ def test_category_rerank_triggers_for_specific_freeform_mismatch(monkeypatch):
     ]
 
 
+def test_category_rerank_triggers_for_broad_neighbor_dispersion(monkeypatch):
+    class _DummyMapper:
+        categories = [
+            "Alcoholic beverages",
+            "Non-alcoholic beverages",
+            "Beverage Manufacture and Bottling",
+            "Fast Food and Quickservice Restaurants",
+            "Food Distributors",
+            "Appetizers and Dips",
+        ]
+
+        @staticmethod
+        def get_mapper_neighbor_categories(
+            raw_category,
+            predicted_brand="",
+            ocr_summary="",
+            reasoning_summary="",
+            top_k=6,
+        ):
+            query = str(raw_category or "")
+            if query == "Food & Beverage":
+                return [
+                    ("Alcoholic beverages", 0.8080),
+                    ("Non-alcoholic beverages", 0.7757),
+                    ("Beverage Manufacture and Bottling", 0.7706),
+                    ("Fast Food and Quickservice Restaurants", 0.7505),
+                    ("Food Distributors", 0.7476),
+                ][:top_k]
+            if "Avocados From Mexico" in query or "guac" in query.lower():
+                return [
+                    ("Appetizers and Dips", 0.7920),
+                    ("Food Distributors", 0.7810),
+                    ("Non-alcoholic beverages", 0.6400),
+                ][:top_k]
+            return []
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+
+    should_rerank, reason, candidates, _visual_matches = pipeline_module._should_run_category_rerank(
+        result_payload={
+            "brand": "Avocados From Mexico",
+            "category": "Food & Beverage",
+            "reasoning": "The ad promotes avocados and guacamole as a food product.",
+        },
+        category_match={
+            "canonical_category": "Alcoholic beverages",
+            "category_match_method": "embeddings",
+            "category_match_score": 0.8080,
+        },
+        ocr_text="FOOTBALL and GUAC Avocados From Mexico ALWAYS GOOD",
+        sorted_vision={
+            "Appetizers and Dips": 0.62,
+            "Food Distributors": 0.54,
+        },
+    )
+
+    assert should_rerank is True
+    assert "broad_neighbor_dispersion" in reason
+    assert "Appetizers and Dips" in candidates
+
+
 def test_category_rerank_candidates_expand_supported_family_branch(monkeypatch):
     class _DummyMapper:
         categories = [
