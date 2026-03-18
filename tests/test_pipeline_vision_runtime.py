@@ -4061,3 +4061,172 @@ def test_category_rerank_branch_expansion_does_not_flood_unrelated_siblings(monk
     assert "Painkiller" in labels
     assert "Anti-Snoring" not in labels
     assert "Anti-Nausea" not in labels
+
+
+def test_pipeline_category_rerank_expands_selected_family_before_leaf_choice(monkeypatch):
+    rerank_calls = {"count": 0}
+
+    class _DummyMapper:
+        categories = [
+            "Pharmaceutical Manufacture and Sale - over the counter",
+            "Birth Control Products",
+            "Painkiller",
+            "Nasal products",
+            "Cough Flu-analgesics",
+            "Optical",
+        ]
+        cat_to_id = {
+            "Pharmaceutical Manufacture and Sale - over the counter": "373",
+            "Birth Control Products": "384",
+            "Painkiller": "5357",
+            "Nasal products": "5362",
+            "Cough Flu-analgesics": "5344",
+            "Optical": "5354",
+        }
+        mapping_state = types.SimpleNamespace(
+            records=(
+                types.SimpleNamespace(category_id="373", name="Pharmaceutical Manufacture and Sale - over the counter", path_names=("Pharmaceutical Manufacture and Sale - over the counter",), parent_id="0"),
+                types.SimpleNamespace(category_id="384", name="Birth Control Products", path_names=("Birth Control Products",), parent_id="0"),
+                types.SimpleNamespace(category_id="5357", name="Painkiller", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Painkiller"), parent_id="373"),
+                types.SimpleNamespace(category_id="5362", name="Nasal products", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Nasal products"), parent_id="373"),
+                types.SimpleNamespace(category_id="5344", name="Cough Flu-analgesics", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Cough Flu-analgesics"), parent_id="373"),
+                types.SimpleNamespace(category_id="5354", name="Optical", path_names=("Pharmaceutical Manufacture and Sale - over the counter", "Optical"), parent_id="373"),
+            )
+        )
+
+        @staticmethod
+        def get_category_parent_id(label):
+            mapping = {
+                "Painkiller": "373",
+                "Nasal products": "373",
+                "Cough Flu-analgesics": "373",
+                "Optical": "373",
+            }
+            return mapping.get(label, "")
+
+        @staticmethod
+        def get_category_context_map(labels):
+            return {
+                "Pharmaceutical Manufacture and Sale - over the counter": "Pharmaceutical Manufacture and Sale - over the counter",
+                "Birth Control Products": "Birth Control Products",
+                "Painkiller": "Pharmaceutical Manufacture and Sale - over the counter : Painkiller",
+                "Nasal products": "Pharmaceutical Manufacture and Sale - over the counter : Nasal products",
+                "Cough Flu-analgesics": "Pharmaceutical Manufacture and Sale - over the counter : Cough Flu-analgesics",
+                "Optical": "Pharmaceutical Manufacture and Sale - over the counter : Optical",
+            }
+
+        @staticmethod
+        def get_category_path_text(label):
+            return _DummyMapper.get_category_context_map([]).get(label, label)
+
+        @staticmethod
+        def map_category(**kwargs):
+            raw = str(kwargs.get("raw_category", "") or "")
+            mapping = {
+                "Over-the-Counter Medication": ("Birth Control Products", "384", 0.7351),
+                "Cough Flu-analgesics": ("Cough Flu-analgesics", "5344", 0.99),
+                "Painkiller": ("Painkiller", "5357", 0.99),
+            }
+            canonical, category_id, score = mapping.get(raw, (raw or "Birth Control Products", "", 0.5))
+            return {
+                "canonical_category": canonical,
+                "category_id": category_id,
+                "category_match_method": "embeddings",
+                "category_match_score": score,
+            }
+
+        @staticmethod
+        def get_mapper_neighbor_categories(raw_category, predicted_brand="", ocr_summary="", reasoning_summary="", top_k=8):
+            query = str(raw_category or "")
+            if query == "Over-the-Counter Medication":
+                return [
+                    ("Birth Control Products", 0.7351),
+                    ("Pharmaceutical Manufacture and Sale - over the counter", 0.7239),
+                    ("Painkiller", 0.6670),
+                    ("Optical", 0.6610),
+                ][:top_k]
+            if "SORE THROAT" in query or "VapoCOOL" in query:
+                return [
+                    ("Painkiller", 0.5813),
+                    ("Nasal products", 0.5790),
+                    ("Cough Flu-analgesics", 0.5775),
+                ][:top_k]
+            return [("Birth Control Products", 0.7351), ("Painkiller", 0.6670), ("Optical", 0.6610)][:top_k]
+
+    class _DummyOCR:
+        @staticmethod
+        def extract_text(engine, image, mode):
+            return "VICKS VapoCOOL MAX Honey Lemon Chill SORE THROAT PAIN"
+
+    class _DummyLLM:
+        @staticmethod
+        def query_pipeline(*args, **kwargs):
+            return {
+                "brand": "Vicks",
+                "category": "Over-the-Counter Medication",
+                "confidence": 1.0,
+                "reasoning": "The ad promotes an OTC Vicks sore-throat product.",
+            }
+
+        @staticmethod
+        def query_category_family_selection(*args, **kwargs):
+            return (
+                {
+                    "family": "Pharmaceutical Manufacture and Sale - over the counter",
+                    "family_index": 1,
+                    "confidence": 0.96,
+                    "reasoning": "The ad is clearly for an OTC medication family.",
+                },
+                "ok",
+            )
+
+        @staticmethod
+        def query_category_rerank(*args, **kwargs):
+            rerank_calls["count"] += 1
+            candidates = list(kwargs.get("candidate_categories") or [])
+            assert "Nasal products" in candidates
+            assert "Cough Flu-analgesics" in candidates
+            return (
+                {
+                    "brand": "Vicks",
+                    "category": "Cough Flu-analgesics",
+                    "confidence": 0.98,
+                    "reasoning": "The product is a cough and flu analgesic within OTC medication.",
+                },
+                "ok",
+            )
+
+    monkeypatch.setattr(pipeline_module, "category_mapper", _DummyMapper())
+    monkeypatch.setattr(
+        pipeline_module,
+        "extract_frames_for_pipeline",
+        lambda _url, **kwargs: ([{"image": object(), "ocr_image": object(), "time": 1.5, "type": "tail"}], None),
+    )
+    monkeypatch.setattr(pipeline_module, "ocr_manager", _DummyOCR())
+    monkeypatch.setattr(pipeline_module, "llm_engine", _DummyLLM())
+
+    _, _, _, _, _, row, signal_artifacts = pipeline_module.process_single_video(
+        url="https://example.test/vicks.mp4",
+        categories=[],
+        p="LM Studio",
+        m="local-model",
+        oe="EasyOCR",
+        om="Fast",
+        override=False,
+        sm="Tail Only",
+        enable_search=False,
+        enable_vision=False,
+        ctx=8192,
+        job_id="job-category-family-vicks",
+    )
+
+    assert rerank_calls["count"] == 1
+    assert row[2] == "5344"
+    assert row[3] == "Cough Flu-analgesics"
+    attempts = signal_artifacts["processing_trace"]["attempts"]
+    assert any(
+        attempt.get("attempt_type") == "category_rerank"
+        and attempt.get("status") == "accepted"
+        and "Selected family 'Pharmaceutical Manufacture and Sale - over the counter'" in str(attempt.get("evidence_note", ""))
+        for attempt in attempts
+    )

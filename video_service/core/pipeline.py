@@ -670,6 +670,100 @@ def _build_category_family_candidates(candidate_labels: list[str]) -> tuple[list
     return ordered_families, family_members
 
 
+def _expand_candidates_within_selected_family(
+    *,
+    selected_family: str,
+    current_candidates: list[str],
+    current_canonical: str,
+    raw_category: str,
+    predicted_brand: str,
+    ocr_text: str,
+    reasoning: str,
+    visual_matches: list[tuple[str, float]] | None = None,
+    limit: int = 8,
+) -> list[str]:
+    family_label = str(selected_family or "").strip()
+    if not family_label:
+        return list(current_candidates)
+
+    taxonomy_stats = _get_category_rerank_taxonomy_stats()
+    token_weights = dict(taxonomy_stats.get("token_weights", {}) or {})
+    path_tokens_by_label = dict(taxonomy_stats.get("path_tokens_by_label", {}) or {})
+    query_tokens = _category_overlap_tokens(
+        " ".join(
+            part
+            for part in (
+                predicted_brand,
+                raw_category,
+                ocr_text,
+                reasoning,
+                " ".join(str(label or "").strip() for label, _score in (visual_matches or [])),
+            )
+            if str(part or "").strip()
+        )
+    )
+    head_tokens = _extract_head_concept_tokens(
+        " ".join(part for part in (raw_category, ocr_text, reasoning) if str(part or "").strip()),
+        max_terms=3,
+    )
+    visual_rank = {
+        str(label or "").strip(): idx
+        for idx, (label, _score) in enumerate((visual_matches or [])[:6], start=1)
+        if str(label or "").strip()
+    }
+
+    candidate_pool: list[str] = []
+
+    def _append(label: str) -> None:
+        clean = str(label or "").strip()
+        if clean and clean not in candidate_pool:
+            candidate_pool.append(clean)
+
+    _append(family_label)
+    for candidate in current_candidates:
+        if _taxonomy_parent_label_for_label(candidate) == family_label or candidate == family_label:
+            _append(candidate)
+    for descendant in _taxonomy_descendants_for_path_name(family_label, leaf_only=True):
+        _append(descendant)
+    for label, _score in visual_matches or []:
+        clean = str(label or "").strip()
+        if clean and (_taxonomy_parent_label_for_label(clean) == family_label or clean == family_label):
+            _append(clean)
+
+    if not candidate_pool:
+        return list(current_candidates)
+
+    current_rank = {
+        str(label or "").strip(): idx
+        for idx, label in enumerate(current_candidates, start=1)
+        if str(label or "").strip()
+    }
+
+    def _score(label: str) -> tuple[float, int, str]:
+        score = 0.0
+        if label == family_label:
+            score += 0.04
+        if label == current_canonical:
+            score += 0.05
+        if label in current_rank:
+            score += max(0.0, 0.22 - (0.02 * float(current_rank[label] - 1)))
+        if label in visual_rank:
+            score += max(0.0, 0.16 - (0.02 * float(visual_rank[label] - 1)))
+        candidate_tokens = set(path_tokens_by_label.get(label, set()))
+        if not candidate_tokens:
+            candidate_tokens = _category_overlap_tokens(
+                str(getattr(category_mapper, "get_category_path_text", lambda value: value)(label) or label)
+            )
+        if candidate_tokens:
+            score += min(0.015 * _weighted_category_overlap_score(query_tokens, candidate_tokens, token_weights), 0.12)
+            if head_tokens and any(token in candidate_tokens for token in head_tokens):
+                score += 0.08
+        return (score, -current_rank.get(label, 99), label)
+
+    ranked = sorted(candidate_pool, key=_score, reverse=True)
+    return ranked[: max(1, limit)]
+
+
 def _is_broad_media_taxonomy_label(label_name: str) -> bool:
     clean = str(label_name or "").strip()
     if not clean:
@@ -4029,7 +4123,16 @@ def process_single_video(
                             selected_family = str(family_res.get("family", "") or "").strip()
                             selected_members = list(family_members.get(selected_family, []))
                             if selected_family and selected_members:
-                                rerank_candidate_categories = selected_members
+                                rerank_candidate_categories = _expand_candidates_within_selected_family(
+                                    selected_family=selected_family,
+                                    current_candidates=selected_members,
+                                    current_canonical=str(category_match.get("canonical_category", "") or ""),
+                                    raw_category=str(res.get("category", "") or ""),
+                                    predicted_brand=str(res.get("brand", "") or ""),
+                                    ocr_text=ocr_text,
+                                    reasoning=str(res.get("reasoning", "") or ""),
+                                    visual_matches=category_rerank_visual_matches,
+                                )
                                 family_note = f"Selected family {selected_family!r}. "
                                 logger.info(
                                     "[%s] category_family_selected family=%r candidates=%s",
