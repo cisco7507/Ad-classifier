@@ -777,6 +777,105 @@ function buildLocalExplanation(
   };
 }
 
+function buildSyntheticBrandReviewAttempt(
+  attempts: ProcessingTraceAttempt[],
+  finalResult: JobExplanation["final"] | null | undefined,
+): ProcessingTraceAttempt | null {
+  if (!finalResult?.brand_ambiguity_flag) return null;
+
+  const acceptedAttempt =
+    [...attempts]
+      .reverse()
+      .find((attempt) => attempt?.status === "accepted" && attempt?.attempt_type !== "brand_review") ||
+    null;
+
+  const confidence =
+    typeof finalResult?.confidence === "number"
+      ? finalResult.confidence
+      : typeof acceptedAttempt?.result?.confidence === "number"
+        ? acceptedAttempt.result.confidence
+        : null;
+
+  const resolved = Boolean(finalResult?.brand_ambiguity_resolved);
+  const detail = resolved
+    ? "web-assisted brand disambiguation"
+    : "brand ambiguity review kept the original brand";
+  const evidenceNote = resolved
+    ? formatBrandDisambiguationReason(
+        finalResult?.brand_disambiguation_reason,
+        finalResult?.brand,
+      )
+    : formatBrandDisambiguationReason(
+        finalResult?.brand_disambiguation_reason,
+        finalResult?.brand,
+      ) || formatBrandAmbiguityReason(finalResult?.brand_ambiguity_reason);
+
+  return {
+    attempt_type: "brand_review",
+    title: "Brand Review",
+    status: resolved ? "accepted" : "rejected",
+    detail,
+    trigger_reason:
+      typeof finalResult?.brand_ambiguity_reason === "string"
+        ? finalResult.brand_ambiguity_reason
+        : "",
+    elapsed_ms: null,
+    frame_count:
+      typeof acceptedAttempt?.frame_count === "number" ? acceptedAttempt.frame_count : 0,
+    frame_times: Array.isArray(acceptedAttempt?.frame_times)
+      ? acceptedAttempt.frame_times
+      : [],
+    ocr_excerpt:
+      typeof acceptedAttempt?.ocr_excerpt === "string" ? acceptedAttempt.ocr_excerpt : "",
+    ocr_signal: acceptedAttempt?.ocr_signal,
+    ocr_mode:
+      typeof acceptedAttempt?.ocr_mode === "string" ? acceptedAttempt.ocr_mode : "",
+    llm_mode:
+      typeof acceptedAttempt?.llm_mode === "string" ? acceptedAttempt.llm_mode : "",
+    evidence_note: evidenceNote,
+    result: {
+      brand: finalResult?.brand || acceptedAttempt?.result?.brand || "",
+      category: finalResult?.category || acceptedAttempt?.result?.category || "",
+      confidence,
+      brand_ambiguity_flag: Boolean(finalResult?.brand_ambiguity_flag),
+      brand_ambiguity_reason:
+        typeof finalResult?.brand_ambiguity_reason === "string"
+          ? finalResult.brand_ambiguity_reason
+          : "",
+      brand_ambiguity_resolved: resolved,
+      brand_disambiguation_reason:
+        typeof finalResult?.brand_disambiguation_reason === "string"
+          ? finalResult.brand_disambiguation_reason
+          : "",
+      brand_evidence_strength:
+        typeof finalResult?.brand_evidence_strength === "string"
+          ? finalResult.brand_evidence_strength
+          : "",
+    },
+    comparison_result: {
+      brand: acceptedAttempt?.result?.brand || finalResult?.brand || "",
+      category: acceptedAttempt?.result?.category || finalResult?.category || "",
+      confidence:
+        typeof acceptedAttempt?.result?.confidence === "number"
+          ? acceptedAttempt.result.confidence
+          : confidence,
+    },
+  };
+}
+
+function appendSyntheticExplainAttempts(
+  attempts: ProcessingTraceAttempt[],
+  finalResult: JobExplanation["final"] | null | undefined,
+): ProcessingTraceAttempt[] {
+  if (!Array.isArray(attempts) || attempts.length === 0) return attempts;
+  if (attempts.some((attempt) => attempt?.attempt_type === "brand_review")) {
+    return attempts;
+  }
+  const brandReviewAttempt = buildSyntheticBrandReviewAttempt(attempts, finalResult);
+  if (!brandReviewAttempt) return attempts;
+  return [...attempts, brandReviewAttempt];
+}
+
 function summarizeAttemptDelta(
   previous: ProcessingTraceAttempt | null,
   current: ProcessingTraceAttempt,
@@ -829,7 +928,10 @@ function buildOperatorNotes(
 
   const initialAttempt = attempts[0];
   const acceptedAttempt =
-    [...attempts].reverse().find((attempt) => attempt.status === "accepted") || null;
+    [...attempts]
+      .reverse()
+      .find((attempt) => attempt.status === "accepted" && attempt.attempt_type !== "brand_review") ||
+    null;
   const ambiguityTriggered = Boolean(finalResult?.brand_ambiguity_flag);
   const ambiguityReason = formatBrandAmbiguityReason(finalResult?.brand_ambiguity_reason);
   const disambiguationReason = formatBrandDisambiguationReason(
@@ -992,6 +1094,13 @@ const EXPLAIN_METHOD_GUIDE: ExplainMethodGuideEntry[] = [
     short: "Constrained taxonomy tie-break for weak mappings.",
     detail:
       "When the embedding mapper returns a weak or tightly clustered result for a free-form LLM category, the model gets one extra chance to choose only from a small set of nearby taxonomy candidates.",
+  },
+  {
+    key: "brand_review",
+    label: "Brand Review",
+    short: "Shows whether weak-anchor brand evidence was confirmed or kept.",
+    detail:
+      "This synthetic explain-stage summarizes the brand ambiguity guard. It appears when the classifier flagged the brand as weak or sparse and optionally tried web-assisted confirmation before keeping or confirming the final brand.",
   },
 ];
 
@@ -2034,16 +2143,19 @@ export function JobDetail() {
       : mapperQueryFragments;
   const vectorPlotOption = buildSignalPlotOption(activeVectorPlot);
   const effectiveExplanation = explanation || localExplanation;
-  const explanationAttempts = Array.isArray(effectiveExplanation?.attempts)
-    ? effectiveExplanation.attempts
-    : [];
-  const explanationSummary = effectiveExplanation?.summary || {};
   const explanationFinal = effectiveExplanation?.final || {};
+  const explanationAttempts = appendSyntheticExplainAttempts(
+    Array.isArray(effectiveExplanation?.attempts) ? effectiveExplanation.attempts : [],
+    explanationFinal,
+  );
+  const explanationSummary = effectiveExplanation?.summary || {};
   const explanationEvidence = effectiveExplanation?.evidence || {};
   const acceptedExplanationAttempt =
     [...explanationAttempts]
       .reverse()
-      .find((attempt) => attempt.status === "accepted") || null;
+      .find(
+        (attempt) => attempt.status === "accepted" && attempt.attempt_type !== "brand_review",
+      ) || null;
   const rawLlmCategory = rawLlmCategoryHint;
   const rawLlmConfidence =
     typeof acceptedExplanationAttempt?.result?.confidence === "number"
