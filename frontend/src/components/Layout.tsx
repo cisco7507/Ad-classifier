@@ -6,9 +6,9 @@ import { BrandLogo } from './BrandLogo';
 
 const pageMeta = {
   '/': {
-    eyebrow: 'Operations Overview',
-    title: 'Bell-aligned control surface for live classifier operations.',
-    description: 'Track cluster health, queue pressure, and output quality from a single interface tuned for Bell media operations.',
+    eyebrow: 'Scenalyze',
+    title: 'Live ad intelligence for Bell media operations.',
+    description: 'See completed work, active processing, and cluster state in one operational surface.',
   },
   '/jobs': {
     eyebrow: 'Pipeline Queue',
@@ -53,8 +53,11 @@ export function Layout() {
     return entry?.[1] ?? pageMeta['/'];
   }, [location.pathname]);
 
+  const isLandingPage = location.pathname === '/';
+  const showPageBanner = !isLandingPage;
+
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#f7f8f5_0%,#eef4f8_100%)] text-slate-900">
+    <div className="flex min-h-screen flex-col bg-[linear-gradient(180deg,#f7f8f5_0%,#eef4f8_100%)] text-slate-900">
       <header className="sticky top-0 z-40">
         <div className="bell-topbar">
           <div className="mx-auto flex max-w-[88rem] flex-wrap items-center justify-between gap-3 px-6 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/84">
@@ -102,22 +105,24 @@ export function Layout() {
           </div>
         </div>
 
-        <div className="border-b border-slate-200/90 bg-white/88 backdrop-blur">
-          <div className="mx-auto flex max-w-[88rem] flex-col gap-4 px-6 py-5 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <div className="bell-kicker">{activeMeta.eyebrow}</div>
-              <h1 className="mt-2 text-[1.65rem] font-bold text-primary-700">{activeMeta.title}</h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{activeMeta.description}</p>
-            </div>
-            <div className="bell-data-pill self-start lg:self-auto">
-              <LightningBoltIcon className="h-3.5 w-3.5 text-primary-500" />
-              Operational UI live
+        {showPageBanner ? (
+          <div className="border-b border-slate-200/90 bg-white/88 backdrop-blur">
+            <div className="mx-auto flex max-w-[88rem] flex-col gap-4 px-6 py-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
+                <div className="bell-kicker">{activeMeta.eyebrow}</div>
+                <h1 className="mt-2 text-[1.65rem] font-bold text-primary-700">{activeMeta.title}</h1>
+                <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">{activeMeta.description}</p>
+              </div>
+              <div className="bell-data-pill self-start lg:self-auto">
+                <LightningBoltIcon className="h-3.5 w-3.5 text-primary-500" />
+                Operational UI live
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
       </header>
 
-      <main className="mx-auto max-w-[88rem] px-6 py-8">
+      <main className={`mx-auto w-full max-w-[88rem] flex-1 px-6 ${isLandingPage ? 'flex min-h-0 flex-col py-4 lg:py-5' : 'py-8'}`}>
         <Outlet />
       </main>
 
