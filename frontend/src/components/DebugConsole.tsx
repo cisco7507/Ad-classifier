@@ -188,8 +188,17 @@ export function DebugConsole({ open, onClose }: DebugConsoleProps) {
   const appendLogs = (rawLines: string[]) => {
     if (!rawLines.length) return;
     setLogs((prev) => {
+      const existing = new Set(prev.map((line) => line.text));
+      const batchSeen = new Set<string>();
       const next = rawLines
-        .filter((line) => typeof line === 'string' && line.trim().length > 0)
+        .filter((line) => {
+          if (typeof line !== 'string') return false;
+          const clean = line.trim();
+          if (!clean) return false;
+          if (existing.has(line) || batchSeen.has(line)) return false;
+          batchSeen.add(line);
+          return true;
+        })
         .map((line) => {
           const item = buildLogLine(lineCounter.current, line);
           lineCounter.current += 1;
