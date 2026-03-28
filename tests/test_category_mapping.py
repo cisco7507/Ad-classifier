@@ -14,6 +14,7 @@ from video_service.core.category_mapping import (
 )
 from video_service.core import category_mapping as category_mapping_module
 from video_service.core.categories import (
+    CategoryMapper,
     _build_taxonomy_retrieval_alias_rows,
     _collapse_alias_scores,
     _prepare_query_text_for_embedding,
@@ -250,6 +251,44 @@ def test_select_mapping_input_text_keeps_specific_freeform_category():
         )
         == "Consumer Goods / Household Cleaning & Laundry"
     )
+
+
+def test_category_mapper_init_does_not_eagerly_reload_taxonomy_or_models(monkeypatch):
+    def _unexpected_reload(*args, **kwargs):
+        raise AssertionError("load_category_mapping should not run during CategoryMapper() init")
+
+    def _unexpected_configure(self, model_name=None):
+        raise AssertionError("configure_embedding_model should not run during CategoryMapper() init")
+
+    monkeypatch.setattr("video_service.core.categories.load_category_mapping", _unexpected_reload)
+    monkeypatch.setattr(CategoryMapper, "configure_embedding_model", _unexpected_configure)
+
+    mapper = CategoryMapper()
+
+    assert mapper.categories
+    assert mapper.embedder is None
+    assert mapper.category_embeddings is None
+
+
+def test_category_mapper_map_category_triggers_lazy_model_init_when_metadata_only(monkeypatch):
+    mapper = CategoryMapper()
+    mapper.embedder = None
+    mapper.category_embeddings = None
+    mapper.retrieval_embeddings = None
+    mapper.retrieval_alias_lookup = {}
+
+    calls = {"count": 0}
+
+    def _fake_reactivate():
+        calls["count"] += 1
+        mapper.active = False
+
+    monkeypatch.setattr(mapper, "_attempt_reactivate", _fake_reactivate)
+
+    result = mapper.map_category("Smartphones", job_id="node-a-test-job")
+
+    assert calls["count"] == 1
+    assert result["category_match_method"] == "disabled"
 
 
 def test_select_mapping_input_text_appends_reasoning_for_ambiguous_product_family():
