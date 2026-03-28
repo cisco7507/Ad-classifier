@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { API_BASE_URL, getClusterNodes, getClusterJobs, getJobArtifacts, getJobVideoPosterUrl, getJobVideoUrl, setClusterNodeMaintenance } from '../lib/api';
+import { API_BASE_URL, getClusterNodes, getClusterJobs, getJobArtifacts, getJobVideoPosterUrl, setClusterNodeMaintenance } from '../lib/api';
 import type { ArtifactFrame, ClusterNode, JobArtifacts, JobStatus } from '../lib/api';
 import { ExclamationTriangleIcon, UpdateIcon, LightningBoltIcon, PlayIcon } from '@radix-ui/react-icons';
 
@@ -221,6 +221,9 @@ export function Overview() {
   const [maintenanceBusy, setMaintenanceBusy] = useState<Record<string, boolean>>({});
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [jobVisuals, setJobVisuals] = useState<JobVisualMap>({});
+  const [pageVisible, setPageVisible] = useState(
+    typeof document === 'undefined' ? true : !document.hidden,
+  );
 
   useEffect(() => {
     let unmounted = false;
@@ -268,6 +271,14 @@ export function Overview() {
   );
 
   const featuredJobs = useMemo(() => completedJobs.slice(0, 8), [completedJobs]);
+  const visualHydrationKey = useMemo(
+    () =>
+      featuredJobs
+        .map((job) => `${job.job_id}:${job.updated_at || job.created_at || ''}`)
+        .join('|'),
+    [featuredJobs],
+  );
+  const hydrationJobs = useMemo(() => featuredJobs, [visualHydrationKey]);
   const leftColumnJobs = useMemo(
     () => fillJobs(featuredJobs.slice(0, 2), Math.min(2, featuredJobs.length)),
     [featuredJobs],
@@ -278,17 +289,28 @@ export function Overview() {
   );
 
   useEffect(() => {
-    const jobsToHydrate = completedJobs.slice(0, 8);
+    const jobsToHydrate = hydrationJobs;
     if (jobsToHydrate.length === 0) {
       setJobVisuals((current) => (Object.keys(current).length === 0 ? current : {}));
       return;
     }
 
     let cancelled = false;
+    const keepIds = new Set(jobsToHydrate.map((job) => job.job_id));
+    const missingJobs = jobsToHydrate.filter((job) => !jobVisuals[job.job_id]);
+
+    setJobVisuals((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([jobId]) => keepIds.has(jobId)),
+      ) as JobVisualMap;
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+
+    if (missingJobs.length === 0) return;
 
     const hydrateVisuals = async () => {
       const results = await Promise.allSettled(
-        jobsToHydrate.map(async (job) => {
+        missingJobs.map(async (job) => {
           try {
             const payload = await getJobArtifacts(job.job_id);
             return [job.job_id, buildGalleryUrls(job, payload.artifacts)] as const;
@@ -306,14 +328,19 @@ export function Overview() {
         const [jobId, urls] = result.value;
         nextVisuals[jobId] = urls;
       }
-      setJobVisuals(nextVisuals);
+      if (Object.keys(nextVisuals).length === 0) return;
+
+      setJobVisuals((current) => {
+        const merged = { ...current, ...nextVisuals };
+        return merged;
+      });
     };
 
     hydrateVisuals();
     return () => {
       cancelled = true;
     };
-  }, [completedJobs]);
+  }, [hydrationJobs, jobVisuals, visualHydrationKey]);
 
   useEffect(() => {
     if (featuredJobs.length === 0) {
@@ -327,12 +354,19 @@ export function Overview() {
   }, [featuredIndex, featuredJobs.length]);
 
   useEffect(() => {
+    const handleVisibilityChange = () => setPageVisible(!document.hidden);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  useEffect(() => {
     if (featuredJobs.length <= 1) return;
+    if (!pageVisible) return;
     const timer = window.setInterval(() => {
       setFeaturedIndex((current) => (current + 1) % featuredJobs.length);
     }, 5200);
     return () => window.clearInterval(timer);
-  }, [featuredJobs.length]);
+  }, [featuredJobs.length, pageVisible]);
 
   const onlineNodes = nodes ? Object.values(nodes.status).filter(Boolean).length : 0;
   const totalNodes = nodes ? Object.keys(nodes.status).length : 0;
@@ -347,6 +381,14 @@ export function Overview() {
   const getVisualUrl = (job: JobStatus, index = 0): string => {
     const visuals = jobVisuals[job.job_id];
     if (visuals && visuals.length > 0) return visuals[Math.min(index, visuals.length - 1)];
+    return getJobVideoPosterUrl(job.job_id);
+  };
+
+  const getFeaturedVisualUrl = (job: JobStatus): string => {
+    const visuals = jobVisuals[job.job_id];
+    if (visuals && visuals.length > 0) {
+      return visuals[Math.min(1, visuals.length - 1)];
+    }
     return getJobVideoPosterUrl(job.job_id);
   };
 
@@ -402,16 +444,12 @@ export function Overview() {
                   </div>
 
                   <div className="landing-feature-media">
-                    <video
+                    <img
                       key={featuredJob.job_id}
-                      src={getJobVideoUrl(featuredJob.job_id)}
-                      poster={getJobVideoPosterUrl(featuredJob.job_id)}
-                      className="h-full w-full object-cover"
-                      autoPlay
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
+                      src={getFeaturedVisualUrl(featuredJob)}
+                      alt={`${getBrandLabel(featuredJob)} key frame`}
+                      className="landing-feature-image"
+                      loading="eager"
                     />
                     <div className="landing-feature-vignette" aria-hidden="true" />
                   </div>
@@ -445,7 +483,7 @@ export function Overview() {
               </div>
               <h3 className="mt-5 text-3xl font-bold text-white">Complete a job and this stage will light up automatically.</h3>
               <p className="mt-3 max-w-xl text-sm leading-6 text-white/72">
-                As soon as Scenalyze finishes a job, its poster and video become part of the landing collage. Until then, the operational shell still tracks queue and node health below.
+                As soon as Scenalyze finishes a job, its poster and key frames become part of the landing collage. Until then, the operational shell still tracks queue and node health below.
               </p>
             </div>
           )}
