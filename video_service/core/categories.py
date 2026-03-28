@@ -496,9 +496,6 @@ def _ensure_siglip_loaded() -> bool:
             siglip_processor = None
             return False
 
-
-_ensure_siglip_loaded()
-
 class CategoryMapper:
     def __init__(self, csv_path=None):
         self.categories = []
@@ -523,7 +520,9 @@ class CategoryMapper:
         self.embedding_device = ""
         self.requested_embedding_model = DEFAULT_CATEGORY_EMBEDDING_MODEL
         self._taxonomy_fingerprint = ""
-        self._taxonomy_source_signature: tuple[str, int, int] | None = None
+        self._taxonomy_source_signature: tuple[str, int, int] | None = self._compute_taxonomy_source_signature(
+            self.taxonomy_path_used
+        )
         self._embedding_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self.retrieval_texts: list[str] = []
         self.retrieval_category_indices: list[int] = []
@@ -772,9 +771,9 @@ class CategoryMapper:
                 self.max_range = 0.0
         return requested
 
-    def _initialize_mapper(self):
+    def _initialize_mapper(self, *, load_models: bool = False):
         try:
-            self._refresh_mapping_state_if_needed(force=True)
+            self._refresh_mapping_state_if_needed(force=False)
             self.cat_to_id = dict(self.mapping_state.category_to_id)
             self.cat_to_industry_id = dict(self.mapping_state.category_to_industry_id)
             self.cat_to_industry_name = dict(self.mapping_state.category_to_industry_name)
@@ -794,7 +793,8 @@ class CategoryMapper:
             if not self.categories:
                 raise RuntimeError("Category taxonomy loaded but contains no valid rows")
             self._taxonomy_fingerprint = self._compute_taxonomy_fingerprint()
-            self.configure_embedding_model(self.requested_embedding_model)
+            if load_models:
+                self.configure_embedding_model(self.requested_embedding_model)
 
         except Exception as e: 
             logger.exception("Mapper init failed: %s", e)
@@ -833,16 +833,16 @@ class CategoryMapper:
             return False, "text embeddings cache failed"
 
     def _attempt_reactivate(self):
-        if self.active:
+        if self.active and self.embedder is not None and self.category_embeddings is not None:
             return
         self._refresh_mapping_state_if_needed()
         if not self.mapping_state.enabled:
             return
         with self._reinit_lock:
-            if self.active:
+            if self.active and self.embedder is not None and self.category_embeddings is not None:
                 return
-            logger.warning("category mapper inactive; attempting re-initialization")
-            self._initialize_mapper()
+            logger.info("category mapper models not loaded; attempting lazy initialization")
+            self._initialize_mapper(load_models=True)
 
     def _resolve_query_text(
         self,
@@ -987,6 +987,8 @@ class CategoryMapper:
         reasoning_summary: str = "",
         top_k: int = 10,
     ) -> dict | None:
+        if self.mapping_state.enabled and (self.embedder is None or self.category_embeddings is None):
+            self._attempt_reactivate()
         if not self.active or self.embedder is None or self.category_embeddings is None:
             return None
 
@@ -1096,6 +1098,8 @@ class CategoryMapper:
         reasoning_summary: str = "",
         top_k: int = 8,
     ) -> list[tuple[str, float]]:
+        if self.mapping_state.enabled and (self.embedder is None or self.category_embeddings is None):
+            self._attempt_reactivate()
         if not self.active or self.embedder is None or self.category_embeddings is None:
             return []
 
@@ -1246,9 +1250,9 @@ class CategoryMapper:
                     "top_matches": [],
                 }
 
-            if not self.active and CATEGORY_MAPPING_STATE.enabled:
+            if self.mapping_state.enabled and (not self.active or self.embedder is None or self.category_embeddings is None):
                 self._attempt_reactivate()
-            if not self.active:
+            if not self.active or self.embedder is None or self.category_embeddings is None:
                 return {
                     "canonical_category": raw_category,
                     "category_id": "",
@@ -1404,13 +1408,14 @@ class CategoryMapper:
 
     def get_diagnostics(self):
         return {
-            "category_mapping_enabled": bool(self.active),
+            "category_mapping_enabled": bool(self.mapping_state.enabled),
             "category_mapping_count": len(self.cat_to_id),
             "category_json_path_used": self.taxonomy_path_used,
             "category_embedding_model": self.embedding_model_name or self.requested_embedding_model,
             "category_embedding_device": self.embedding_device or device,
+            "category_embedding_loaded": bool(self.embedder is not None and self.category_embeddings is not None),
             "category_retrieval_alias_count": max(0, len(self.retrieval_texts) - len(self.categories)),
-            "last_error": self.last_error if not self.active else None,
+            "last_error": self.last_error,
             "siglip_model_loaded": bool(siglip_model is not None and siglip_processor is not None),
             "vision_text_features_cached": bool(self.vision_text_features is not None),
             "siglip_last_error": siglip_last_error,
